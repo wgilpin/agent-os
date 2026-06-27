@@ -1,0 +1,26 @@
+{
+  "source_path": "/Users/will/projects/agent_os/docs/agent_os.md",
+  "type": "PRD",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "Agent OS User Story Map",
+  "summary": "User story map for an agent operating system, mapping activities and steps to four releases (R1 walking skeleton through R4 generation MVP).",
+  "scope": [
+    "agent declaration",
+    "manifest",
+    "capability grants",
+    "spend cap",
+    "provisioning",
+    "triggers",
+    "deterministic gate",
+    "credential proxy",
+    "security review",
+    "conformance auditor",
+    "agent generation",
+    "supervision"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": "User story map (Activity/Step/release-tagged entries) describing product capabilities across releases R1-R4 from a user perspective -> PRD. Mentions implementation concepts (containers, GenServer, deterministic gate) but as capability outcomes, not contracts, so SPEC was a weaker competing signal. No Decision/Consequences structure rules out ADR. Required reading file agents/gsd-doc-classifier.md did not exist; classified using role instructions."
+}

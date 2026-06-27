@@ -1,0 +1,1516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Story Map - agent_os.md</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f8fafc;
+            --panel-bg: rgba(255, 255, 255, 0.7);
+            --border-color: rgba(15, 23, 42, 0.08);
+            --text-primary: #0f172a;
+            --text-secondary: #64748b;
+            --card-bg: #fefce8;
+            --card-hover-bg: #fef9c3;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 40px;
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(79, 70, 229, 0.05) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(225, 29, 72, 0.04) 0px, transparent 50%);
+            color: var(--text-primary);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            min-height: 100vh;
+        }
+
+        .map-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 32px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo-icon {
+            font-size: 2.5rem;
+        }
+
+        .brand h1 {
+            margin: 0;
+            font-size: 1.8rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .subtitle {
+            margin: 4px 0 0 0;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .file-path {
+            font-family: monospace;
+            background: rgba(15, 23, 42, 0.05);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .stats {
+            display: flex;
+            gap: 12px;
+        }}
+
+        .stat-badge {
+            background: rgba(0, 0, 0, 0.02);
+            border: 1px solid var(--border-color);
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .stat-badge strong {
+            color: var(--text-primary);
+            margin-right: 4px;
+        }
+
+        .board {
+            display: grid;
+            gap: 16px;
+            background: #ffffff;
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            padding: 24px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+            overflow-x: auto;
+        }
+
+        .board-top-left {
+            grid-column: 1;
+            grid-row: 1 / 3;
+            background: rgba(0, 0, 0, 0.01);
+            border-radius: 8px;
+            border: 1px solid rgba(0, 0, 0, 0.02);
+        }
+
+        .activity-header {
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            border-top: 4px solid #4f46e5;
+            border-radius: 12px;
+            border-left: 1px solid rgba(0, 0, 0, 0.04);
+            border-right: 1px solid rgba(0, 0, 0, 0.04);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.03);
+            text-align: center;
+        }
+
+        .activity-name {
+            font-weight: 600;
+            font-size: 1.05rem;
+            color: #0f172a;
+        }
+
+        .activity-meta {
+            margin-top: 4px;
+            display: flex;
+            gap: 8px;
+            font-size: 0.75rem;
+        }
+
+        .activity-slug {
+            color: #4f46e5;
+            font-weight: 500;
+        }
+
+        .step-header {
+            background: rgba(255, 255, 255, 0.8);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+        }
+
+        .step-name {
+            font-weight: 500;
+            font-size: 0.95rem;
+            color: #334155;
+        }
+
+        .step-meta {
+            margin-top: 4px;
+            display: flex;
+            gap: 6px;
+            font-size: 0.7rem;
+        }
+
+        .step-slug {
+            color: #64748b;
+        }
+
+        .empty-step {
+            border: 1px dashed rgba(0, 0, 0, 0.08);
+            background: transparent;
+            box-shadow: none;
+        }
+
+        .empty-step .step-name {
+            color: rgba(0, 0, 0, 0.25);
+            font-style: italic;
+        }
+
+        .release-header {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: flex-start;
+            border-left: 4px solid var(--release-color);
+            border-radius: 8px;
+            padding: 16px;
+            border-top: 1px solid rgba(0, 0, 0, 0.04);
+            border-right: 1px solid rgba(0, 0, 0, 0.04);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+        }
+
+        .release-tag {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            margin-bottom: 6px;
+        }
+
+        .release-name {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: #0f172a;
+        }
+
+        .card-cell {
+            border: 1px solid rgba(0, 0, 0, 0.04);
+            border-radius: 8px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            min-height: 120px;
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+        }
+
+        .empty-cell {
+            border: 1px dashed rgba(0, 0, 0, 0.06);
+            box-shadow: none;
+        }
+
+        .empty-cell-placeholder {
+            color: rgba(0, 0, 0, 0.1);
+            font-size: 1.5rem;
+            font-weight: 300;
+            user-select: none;
+        }
+
+        .card {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.02), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(15, 23, 42, 0.08);
+        }
+
+        .card-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-slug {
+            font-family: monospace;
+            font-size: 0.7rem;
+            background: rgba(0, 0, 0, 0.04);
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #475569;
+        }
+
+        .card-title {
+            color: #1e293b;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+
+        .no-content {
+            text-align: center;
+            padding: 60px;
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            border: 1px dashed var(--border-color);
+            border-radius: 12px;
+            background: rgba(0, 0, 0, 0.005);
+        }
+
+        /* Alternating Release Swimlane Theme Colors */
+        .theme-odd {
+            background: #fffbeb;
+            border-color: rgba(217, 119, 6, 0.08);
+        }
+        .theme-odd.empty-cell {
+            background: rgba(251, 191, 36, 0.02);
+            border-color: rgba(217, 119, 6, 0.12);
+        }
+        .theme-odd .card {
+            background: #fef3c7;
+            border-color: rgba(217, 119, 6, 0.15);
+        }
+        .theme-odd .card:hover {
+            background: #fde68a;
+            border-color: rgba(217, 119, 6, 0.25);
+        }
+        
+        .theme-even {
+            background: #f0f9ff;
+            border-color: rgba(2, 132, 199, 0.08);
+        }
+        .theme-even.empty-cell {
+            background: rgba(56, 189, 248, 0.02);
+            border-color: rgba(2, 132, 199, 0.12);
+        }
+        .theme-even .card {
+            background: #e0f2fe;
+            border-color: rgba(2, 132, 199, 0.15);
+        }
+        .theme-even .card:hover {
+            background: #bae6fd;
+            border-color: rgba(2, 132, 199, 0.25);
+        }
+    </style>
+</head>
+<body>
+    <header class="map-header">
+        <div class="brand">
+            <span class="logo-icon">🗺️</span>
+            <div>
+                <h1>User Story Map</h1>
+                <p class="subtitle">File: <span class="file-path">/Users/will/projects/agent_os/docs/agent_os.md</span></p>
+            </div>
+        </div>
+        <div class="stats">
+            <div class="stat-badge"><strong>8</strong> Activities</div>
+            <div class="stat-badge"><strong>30</strong> Steps</div>
+            <div class="stat-badge"><strong>57</strong> Cards</div>
+        </div>
+    </header>
+    <main>
+        
+        <div class="board" style="grid-template-columns: 200px repeat(30, minmax(260px, 1fr));">
+            <div class="board-top-left"></div>
+            
+            <div class="activity-header" style="grid-column: 2 / 6; grid-row: 1;">
+                <div class="activity-name">Declare an agent</div>
+                <div class="activity-meta">
+                    <span class="activity-slug">[declare]</span>
+                </div>
+            </div>
+            
+            <div class="activity-header" style="grid-column: 6 / 9; grid-row: 1;">
+                <div class="activity-name">Provision it from the declaration</div>
+                <div class="activity-meta">
+                    <span class="activity-slug">[provision]</span>
+                </div>
+            </div>
+            
+            <div class="activity-header" style="grid-column: 9 / 12; grid-row: 1;">
+                <div class="activity-name">Trigger it into motion</div>
+                <div class="activity-meta">
+                    <span class="activity-slug">[trigger]</span>
+                </div>
+            </div>
+            
+            <div class="activity-header" style="grid-column: 12 / 15; grid-row: 1;">
+                <div class="activity-name">Run it (LLM does the work)</div>
+                <div class="activity-meta">
+                    <span class="activity-slug">[run]</span>
+                </div>
+            </div>
+            
+            <div class="activity-header" style="grid-column: 15 / 19; grid-row: 1;">
+                <div class="activity-name">Gate its outputs before effect</div>
+                <div class="activity-meta">
+                    <span class="activity-slug">[gate]</span>
+                </div>
+            </div>
+            
+            <div class="activity-header" style="grid-column: 19 / 23; grid-row: 1;">
+                <div class="activity-name">Observe what exists & what it did</div>
+                <div class="activity-meta">
+                    <span class="activity-slug">[observe]</span>
+                </div>
+            </div>
+            
+            <div class="activity-header" style="grid-column: 23 / 26; grid-row: 1;">
+                <div class="activity-name">Supervise its lifecycle & failures</div>
+                <div class="activity-meta">
+                    <span class="activity-slug">[supervise]</span>
+                </div>
+            </div>
+            
+            <div class="activity-header" style="grid-column: 26 / 32; grid-row: 1;">
+                <div class="activity-name">Generate an agent from a stated purpose</div>
+                <div class="activity-meta">
+                    <span class="activity-slug">[generate]</span>
+                </div>
+            </div>
+            
+            
+                <div class="step-header" style="grid-column: 2; grid-row: 2;">
+                    <div class="step-name">Write a manifest</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[write-manifest]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 3; grid-row: 2;">
+                    <div class="step-name">State purpose</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[state-purpose]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 4; grid-row: 2;">
+                    <div class="step-name">Grant connectors & mounts</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[grant-caps]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 5; grid-row: 2;">
+                    <div class="step-name">Set spend cap</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[set-spend]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 6; grid-row: 2;">
+                    <div class="step-name">Instantiate from declaration</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[instantiate]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 7; grid-row: 2;">
+                    <div class="step-name">Mount state</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[mount-state]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 8; grid-row: 2;">
+                    <div class="step-name">Wire credentials</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[wire-creds]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 9; grid-row: 2;">
+                    <div class="step-name">Wake on clock (time)</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[trig-time]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 10; grid-row: 2;">
+                    <div class="step-name">Wake on event (world)</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[trig-event]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 11; grid-row: 2;">
+                    <div class="step-name">Wake on message / approval</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[trig-message]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 12; grid-row: 2;">
+                    <div class="step-name">Hand input to Python agent</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[hand-input]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 13; grid-row: 2;">
+                    <div class="step-name">Reason over sanitized input</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[reason]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 14; grid-row: 2;">
+                    <div class="step-name">Propose enumerated actions</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[propose]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 15; grid-row: 2;">
+                    <div class="step-name">Validate action vs grants</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[validate]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 16; grid-row: 2;">
+                    <div class="step-name">Inject credential</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[inject-cred]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 17; grid-row: 2;">
+                    <div class="step-name">Meter spend</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[meter-spend]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 18; grid-row: 2;">
+                    <div class="step-name">Act on agent's behalf</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[act]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 19; grid-row: 2;">
+                    <div class="step-name">List what exists</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[inventory]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 20; grid-row: 2;">
+                    <div class="step-name">Read run-trace</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[run-trace]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 21; grid-row: 2;">
+                    <div class="step-name">See spend</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[see-spend]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 22; grid-row: 2;">
+                    <div class="step-name">Check conformance</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[conformance]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 23; grid-row: 2;">
+                    <div class="step-name">Restart policy</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[restart]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 24; grid-row: 2;">
+                    <div class="step-name">Kill on breach</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[kill-breach]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 25; grid-row: 2;">
+                    <div class="step-name">Surface child crash</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[child-crash]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 26; grid-row: 2;">
+                    <div class="step-name">Elicit the spec (question until KISS-clear)</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[elicit-spec]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 27; grid-row: 2;">
+                    <div class="step-name">Write the manifest</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[gen-manifest]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 28; grid-row: 2;">
+                    <div class="step-name">Write the judge (LLM-judged eval-lite)</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[write-judge]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 29; grid-row: 2;">
+                    <div class="step-name">Write the novel agent</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[write-agent]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 30; grid-row: 2;">
+                    <div class="step-name">Security review (reads code+manifest+purpose)</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[security-review]</span>
+                    </div>
+                </div>
+                
+                <div class="step-header" style="grid-column: 31; grid-row: 2;">
+                    <div class="step-name">Deploy on green (judge AND security)</div>
+                    <div class="step-meta">
+                        <span class="step-slug">[deploy-on-green]</span>
+                    </div>
+                </div>
+                
+            
+            <div class="release-header theme-odd" style="grid-column: 1; grid-row: 3; --release-color: #4f46e5;">
+                <span class="release-tag" style="background: rgba(79, 70, 229, 0.1); color: #4f46e5; border: 1px solid rgba(79, 70, 229, 0.2);">R1</span>
+                <div class="release-name">v0 — Walking skeleton</div>
+            </div>
+            
+            <div class="release-header theme-even" style="grid-column: 1; grid-row: 4; --release-color: #059669;">
+                <span class="release-tag" style="background: rgba(5, 150, 105, 0.1); color: #059669; border: 1px solid rgba(5, 150, 105, 0.2);">R2</span>
+                <div class="release-name">v1 — Isolation</div>
+            </div>
+            
+            <div class="release-header theme-odd" style="grid-column: 1; grid-row: 5; --release-color: #e11d48;">
+                <span class="release-tag" style="background: rgba(225, 29, 72, 0.1); color: #e11d48; border: 1px solid rgba(225, 29, 72, 0.2);">R3</span>
+                <div class="release-name">v2 — Manifest enforcement</div>
+            </div>
+            
+            <div class="release-header theme-even" style="grid-column: 1; grid-row: 6; --release-color: #d97706;">
+                <span class="release-tag" style="background: rgba(217, 119, 6, 0.1); color: #d97706; border: 1px solid rgba(217, 119, 6, 0.2);">R4</span>
+                <div class="release-name">v3 — Generation (MVP)</div>
+            </div>
+            
+            
+                    <div class="card-cell theme-odd" style="grid-column: 2; grid-row: 3;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[write-manifest-1]</span>
+                        </div>
+                        <div class="card-title">Hand-write a markdown manifest, human-kept-in-sync</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 3; grid-row: 3;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[state-purpose-1]</span>
+                        </div>
+                        <div class="card-title">Purpose stated as a one-line contract</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 4; grid-row: 3;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[grant-caps-1]</span>
+                        </div>
+                        <div class="card-title">Connectors & mounts listed by hand</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 5; grid-row: 3;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[set-spend-1]</span>
+                        </div>
+                        <div class="card-title">Spend cap as a number (no on_breach yet)</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 6; grid-row: 3;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[instantiate-1]</span>
+                        </div>
+                        <div class="card-title">Hard-wired config (not provisioned from manifest)</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 7; grid-row: 3;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[mount-state-1]</span>
+                        </div>
+                        <div class="card-title">Roster/trust state mounted to single-writer GenServer</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 8; grid-row: 3;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 9; grid-row: 3;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[trig-time-1]</span>
+                        </div>
+                        <div class="card-title">One timer (daily 07:00 emergence signal)</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 10; grid-row: 3;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 11; grid-row: 3;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 12; grid-row: 3;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[hand-input-1]</span>
+                        </div>
+                        <div class="card-title">One port → human-written Python discovery agent</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 13; grid-row: 3;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[reason-1]</span>
+                        </div>
+                        <div class="card-title">LLM reasons over input (unsanitized at v0)</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 14; grid-row: 3;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[propose-1]</span>
+                        </div>
+                        <div class="card-title">Proposes enumerated actions</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 15; grid-row: 3;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[validate-1]</span>
+                        </div>
+                        <div class="card-title">Minimal output check (not enforcement)</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 16; grid-row: 3;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 17; grid-row: 3;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 18; grid-row: 3;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[act-1]</span>
+                        </div>
+                        <div class="card-title">Privileged action on agent's behalf (deterministic)</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 19; grid-row: 3;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[inventory-1]</span>
+                        </div>
+                        <div class="card-title">Standing inventory of what exists</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 20; grid-row: 3;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[run-trace-1]</span>
+                        </div>
+                        <div class="card-title">A legible run-log</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 21; grid-row: 3;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 22; grid-row: 3;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 23; grid-row: 3;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[restart-1]</span>
+                        </div>
+                        <div class="card-title">Restart-once-and-alert policy</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 24; grid-row: 3;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 25; grid-row: 3;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 26; grid-row: 3;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 27; grid-row: 3;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 28; grid-row: 3;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 29; grid-row: 3;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 30; grid-row: 3;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 31; grid-row: 3;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 2; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 3; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 4; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 5; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-even" style="grid-column: 6; grid-row: 4;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[instantiate-2]</span>
+                        </div>
+                        <div class="card-title">Provision agent into a container</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 7; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 8; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 9; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 10; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 11; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-even" style="grid-column: 12; grid-row: 4;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[hand-input-2]</span>
+                        </div>
+                        <div class="card-title">Agent runs sandboxed; safe against injected bookmark/tweet</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-even" style="grid-column: 13; grid-row: 4;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[reason-2]</span>
+                        </div>
+                        <div class="card-title">Reasons over sanitized untrusted web input</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 14; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 15; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 16; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 17; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 18; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 19; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 20; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 21; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 22; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 23; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 24; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-even" style="grid-column: 25; grid-row: 4;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[child-crash-1]</span>
+                        </div>
+                        <div class="card-title">Child OOM/crash surfaces as clean BEAM exit</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 26; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 27; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 28; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 29; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 30; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 31; grid-row: 4;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 2; grid-row: 5;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[write-manifest-2]</span>
+                        </div>
+                        <div class="card-title">Manifest gains boundary-contract fields (recipient scoping, on_breach, approval-as-event)</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 3; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 4; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 5; grid-row: 5;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[set-spend-2]</span>
+                        </div>
+                        <div class="card-title">Spend becomes {cap, window, on_breach}</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 6; grid-row: 5;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[instantiate-3]</span>
+                        </div>
+                        <div class="card-title">Substrate provisions from the enforced manifest</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 7; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 8; grid-row: 5;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[wire-creds-1]</span>
+                        </div>
+                        <div class="card-title">Credential proxy holds caps, injects at request time</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 9; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 10; grid-row: 5;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[trig-event-1]</span>
+                        </div>
+                        <div class="card-title">Event-trigger + approval-as-event-trigger</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 11; grid-row: 5;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[trig-message-1]</span>
+                        </div>
+                        <div class="card-title">Message-trigger (you, via chat, are another process)</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 12; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 13; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 14; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 15; grid-row: 5;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[validate-2]</span>
+                        </div>
+                        <div class="card-title">Deterministic gate: every action validated vs enumerated grants + constraints</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 16; grid-row: 5;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[inject-cred-1]</span>
+                        </div>
+                        <div class="card-title">Credential proxy injects at the chokepoint</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 17; grid-row: 5;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[meter-spend-1]</span>
+                        </div>
+                        <div class="card-title">Spend metered at the deterministic chokepoint</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 18; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 19; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 20; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 21; grid-row: 5;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[see-spend-1]</span>
+                        </div>
+                        <div class="card-title">Per-agent spend visible from the chokepoint</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 22; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 23; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-odd" style="grid-column: 24; grid-row: 5;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[kill-breach-1]</span>
+                        </div>
+                        <div class="card-title">Spend-cap-on-breach becomes a real kill</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 25; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 26; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 27; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 28; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 29; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 30; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-odd" style="grid-column: 31; grid-row: 5;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 2; grid-row: 6;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-even" style="grid-column: 3; grid-row: 6;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[state-purpose-2]</span>
+                        </div>
+                        <div class="card-title">Declare a purpose; OS emits the manifest</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-even" style="grid-column: 4; grid-row: 6;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[grant-caps-2]</span>
+                        </div>
+                        <div class="card-title">Manifest carries a normie-readable capability render: <READ YOUR GMAIL>, <SEND EMAILS FROM YOUR GMAIL></div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[grant-caps-3]</span>
+                        </div>
+                        <div class="card-title">Render is FAITHFUL+TOTAL (every capability appears; may collapse detail, never drop one)</div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[grant-caps-4]</span>
+                        </div>
+                        <div class="card-title">Render is DETERMINISTIC from manifest fields, never LLM-written (else co-generation misleads the consent screen)</div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[grant-caps-5]</span>
+                        </div>
+                        <div class="card-title">Render is DANGER-RANKED: read looks different from send/egress — the user sees WHY it left the envelope</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 5; grid-row: 6;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-even" style="grid-column: 6; grid-row: 6;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[instantiate-4]</span>
+                        </div>
+                        <div class="card-title">OS composes/selects template, validates generated manifest is well-formed & minimally-scoped</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 7; grid-row: 6;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 8; grid-row: 6;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 9; grid-row: 6;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 10; grid-row: 6;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 11; grid-row: 6;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-even" style="grid-column: 12; grid-row: 6;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[hand-input-3]</span>
+                        </div>
+                        <div class="card-title">OS synthesises a NOVEL agent body (new code, not template/compose) — the step the map never reached</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 13; grid-row: 6;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 14; grid-row: 6;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-even" style="grid-column: 15; grid-row: 6;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[validate-3]</span>
+                        </div>
+                        <div class="card-title">Gate now checks a machine-written manifest (new trust posture)</div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[validate-4]</span>
+                        </div>
+                        <div class="card-title">Gate must hold against machine-written CODE: post-deploy safety rests on the gate, not the security LLM's reading (world B)</div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[validate-5]</span>
+                        </div>
+                        <div class="card-title">Manifest is NOT readable by the agent (privileged-read for the gate only) — agent can't hug a boundary it can't see</div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[validate-6]</span>
+                        </div>
+                        <div class="card-title">INVARIANT: --dangerously-skip-review is deploy-review skip ONLY; the gate still enforces the manifest at runtime</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 16; grid-row: 6;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 17; grid-row: 6;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 18; grid-row: 6;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-even" style="grid-column: 19; grid-row: 6;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[inventory-2]</span>
+                        </div>
+                        <div class="card-title">Security-review verdict + judge result shown in the standing inventory (never 'ask the agent')</div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[inventory-3]</span>
+                        </div>
+                        <div class="card-title">Permission summary ALWAYS shown at deploy, every mode (display, not a decision) — legibility has no flag</div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[inventory-4]</span>
+                        </div>
+                        <div class="card-title">Inventory records provenance: reviewed = human | skipped-in-envelope | dangerously-skipped</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 20; grid-row: 6;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 21; grid-row: 6;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-even" style="grid-column: 22; grid-row: 6;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[conformance-1]</span>
+                        </div>
+                        <div class="card-title">Conformance auditor: stated purpose vs observed behaviour, flag-only</div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[conformance-2]</span>
+                        </div>
+                        <div class="card-title">Auditor flags drift to human; human stays on approve-path</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 23; grid-row: 6;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 24; grid-row: 6;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell empty-cell theme-even" style="grid-column: 25; grid-row: 6;">
+                        <div class="empty-cell-placeholder">+</div>
+                    </div>
+                    
+                    <div class="card-cell theme-even" style="grid-column: 26; grid-row: 6;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[elicit-spec-1]</span>
+                        </div>
+                        <div class="card-title">Question the user until purpose is clear; minimise everything (KISS) — this is the real defence against spec-misread</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-even" style="grid-column: 27; grid-row: 6;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[gen-manifest-1]</span>
+                        </div>
+                        <div class="card-title">Emit manifest from elicited spec; the human-readable manifest is THE safety artifact</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-even" style="grid-column: 28; grid-row: 6;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[write-judge-1]</span>
+                        </div>
+                        <div class="card-title">Synthesise tests; LLM-judged, non-deterministic; certifies code-matches-manifest, not manifest-matches-intent</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-even" style="grid-column: 29; grid-row: 6;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[write-agent-1]</span>
+                        </div>
+                        <div class="card-title">Synthesise novel agent body (Python/PydanticAI across the port boundary)</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-even" style="grid-column: 30; grid-row: 6;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[security-review-1]</span>
+                        </div>
+                        <div class="card-title">New agent: reads code+manifest+purpose, judges 'written to satisfy purpose without breaching manifest' — smoke detector, not firewall</div>
+                    </div>
+                    
+                    </div>
+                    
+                    <div class="card-cell theme-even" style="grid-column: 31; grid-row: 6;">
+                        
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[deploy-on-green-1]</span>
+                        </div>
+                        <div class="card-title">On pass from judge AND security review, deploy with no further human input — sound ONLY in world B</div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[deploy-on-green-2]</span>
+                        </div>
+                        <div class="card-title">Mode --always-review: every deploy blocks on a human (v3-LAUNCH DEFAULT; human does the SEMANTIC check, not security)</div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[deploy-on-green-3]</span>
+                        </div>
+                        <div class="card-title">Mode --review-if-risky: in-envelope (read-only/no-egress/spend<threshold) auto-deploys; out-of-envelope blocks</div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[deploy-on-green-4]</span>
+                        </div>
+                        <div class="card-title">Mode --dangerously-skip-review: out-of-envelope also auto-deploys (the only genuinely dangerous mode)</div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[deploy-on-green-5]</span>
+                        </div>
+                        <div class="card-title">Envelope is a DETERMINISTIC predicate over manifest fields — never an LLM judgement</div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-meta">
+                            <span class="card-slug">[deploy-on-green-6]</span>
+                        </div>
+                        <div class="card-title">OPEN: should 'conformance auditor live & watching' be a precondition of envelope-eligibility? (leaning yes)</div>
+                    </div>
+                    
+                    </div>
+                    
+        </div>
+        
+    </main>
+</body>
+</html>

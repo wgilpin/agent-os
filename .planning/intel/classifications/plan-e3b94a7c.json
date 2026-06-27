@@ -1,0 +1,13 @@
+{
+  "source_path": "/Users/will/projects/agent_os/docs/plan.md",
+  "type": "DOC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "v0 — Walking skeleton",
+  "summary": "Release roadmap checklist sequencing agent-OS work across versions v0 through v3 as unchecked task items.",
+  "scope": ["manifest", "credential proxy", "deterministic gate", "agent sandbox/container", "spend cap", "conformance auditor", "deploy review modes", "capability render"],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": "Roadmap/release checklist, not a decision (no Context/Decision/Consequences), not user-story PRD, and no API/schema contracts. Task-structured planning doc classified as DOC (context only). No H1 reads as a title proper; used first H1 'v0 — Walking skeleton'. Confidence medium: clear DOC signals but unconventional roadmap structure."
+}

@@ -1,0 +1,24 @@
+{
+  "source_path": "/Users/will/projects/agent_os/docs/agent-os-design.md",
+  "type": "DOC",
+  "confidence": "high",
+  "manifest_override": false,
+  "title": "Agent OS — Vision, Architecture, and Roadmap",
+  "summary": "Design/vision document for an OS-style substrate that builds, isolates, enforces, and supervises invocation-scoped agents, with a release roadmap.",
+  "scope": [
+    "Agent OS substrate (kernel)",
+    "invocation-scoped agents",
+    "agent manifest",
+    "deterministic gate / credential proxy",
+    "conformance auditor",
+    "security-review agent",
+    "synthesis pipeline",
+    "review modes and permission visibility",
+    "BEAM/OTP runtime",
+    "release roadmap (v0-v3)"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": "Self-described as 'a structural plan, not a spec' that 'captures the decisions made during exploration.' Prose-heavy, explanatory, with embedded rationale and a release roadmap — DOC. Carries strong architectural reasoning and settled decisions (could read as ADR-like), but no Accepted status, no numbered ADR filename, and it bundles many decisions plus open questions rather than locking one — so classified DOC over ADR. Filename source-hash (3d8f6a2b) was assigned without a SHA tool available; verify if collision-sensitive."
+}
