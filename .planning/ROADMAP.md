@@ -37,14 +37,14 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Roster/trust state is mounted to a single-writer GenServer and the privileged action runs deterministically on the agent's behalf after a minimal output check.
   4. A standing inventory shows what exists and a legible run-log shows what it did — read without asking the agent.
   5. When the child fails, restart-once-and-alert fires.
-**Plans**: TBD
+**Plans**: 5 plans (4 waves)
 
 Plans:
-- [ ] 01-01: One supervisor + one single-writer GenServer (roster/trust state mount)
-- [ ] 01-02: Hand-written manifest + hard-wired provisioning + daily 07:00 timer trigger
-- [ ] 01-03: Port boundary → human-written Python discovery agent (reason + propose enumerated actions)
-- [ ] 01-04: Minimal output check + deterministic act-on-behalf
-- [ ] 01-05: Standing inventory + legible run-log + restart-once-and-alert
+- [ ] 01-01-PLAN.md — Scaffold single Mix app + single-writer RosterStore GenServer + manifest parser & 7-field manifest (wave 1)
+- [ ] 01-02-PLAN.md — Hard-wired provisioning + manifest-drift check + daily 07:00 self-rescheduling timer (wave 2)
+- [ ] 01-03-PLAN.md — Port boundary (stdin-guard wrapper + PortRunner) → human-written Python discovery agent (wave 2)
+- [ ] 01-04-PLAN.md — Deterministic minimal output check + act-on-behalf effector (ring split) (wave 3)
+- [ ] 01-05-PLAN.md — Legible run-log + standing inventory + end-to-end run pipeline + restart-once-and-alert (wave 4)
 
 ### Phase 2: Isolation (v1)
 **Goal**: The child discovery agent runs sandboxed in a container, making it the first version safe to leave running against the live web (it reads untrusted X input now). The discovery agent becomes daily-runnable for the user. A child OOM/crash surfaces cleanly so let-it-crash works.
@@ -122,7 +122,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Walking Skeleton (v0) | 0/5 | Not started | - |
+| 1. Walking Skeleton (v0) | 0/5 | Planned | - |
 | 2. Isolation (v1) | 0/3 | Not started | - |
 | 3. Manifest Enforcement (v2) | 0/6 | Not started | - |
 | 4. Generation MVP (v3) | 0/6 | Not started | - |
