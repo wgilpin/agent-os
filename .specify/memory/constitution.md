@@ -1,3 +1,24 @@
+<!--
+SYNC IMPACT REPORT
+Version change: 1.2.0 → 1.3.0 (MINOR — materially new rule added to an existing principle)
+Modified principles:
+  - X. No Ambient Authority — added the "Capabilities are declared, never self-conferred"
+    clause (declaration vs conferral vs danger-classification; conferral outside any LLM;
+    intrinsic danger fixed by the connector capability registry).
+Added sections: none (clause added within Principle X)
+Removed sections: none
+Other edits: removed a stray trailing code fence at end of file.
+Templates reviewed for consistency:
+  - .specify/templates/plan-template.md — ✅ no change (Constitution Check is generic;
+    derives gates from this file, no hard-coded principle list)
+  - .specify/templates/spec-template.md — ✅ no change (no principle references; "capability"
+    appears only in generic FR examples)
+  - .specify/templates/tasks-template.md — ✅ no change (no principle references)
+Downstream references (informational, not templates):
+  - specs/002-manifest-enforcement/spec.md FR-002a and
+    specs/002-manifest-enforcement/contracts/connector-registry.md realize this clause.
+Deferred TODOs: none
+-->
 # Agent OS Constitution
 
 Agent OS is a deterministic BEAM/OTP control plane (the kernel) that declares,
@@ -71,6 +92,18 @@ An agent's manifest grants are its entire power — capability-based in the seL4
 The declarative manifest is the single source of truth, and it is privileged-read for
 the gate only: NOT readable by the agent at all (the agent is the untrusted party).
 
+**Capabilities are declared, never self-conferred.** The manifest DECLARES an agent's
+requested capabilities (which connectors, scoped to which recipients/methods); CONFERRING
+them is a privileged act performed outside any LLM — a human author/approver in v2, and a
+human review gate and/or a deterministic envelope predicate in v3 (enforcement precedes
+generation, Principle XII). A component that runs an LLM proposes only actions at runtime —
+never grants, and never its own danger classification. A capability's intrinsic danger —
+whether it mutates external state, whether it requires approval, which credential it needs,
+and its per-action cost — is fixed by the substrate's connector capability registry, keyed by
+generic capability names, NOT by the manifest author. This is the seL4 capability sense made
+concrete: a holder can never widen its own authority, and the thing being granted never
+classifies its own danger.
+
 ### XI. The Deterministic Gate Is the Only Firewall (NON-NEGOTIABLE)
 No component both runs an LLM and holds a credential that can mutate external state.
 Privileged action is deterministic, on the agent's behalf, after a gate check. LLM
@@ -109,5 +142,4 @@ and a version bump. Any complexity or deviation must be justified against Princi
 Specs, plans, and reviews verify compliance with these principles; an unjustified
 violation blocks the change.
 
-**Version**: 1.2.0 | **Ratified**: 2026-06-28 | **Last Amended**: 2026-06-28
-```
+**Version**: 1.3.0 | **Ratified**: 2026-06-28 | **Last Amended**: 2026-06-28
