@@ -1,7 +1,19 @@
 [project]
 name = "agent-os"
 version = "0.1.0"
-description = "Add your description here"
+description = "Agent OS — Python agent workloads (the discovery agent runs across the BEAM port boundary)"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "pydantic>=2.13",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["agents"]
+pythonpath = ["."]
+

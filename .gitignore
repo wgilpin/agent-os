@@ -1,6 +1,18 @@
 # macOS
 .DS_Store
 
+# Elixir / Mix
+/_build/
+/deps/
+/cover/
+erl_crash.dump
+*.ez
+agent_os-*.tar
+
+# Mutable substrate state (run_log.md stays tracked — it's the legible run trace)
+/data/roster.term
+/data/roster.term.tmp
+
 # Python-generated files
 __pycache__/
 *.py[oc]
@@ -11,3 +23,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Claude Code local (personal) settings — not shared
+.claude/settings.local.json

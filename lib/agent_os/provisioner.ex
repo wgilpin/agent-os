@@ -1,0 +1,107 @@
+defmodule AgentOS.Provisioner do
+  @moduledoc """
+  Exposes the hard-wired v0 agent config and performs a startup drift check
+  against the hand-kept markdown manifest.
+  """
+
+  require Logger
+
+  @doc """
+  Returns the hard-wired agent config as a map.
+  Retrieves parameters from the global Elixir Application configuration environment.
+  """
+  @spec agent_config() :: map()
+  def agent_config do
+    # Application.fetch_env!/2 raises an ArgumentError if the key (:agent) is missing
+    # in the application scope (:agent_os). It returns a keyword list.
+    config = Application.fetch_env!(:agent_os, :agent)
+    
+    # Keyword.fetch!/2 fetches the value for a given key, raising an error if missing.
+    # We pack the values into a map for structured access.
+    %{
+      manifest_path: Keyword.fetch!(config, :manifest_path),
+      agent_cmd: Keyword.fetch!(config, :agent_cmd),
+      agent_args: Keyword.fetch!(config, :agent_args),
+      tz: Keyword.fetch!(config, :tz),
+      run_hour: Keyword.fetch!(config, :run_hour),
+      connectors: Keyword.fetch!(config, :connectors),
+      outputs: Keyword.fetch!(config, :outputs),
+      spend_cap: Keyword.fetch!(config, :spend_cap)
+    }
+  end
+
+  @doc """
+  Compares the hard-wired config grants (connectors, outputs, spend_cap) against
+  the fields declared in manifests/discovery.md. Logs a warning on drift.
+  
+  ## Returns
+    - `:ok` if config matches manifest.
+    - `{:drift, list_of_mismatched_atoms}` if discrepancies are found.
+  """
+  @spec check_drift() :: :ok | {:drift, [atom()]}
+  def check_drift do
+    # Fetch the current runtime config map
+    config = agent_config()
+
+    # Load and pattern match the manifest
+    case AgentOS.Manifest.load(config.manifest_path) do
+      {:ok, manifest} ->
+        # Initialize an empty list to accumulate mismatches
+        mismatched = []
+
+        # 1. Compare connectors list.
+        # `[:connectors | mismatched]` prepends `:connectors` to the list (cons cell).
+        mismatched =
+          if manifest["connectors"] != config.connectors do
+            [:connectors | mismatched]
+          else
+            mismatched
+          end
+
+        # 2. Compare outputs list.
+        mismatched =
+          if manifest["outputs"] != config.outputs do
+            [:outputs | mismatched]
+          else
+            mismatched
+          end
+
+        # 3. Compare spend cap.
+        # get_in/2 performs a nested map lookup safely using string keys.
+        manifest_cap = get_in(manifest, ["spend", "cap"])
+        mismatched =
+          if manifest_cap != config.spend_cap do
+            [:spend_cap | mismatched]
+          else
+            mismatched
+          end
+
+        # Evaluate accumulative results
+        if mismatched == [] do
+          # Return the atom :ok if lists are fully identical
+          :ok
+        else
+          # Reverse the accumulated list because prepending (consing) builds it backward
+          mismatched = Enum.reverse(mismatched)
+          # Log a warning message in the system logger
+          Logger.warning("manifest drift: mismatched fields #{inspect(mismatched)}")
+          {:drift, mismatched}
+        end
+
+      {:error, reason} ->
+        # Fallback when the manifest file itself couldn't be loaded
+        Logger.warning("manifest drift: could not load manifest #{config.manifest_path}: #{inspect(reason)}")
+        {:drift, [:manifest]}
+    end
+  end
+
+  @doc """
+  Triggers an agent run execution under the RunSupervisor.
+  """
+  @spec fire_run() :: :ok
+  def fire_run do
+    # Cast to RunSupervisor to trigger execution asynchronously (cast does not wait).
+    AgentOS.RunSupervisor.start_run()
+    :ok
+  end
+end

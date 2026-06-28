@@ -1,0 +1,191 @@
+defmodule AgentOS.RunSupervisorTest do
+  use ExUnit.Case, async: false
+
+  alias AgentOS.RunSupervisor
+  alias AgentOS.RunWorker
+  alias AgentOS.StateStore
+
+  setup do
+    tmp_roster =
+      Path.join(
+        System.tmp_dir!(),
+        "roster_super_#{System.unique_integer([:positive])}.term"
+      )
+
+    tmp_log =
+      Path.join(
+        System.tmp_dir!(),
+        "run_log_super_#{System.unique_integer([:positive])}.md"
+      )
+
+    on_exit(fn ->
+      File.rm(tmp_roster)
+      File.rm(tmp_log)
+    end)
+
+    start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})
+    start_supervised!({StateStore, name: "roster_trust", path: tmp_roster, initial: %{records: []}})
+    start_supervised!(RunSupervisor)
+
+    {:ok, roster_path: tmp_roster, log_path: tmp_log}
+  end
+
+  # --- Task 2: RunWorker Tests ---
+
+  test "RunWorker.run_once/1 happy path runs python agent, validates and executes actions", %{
+    log_path: log_path
+  } do
+    # Seed the roster store so the agent has input
+    :ok = StateStore.apply_action("roster_trust", {:append, :records, %{"signal" => "high", "text" => "valid news"}})
+
+    # Run the worker with the real python agent path
+    assert :ok =
+             RunWorker.run_once(
+               agent_cmd: ".venv/bin/python",
+               agent_args: ["agents/discovery/main.py"],
+               run_log_path: log_path
+             )
+
+    # Check that state was mutated (the python agent emits actions based on roster input)
+    # The effector creates an append_digest action that gets recorded as a digest record at v0
+    snapshot = StateStore.snapshot("roster_trust")
+    assert length(snapshot.records) == 2
+    assert Enum.any?(snapshot.records, fn r -> Map.has_key?(r, "digest") and r["digest"] =~ "valid news" end)
+
+    # Verify run-log entry
+    assert File.exists?(log_path)
+    log_content = File.read!(log_path)
+    assert log_content =~ "status=ok"
+    assert log_content =~ "actions=1"
+  end
+
+  test "RunWorker.run_once/1 error path logs status=error when PortRunner fails", %{
+    log_path: log_path
+  } do
+    # Inject a failing command
+    assert {:error, _} =
+             RunWorker.run_once(
+               agent_cmd: "bash",
+               agent_args: ["-c", "exit 1"],
+               run_log_path: log_path
+             )
+
+    # Verify run-log entry has error status
+    assert File.exists?(log_path)
+    log_content = File.read!(log_path)
+    assert log_content =~ "status=error"
+    assert log_content =~ "actions=0"
+  end
+
+  test "RunWorker.run_once/1 drops ungranted actions", %{log_path: log_path} do
+    # Create a custom manifest with NO outputs/connectors allowed
+    tmp_manifest =
+      Path.join(
+        System.tmp_dir!(),
+        "discovery_empty_#{System.unique_integer([:positive])}.md"
+      )
+
+    on_exit(fn -> File.rm(tmp_manifest) end)
+
+    File.write!(tmp_manifest, """
+    ---
+    purpose: "Empty manifest"
+    connectors: []
+    outputs: []
+    ---
+    """)
+
+    # Seed roster
+    :ok = StateStore.apply_action("roster_trust", {:append, :records, %{"text" => "news"}})
+
+    # Run worker with the empty manifest
+    assert :ok =
+             RunWorker.run_once(
+               agent_cmd: ".venv/bin/python",
+               agent_args: ["agents/discovery/main.py"],
+               manifest_path: tmp_manifest,
+               run_log_path: log_path
+             )
+
+    # Verify no new record was created (it was dropped before effector)
+    snapshot = StateStore.snapshot("roster_trust")
+    assert length(snapshot.records) == 1
+
+    # Verify log says actions=0 (since 1 proposed action was dropped)
+    log_content = File.read!(log_path)
+    assert log_content =~ "status=ok"
+    assert log_content =~ "actions=0"
+  end
+
+  # --- Task 3: RunSupervisor Tests ---
+
+  test "RunSupervisor success path: successful run is executed exactly once", %{
+    log_path: log_path
+  } do
+    test_pid = self()
+
+    worker_fn = fn _opts ->
+      send(test_pid, :worker_called)
+      :ok
+    end
+
+    assert :ok = RunSupervisor.start_run(worker_fn: worker_fn, run_log_path: log_path)
+
+    # Assert worker called once
+    assert_receive :worker_called, 500
+    refute_receive :worker_called, 500
+  end
+
+  test "RunSupervisor crash-once path: fails first time, retried once, ends green", %{
+    log_path: log_path
+  } do
+    test_pid = self()
+
+    {:ok, agent_pid} = Agent.start_link(fn -> 0 end)
+
+    worker_fn = fn _opts ->
+      send(test_pid, :worker_called)
+      attempts = Agent.get_and_update(agent_pid, fn count -> {count, count + 1} end)
+
+      if attempts == 0 do
+        {:error, :temporary_failure}
+      else
+        :ok
+      end
+    end
+
+    assert :ok = RunSupervisor.start_run(worker_fn: worker_fn, run_log_path: log_path)
+
+    assert_receive :worker_called, 500
+    assert_receive :worker_called, 500
+    refute_receive :worker_called, 500
+
+    refute File.exists?(log_path) and File.read!(log_path) =~ "status=alert"
+  end
+
+  test "RunSupervisor crash-twice path: fails both times, triggers Alerter", %{
+    log_path: log_path
+  } do
+    test_pid = self()
+
+    worker_fn = fn _opts ->
+      send(test_pid, :worker_called)
+      {:error, :persistent_failure}
+    end
+
+    assert :ok = RunSupervisor.start_run(worker_fn: worker_fn, run_log_path: log_path)
+
+    assert_receive :worker_called, 500
+    assert_receive :worker_called, 500
+    refute_receive :worker_called, 500
+
+    # Wait a moment for Alerter to run asynchronously
+    Process.sleep(100)
+
+    # Assert Alerter log entry exists and contains the failure reason
+    assert File.exists?(log_path)
+    log_content = File.read!(log_path)
+    assert log_content =~ "status=alert"
+    assert log_content =~ ":persistent_failure"
+  end
+end
