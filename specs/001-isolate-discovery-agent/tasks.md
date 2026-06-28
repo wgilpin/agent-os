@@ -23,8 +23,8 @@ boundary but are independently testable.
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 [P] Configure `ExUnit.configure(exclude: [:docker])` in `test/test_helper.exs` so the default `mix test` stays hermetic (Constitution IV); `mix test --include docker` runs the container suite.
-- [ ] T002 [P] Confirm `pydantic` is declared in `pyproject.toml` (add if missing) and run `uv sync`.
+- [x] T001 [P] Configure `ExUnit.configure(exclude: [:docker])` in `test/test_helper.exs` so the default `mix test` stays hermetic (Constitution IV); `mix test --include docker` runs the container suite.
+- [x] T002 [P] Confirm `pydantic` is declared in `pyproject.toml` (add if missing) and run `uv sync`.
 
 ---
 
@@ -32,9 +32,9 @@ boundary but are independently testable.
 
 **⚠️ Blocks all user stories — every story runs the agent in a container.**
 
-- [ ] T003 Create the agent container image at `agents/discovery/Dockerfile` (`python:3.11-slim` + `uv`, copies agent code, runs as a non-root user, entrypoint reads stdin).
-- [ ] T004 [P] Add a dev helper script `scripts/agent_image.sh` that builds `agent-discovery:dev` (referenced by quickstart + `:docker` tests; does not run at test time).
-- [ ] T005 [P] Ensure the deterministic stub agent (`agents/discovery/main.py`) runs inside the image with `--network none`, for use by `:docker` tests.
+- [x] T003 Create the agent container image at `agents/discovery/Dockerfile` (`python:3.11-slim` + `uv`, copies agent code, runs as a non-root user, entrypoint reads stdin).
+- [x] T004 [P] Add a dev helper script `scripts/agent_image.sh` that builds `agent-discovery:dev` (referenced by quickstart + `:docker` tests; does not run at test time).
+- [x] T005 [P] Ensure the deterministic stub agent (`agents/discovery/main.py`) runs inside the image with `--network none`, for use by `:docker` tests.
 
 **Checkpoint**: An image exists and can be launched; story work can begin.
 
@@ -52,16 +52,16 @@ input/output and `/scratch` work.
 
 ### Tests for User Story 1 (write first, must FAIL)
 
-- [ ] T006 [P] [US1] Unit test the docker-argv builder in `test/agent_os/sandbox_test.exs`, asserting it emits `--network none`, `--read-only`, `--tmpfs /scratch`, `--memory`/`--memory-swap`, `--cpus`, `--user`, `--cap-drop ALL`, `--security-opt no-new-privileges`, and `--cidfile` (per `contracts/sandbox.md`).
-- [ ] T007 [P] [US1] Integration test `test/agent_os/isolation_test.exs` (tag `:docker`): stub writing to `/scratch` succeeds; reading a host path outside `/scratch` fails; any outbound network connection fails.
+- [x] T006 [P] [US1] Unit test the docker-argv builder in `test/agent_os/sandbox_test.exs`, asserting it emits `--network none`, `--read-only`, `--tmpfs /scratch`, `--memory`/`--memory-swap`, `--cpus`, `--user`, `--cap-drop ALL`, `--security-opt no-new-privileges`, and `--cidfile` (per `contracts/sandbox.md`).
+- [x] T007 [P] [US1] Integration test `test/agent_os/isolation_test.exs` (tag `:docker`): stub writing to `/scratch` succeeds; reading a host path outside `/scratch` fails; any outbound network connection fails.
 
 ### Implementation for User Story 1
 
-- [ ] T008 [P] [US1] Implement `AgentOS.Sandbox` (struct + pure argv builder) in `lib/agent_os/sandbox.ex` per `contracts/sandbox.md`.
-- [ ] T009 [US1] Modify `lib/agent_os/port_runner.ex` to invoke `cmd = "docker"` with the `Sandbox` argv instead of `python` (reuse the exit-status path unchanged).
-- [ ] T010 [US1] Extend `priv/port_wrapper.sh` to pass `--cidfile` and `trap EXIT` → `docker stop` then `docker kill` the recorded id, so no container is orphaned on timeout/crash (D2).
-- [ ] T011 [US1] Wire `lib/agent_os/provisioner.ex` / `lib/agent_os/run_worker.ex` to build and pass the discovery agent's `Sandbox` config (hard-wired grants, consistent with Phase 1 provisioning).
-- [ ] T012 [US1] Add logging of container start (image, resource caps, `--network none`) in `lib/agent_os/sandbox.ex` (Constitution VI).
+- [x] T008 [P] [US1] Implement `AgentOS.Sandbox` (struct + pure argv builder) in `lib/agent_os/sandbox.ex` per `contracts/sandbox.md`.
+- [x] T009 [US1] Modify `lib/agent_os/port_runner.ex` to invoke `cmd = "docker"` with the `Sandbox` argv instead of `python` (reuse the exit-status path unchanged).
+- [x] T010 [US1] Extend `priv/port_wrapper.sh` to pass `--cidfile` and `trap EXIT` → `docker stop` then `docker kill` the recorded id, so no container is orphaned on timeout/crash (D2).
+- [x] T011 [US1] Wire `lib/agent_os/provisioner.ex` / `lib/agent_os/run_worker.ex` to build and pass the discovery agent's `Sandbox` config (hard-wired grants, consistent with Phase 1 provisioning).
+- [x] T012 [US1] Add logging of container start (image, resource caps, `--network none`) in `lib/agent_os/sandbox.ex` (Constitution VI).
 
 **Checkpoint**: US1 fully functional and independently testable — the MVP.
 
@@ -78,17 +78,17 @@ action, no escape, and a safe, logged outcome.
 
 ### Tests for User Story 2 (write first, must FAIL)
 
-- [ ] T013 [P] [US2] Unit test `AgentOS.Sanitizer` in `test/agent_os/sanitizer_test.exs`: size bounds, control-char stripping, schema rejection, and drop-and-log of malformed items (per data-model.md rules).
-- [ ] T014 [P] [US2] Python test for the Pydantic input model + rejection of malformed input in `agents/discovery/test_main.py`.
-- [ ] T015 [P] [US2] Integration test (tag `:docker`) in `test/agent_os/isolation_test.exs`: hostile fixture (injection text + malformed payload) → no out-of-grant action, no escape, run fails safely and is logged.
+- [x] T013 [P] [US2] Unit test `AgentOS.Sanitizer` in `test/agent_os/sanitizer_test.exs`: size bounds, control-char stripping, schema rejection, and drop-and-log of malformed items (per data-model.md rules).
+- [x] T014 [P] [US2] Python test for the Pydantic input model + rejection of malformed input in `agents/discovery/test_main.py`.
+- [x] T015 [P] [US2] Integration test (tag `:docker`) in `test/agent_os/isolation_test.exs`: hostile fixture (injection text + malformed payload) → no out-of-grant action, no escape, run fails safely and is logged.
 
 ### Implementation for User Story 2
 
-- [ ] T016 [P] [US2] Implement `AgentOS.Sanitizer` in `lib/agent_os/sanitizer.ex` (validate → bound → normalize → drop+log rejects).
-- [ ] T017 [P] [US2] Implement the Pydantic input model in `agents/discovery/models.py`.
-- [ ] T018 [US2] Modify `agents/discovery/main.py` to validate input via `models.py` before reasoning; exit non-zero with a stderr log on invalid input.
-- [ ] T019 [US2] Modify `lib/agent_os/provisioner.ex` to load the bookmark export fixture, run it through `Sanitizer`, and pass the sanitized items (alongside the agent's mounted-state snapshot) across the boundary.
-- [ ] T020 [P] [US2] Add a hostile bookmark fixture at `test/fixtures/hostile_bookmarks.json` for the integration test.
+- [x] T016 [P] [US2] Implement `AgentOS.Sanitizer` in `lib/agent_os/sanitizer.ex` (validate → bound → normalize → drop+log rejects).
+- [x] T017 [P] [US2] Implement the Pydantic input model in `agents/discovery/models.py`.
+- [x] T018 [US2] Modify `agents/discovery/main.py` to validate input via `models.py` before reasoning; exit non-zero with a stderr log on invalid input.
+- [x] T019 [US2] Modify `lib/agent_os/provisioner.ex` to load the bookmark export fixture, run it through `Sanitizer`, and pass the sanitized items (alongside the agent's mounted-state snapshot) across the boundary.
+- [x] T020 [P] [US2] Add a hostile bookmark fixture at `test/fixtures/hostile_bookmarks.json` for the integration test.
 
 **Checkpoint**: US1 + US2 both work independently.
 
@@ -106,18 +106,18 @@ trigger launch the sandboxed run and are recorded.
 
 ### Tests for User Story 3 (write first, must FAIL)
 
-- [ ] T021 [P] [US3] Integration test (tag `:docker`): forced crash (`exit 1`) → `:failed`; forced OOM (exceed `--memory`) → exit `137` surfaced; restart-once-and-alert fires.
-- [ ] T022 [P] [US3] Unit test exit-code classification in `test/agent_os/run_worker_test.exs` (0→ok, 137→oom, other→crash, timeout→timeout).
-- [ ] T023 [P] [US3] Test the manual on-demand path records `trigger: :manual` in `test/agent_os/scheduler_test.exs`.
-- [ ] T024 [P] [US3] Test that the daily timer trigger launches the sandboxed run and records `trigger: :timer` in `test/agent_os/scheduler_test.exs` (FR-007 / SC-005 — closes the timer→container coverage gap).
+- [x] T021 [P] [US3] Integration test (tag `:docker`): forced crash (`exit 1`) → `:failed`; forced OOM (exceed `--memory`) → exit `137` surfaced; restart-once-and-alert fires.
+- [x] T022 [P] [US3] Unit test exit-code classification in `test/agent_os/run_worker_test.exs` (0→ok, 137→oom, other→crash, timeout→timeout).
+- [x] T023 [P] [US3] Test the manual on-demand path records `trigger: :manual` in `test/agent_os/scheduler_test.exs`.
+- [x] T024 [P] [US3] Test that the daily timer trigger launches the sandboxed run and records `trigger: :timer` in `test/agent_os/scheduler_test.exs` (FR-007 / SC-005 — closes the timer→container coverage gap).
 
 ### Implementation for User Story 3
 
-- [ ] T025 [US3] Modify `lib/agent_os/run_worker.ex` to classify the container exit code into outcome + cause and attach it to the Run Record.
-- [ ] T026 [US3] Extend the Run Record in `lib/agent_os/run_log.ex` and `lib/agent_os/inventory.ex` with `exit_code`, `failure_cause`, `items_in`/`items_dropped`, and `trigger` (FR-006).
-- [ ] T027 [US3] Add `AgentOS.Scheduler.run_now(:manual)` in `lib/agent_os/scheduler.ex` for the on-demand run, and ensure the daily timer path tags `trigger: :timer` (FR-010 / FR-007).
-- [ ] T028 [US3] Confirm restart-once-and-alert fires on OOM/crash across the boundary by wiring `lib/agent_os/run_supervisor.ex` / `lib/agent_os/alerter.ex` to the classified failure.
-- [ ] T029 [US3] Add run-log entries for exit cause and sanitizer drop counts (Constitution VI / FR-006).
+- [x] T025 [US3] Modify `lib/agent_os/run_worker.ex` to classify the container exit code into outcome + cause and attach it to the Run Record.
+- [x] T026 [US3] Extend the Run Record in `lib/agent_os/run_log.ex` and `lib/agent_os/inventory.ex` with `exit_code`, `failure_cause`, `items_in`/`items_dropped`, and `trigger` (FR-006).
+- [x] T027 [US3] Add `AgentOS.Scheduler.run_now(:manual)` in `lib/agent_os/scheduler.ex` for the on-demand run, and ensure the daily timer path tags `trigger: :timer` (FR-010 / FR-007).
+- [x] T028 [US3] Confirm restart-once-and-alert fires on OOM/crash across the boundary by wiring `lib/agent_os/run_supervisor.ex` / `lib/agent_os/alerter.ex` to the classified failure.
+- [x] T029 [US3] Add run-log entries for exit cause and sanitizer drop counts (Constitution VI / FR-006).
 
 **Checkpoint**: All three stories independently functional.
 
@@ -125,10 +125,10 @@ trigger launch the sandboxed run and are recorded.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T030 [P] Run `quickstart.md` validation end-to-end (build image, manual run, full `mix test --include docker` green).
-- [ ] T031 [P] Verify `docker ps` is clean after a timeout/crash (no orphaned containers) and the container has no network (`--network none`).
-- [ ] T032 Quality gates: `mix format` + Credo clean (Elixir), `ruff` + `mypy` clean (Python).
-- [ ] T033 [P] Update `data/run_log.md` / inventory docs so failure legibility is demonstrable.
+- [x] T030 [P] Run `quickstart.md` validation end-to-end (build image, manual run, full `mix test --include docker` green).
+- [x] T031 [P] Verify `docker ps` is clean after a timeout/crash (no orphaned containers) and the container has no network (`--network none`).
+- [x] T032 Quality gates: `mix format` + Credo clean (Elixir), `ruff` + `mypy` clean (Python).
+- [x] T033 [P] Update `data/run_log.md` / inventory docs so failure legibility is demonstrable.
 
 ---
 

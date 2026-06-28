@@ -21,7 +21,7 @@ enforcement precedes generation, always.
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Walking Skeleton (v0)** - BEAM substrate runs one hand-written discovery agent end-to-end on a daily timer
-- [ ] **Phase 2: Isolation (v1)** - Containerise the child agent so it is safe against the live web and daily-usable
+- [x] **Phase 2: Isolation (v1)** - Containerise the child agent so it is safe against the live web and daily-usable
 - [ ] **Phase 3: Manifest Enforcement (v2)** - Deterministic gate enforces the manifest from outside the agent; world-B airtight
 - [ ] **Phase 4: Generation MVP (v3)** - OS synthesises novel agents from a stated purpose behind the proven gate
 
@@ -58,9 +58,9 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 02-01: Containerise the child agent; provision into a sandbox across the port boundary
-- [ ] 02-02: Sanitize untrusted web input; safe against injected bookmark/tweet
-- [ ] 02-03: Clean cross-boundary failure semantics (Python crash/OOM → clean BEAM exit)
+- [x] 02-01: Containerise the child agent; provision into a sandbox across the port boundary
+- [x] 02-02: Sanitize untrusted web input; safe against injected bookmark/tweet
+- [x] 02-03: Clean cross-boundary failure semantics (Python crash/OOM → clean BEAM exit)
 
 > **OPEN QUESTION (preserved, do not auto-decide):** v1 (isolation) vs v2
 > (enforcement) ordering. Committed order is isolation-first (PRD story map + plan.md),
@@ -123,6 +123,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Walking Skeleton (v0) | 5/5 | Complete | 2026-06-28 |
-| 2. Isolation (v1) | 0/3 | Not started | - |
+| 2. Isolation (v1) | 3/3 | Complete | 2026-06-28 |
 | 3. Manifest Enforcement (v2) | 0/6 | Not started | - |
 | 4. Generation MVP (v3) | 0/6 | Not started | - |
