@@ -24,7 +24,11 @@ defmodule AgentOS.RunSupervisorTest do
     end)
 
     start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})
-    start_supervised!({StateStore, name: "roster_trust", path: tmp_roster, initial: %{records: []}})
+
+    start_supervised!(
+      {StateStore, name: "roster_trust", path: tmp_roster, initial: %{records: []}}
+    )
+
     start_supervised!(RunSupervisor)
 
     {:ok, roster_path: tmp_roster, log_path: tmp_log}
@@ -36,7 +40,11 @@ defmodule AgentOS.RunSupervisorTest do
     log_path: log_path
   } do
     # Seed the roster store so the agent has input
-    :ok = StateStore.apply_action("roster_trust", {:append, :records, %{"signal" => "high", "text" => "valid news"}})
+    :ok =
+      StateStore.apply_action(
+        "roster_trust",
+        {:append, :records, %{"signal" => "high", "text" => "valid news"}}
+      )
 
     # Run the worker with the real python agent path
     assert :ok =
@@ -50,7 +58,10 @@ defmodule AgentOS.RunSupervisorTest do
     # The effector creates an append_digest action that gets recorded as a digest record at v0
     snapshot = StateStore.snapshot("roster_trust")
     assert length(snapshot.records) == 2
-    assert Enum.any?(snapshot.records, fn r -> Map.has_key?(r, "digest") and r["digest"] =~ "valid news" end)
+
+    assert Enum.any?(snapshot.records, fn r ->
+             Map.has_key?(r, "digest") and r["digest"] =~ "valid news"
+           end)
 
     # Verify run-log entry
     assert File.exists?(log_path)
@@ -75,6 +86,41 @@ defmodule AgentOS.RunSupervisorTest do
     log_content = File.read!(log_path)
     assert log_content =~ "status=error"
     assert log_content =~ "actions=0"
+  end
+
+  test "RunWorker.run_once/1 exit code classification (0, 137, non-zero, timeout)", %{
+    log_path: log_path
+  } do
+    # 1. Test timeout (returns {:error, :timeout})
+    assert {:error, :timeout} =
+             RunWorker.run_once(
+               agent_cmd: "sleep",
+               agent_args: ["10"],
+               timeout_ms: 100,
+               run_log_path: log_path
+             )
+
+    assert File.read!(log_path) =~ "failure_cause=timeout"
+
+    # 2. Test crash (exit 1)
+    assert {:error, {:exit_status, 1}} =
+             RunWorker.run_once(
+               agent_cmd: "bash",
+               agent_args: ["-c", "exit 1"],
+               run_log_path: log_path
+             )
+
+    assert File.read!(log_path) =~ "exit_code=1 failure_cause=crash"
+
+    # 3. Test OOM (exit 137)
+    assert {:error, {:exit_status, 137}} =
+             RunWorker.run_once(
+               agent_cmd: "bash",
+               agent_args: ["-c", "exit 137"],
+               run_log_path: log_path
+             )
+
+    assert File.read!(log_path) =~ "exit_code=137 failure_cause=oom"
   end
 
   test "RunWorker.run_once/1 drops ungranted actions", %{log_path: log_path} do

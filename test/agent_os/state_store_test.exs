@@ -49,7 +49,10 @@ defmodule AgentOS.StateStoreTest do
 
   test "malformed actions are rejected without mutating state", %{tmp1: tmp} do
     start_supervised!({StateStore, name: "test_store_1", path: tmp, initial: %{records: []}})
-    assert {:error, :bad_action} = StateStore.apply_action("test_store_1", {:not_append, :records, %{}})
+
+    assert {:error, :bad_action} =
+             StateStore.apply_action("test_store_1", {:not_append, :records, %{}})
+
     assert {:error, :bad_action} = StateStore.apply_action("test_store_1", :garbage)
     assert %{records: []} = StateStore.snapshot("test_store_1")
   end
@@ -65,7 +68,10 @@ defmodule AgentOS.StateStoreTest do
     assert %{records: [%{"persisted" => true}]} = StateStore.snapshot("test_store_1")
   end
 
-  test "multiple isolated stores can be started and managed concurrently", %{tmp1: tmp1, tmp2: tmp2} do
+  test "multiple isolated stores can be started and managed concurrently", %{
+    tmp1: tmp1,
+    tmp2: tmp2
+  } do
     start_supervised!({StateStore, name: "store_a", path: tmp1, initial: %{records: []}})
     start_supervised!({StateStore, name: "store_b", path: tmp2, initial: %{items: []}})
 

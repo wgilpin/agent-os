@@ -22,7 +22,7 @@ defmodule AgentOS.Alerter do
     # Extract log path from either :path or :run_log_path (used in tests/downstream calls).
     # Keyword.get/2 returns nil if the key is not found.
     path = Keyword.get(opts, :path) || Keyword.get(opts, :run_log_path)
-    
+
     # If a path was explicitly provided, pass it in keyword list format [path: path],
     # otherwise default to empty list which lets RunLog.append default its path.
     append_opts = if path, do: [path: path], else: []

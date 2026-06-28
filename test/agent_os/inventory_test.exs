@@ -20,7 +20,11 @@ defmodule AgentOS.InventoryTest do
 
   test "render/1 returns standing inventory text" do
     # Add a mock digest to RosterStore to check if inventory extracts it
-    :ok = StateStore.apply_action("roster_trust", {:append, :records, %{"digest" => "test digest text"}})
+    :ok =
+      StateStore.apply_action(
+        "roster_trust",
+        {:append, :records, %{"digest" => "test digest text"}}
+      )
 
     report = Inventory.render(manifest_path: "manifests/discovery.md")
 

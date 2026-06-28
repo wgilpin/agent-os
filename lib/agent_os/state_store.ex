@@ -107,10 +107,10 @@ defmodule AgentOS.StateStore do
     # Map.update/4 updates the key in the map. If the key is not present, it inserts [item].
     # Otherwise, it appends the item to the existing list (`list ++ [item]`).
     new_data = Map.update(state.data, list_key, [item], fn list -> list ++ [item] end)
-    
+
     # Persist the updated state to the term-file.
     :ok = persist(state.path, new_data)
-    
+
     # Reply `:ok` to the caller, and update the GenServer's internal state.
     {:reply, :ok, %{state | data: new_data}}
   end
@@ -119,10 +119,10 @@ defmodule AgentOS.StateStore do
   def handle_call({:apply, {:put, key, value}}, _from, state) do
     # Map.put/3 adds or replaces the key with the value.
     new_data = Map.put(state.data, key, value)
-    
+
     # Persist state.
     :ok = persist(state.path, new_data)
-    
+
     # Reply and update state.
     {:reply, :ok, %{state | data: new_data}}
   end
@@ -138,16 +138,16 @@ defmodule AgentOS.StateStore do
   defp persist(path, data) do
     # Ensure directory structure exists.
     path |> Path.dirname() |> File.mkdir_p!()
-    
+
     # Append ".tmp" to the path.
     tmp = path <> ".tmp"
-    
+
     # Serialize the data using Erlang External Term Format, and write it to the tmp file.
     File.write!(tmp, :erlang.term_to_binary(data))
-    
+
     # Atomically rename the tmp file to the target path.
     File.rename!(tmp, path)
-    
+
     # Return :ok.
     :ok
   end

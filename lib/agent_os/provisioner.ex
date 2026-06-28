@@ -15,7 +15,7 @@ defmodule AgentOS.Provisioner do
     # Application.fetch_env!/2 raises an ArgumentError if the key (:agent) is missing
     # in the application scope (:agent_os). It returns a keyword list.
     config = Application.fetch_env!(:agent_os, :agent)
-    
+
     # Keyword.fetch!/2 fetches the value for a given key, raising an error if missing.
     # We pack the values into a map for structured access.
     %{
@@ -33,7 +33,7 @@ defmodule AgentOS.Provisioner do
   @doc """
   Compares the hard-wired config grants (connectors, outputs, spend_cap) against
   the fields declared in manifests/discovery.md. Logs a warning on drift.
-  
+
   ## Returns
     - `:ok` if config matches manifest.
     - `{:drift, list_of_mismatched_atoms}` if discrepancies are found.
@@ -69,6 +69,7 @@ defmodule AgentOS.Provisioner do
         # 3. Compare spend cap.
         # get_in/2 performs a nested map lookup safely using string keys.
         manifest_cap = get_in(manifest, ["spend", "cap"])
+
         mismatched =
           if manifest_cap != config.spend_cap do
             [:spend_cap | mismatched]
@@ -90,8 +91,43 @@ defmodule AgentOS.Provisioner do
 
       {:error, reason} ->
         # Fallback when the manifest file itself couldn't be loaded
-        Logger.warning("manifest drift: could not load manifest #{config.manifest_path}: #{inspect(reason)}")
+        Logger.warning(
+          "manifest drift: could not load manifest #{config.manifest_path}: #{inspect(reason)}"
+        )
+
         {:drift, [:manifest]}
+    end
+  end
+
+  @doc """
+  Loads raw bookmarks from a JSON export path, runs them through the Sanitizer,
+  and returns the tuple `{sanitized_items, dropped_count}`.
+  """
+  @spec load_and_sanitize_bookmarks(binary()) :: {[map()], non_neg_integer()}
+  def load_and_sanitize_bookmarks(path) do
+    if File.exists?(path) do
+      case File.read(path) do
+        {:ok, content} ->
+          case Jason.decode(content) do
+            {:ok, items} when is_list(items) ->
+              AgentOS.Sanitizer.sanitize_list(items)
+
+            {:ok, other} ->
+              Logger.warning("bookmarks JSON at #{path} is not a list: #{inspect(other)}")
+              {[], 0}
+
+            {:error, reason} ->
+              Logger.warning("bookmarks JSON at #{path} failed to parse: #{inspect(reason)}")
+              {[], 0}
+          end
+
+        {:error, reason} ->
+          Logger.warning("failed to read bookmarks file at #{path}: #{inspect(reason)}")
+          {[], 0}
+      end
+    else
+      Logger.warning("bookmarks export file does not exist at #{path}")
+      {[], 0}
     end
   end
 

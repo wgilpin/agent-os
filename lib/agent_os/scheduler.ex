@@ -22,7 +22,7 @@ defmodule AgentOS.Scheduler do
     # Keyword.pop/3 extracts the value of :name from the options list and returns
     # a 2-tuple containing the name and the remaining options without :name.
     {name, opts_without_name} = Keyword.pop(opts, :name, __MODULE__)
-    
+
     # We pass the cleaned options list to GenServer.start_link.
     # [name: name] |> Enum.reject/2 ensures that if `name` is nil, we don't pass name registration.
     GenServer.start_link(
@@ -30,6 +30,16 @@ defmodule AgentOS.Scheduler do
       opts_without_name,
       [name: name] |> Enum.reject(fn {_, v} -> is_nil(v) end)
     )
+  end
+
+  @doc """
+  Triggers a manual run immediately. Passes `trigger: :manual` to the supervisor.
+  """
+  @spec run_now(atom(), keyword()) :: :ok
+  def run_now(:manual, opts \\ []) do
+    merged_opts = Keyword.put(opts, :trigger, :manual)
+    AgentOS.RunSupervisor.start_run(merged_opts)
+    :ok
   end
 
   @doc """
@@ -42,7 +52,7 @@ defmodule AgentOS.Scheduler do
   def ms_until_next(now_dt, hour) when is_integer(hour) and hour >= 0 and hour < 24 do
     # Time.new!/3 creates a Time struct, raising an exception if values are invalid.
     time = Time.new!(hour, 0, 0)
-    
+
     # Construct a DateTime representing today's occurrence.
     # DateTime.to_date/1 extracts the Date struct from the given DateTime.
     {:ok, today_target} = DateTime.new(DateTime.to_date(now_dt), time, now_dt.time_zone)
@@ -122,10 +132,10 @@ defmodule AgentOS.Scheduler do
 
     # Get current UTC time.
     now = DateTime.utc_now()
-    
+
     # Calculate milliseconds until the next scheduled hour.
     ms = ms_until_next(now, state.run_hour)
-    
+
     # Schedule the atom `:fire` to be sent to self (`self()`) after `ms` milliseconds.
     # Returns a reference that can be used to cancel the timer.
     ref = Process.send_after(self(), :fire, ms)

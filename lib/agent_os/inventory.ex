@@ -36,7 +36,7 @@ defmodule AgentOS.Inventory do
       {:ok, manifest} ->
         # Fetch the current state snapshot from the StateStore GenServer named :roster_trust.
         snapshot = AgentOS.StateStore.snapshot("roster_trust")
-        
+
         # Calculate the total number of records recorded in state.
         records_count = length(snapshot.records)
 
@@ -45,13 +45,37 @@ defmodule AgentOS.Inventory do
         # the first argument of the next function.
         last_digest =
           snapshot.records
-          |> Enum.reverse() # Start searching from the most recent records first
-          |> Enum.find_value("none", fn # If no value matches, return the string "none"
+          # Start searching from the most recent records first
+          |> Enum.reverse()
+          # If no value matches, return the string "none"
+          |> Enum.find_value("none", fn
             # Pattern match on map to extract value of "digest" key.
             %{"digest" => text} -> text
             # Ignore other shapes of records.
             _ -> nil
           end)
+
+        # Parse last run details
+        last_run = parse_last_run(Keyword.get(opts, :run_log_path, "data/run_log.md"))
+
+        last_run_details =
+          if last_run.status == "unknown" do
+            "No runs recorded."
+          else
+            cause_detail =
+              if last_run.failure_cause, do: " (cause: #{last_run.failure_cause})", else: ""
+
+            exit_detail =
+              if last_run.exit_code, do: " (exit code: #{last_run.exit_code})", else: ""
+
+            """
+            Last Run Status: #{last_run.status}#{cause_detail}#{exit_detail}
+            Last Run Trigger: #{last_run.trigger}
+            Last Run Actions: #{last_run.actions}
+            Last Run Items In / Dropped: #{last_run.items_in} / #{last_run.items_dropped}
+            """
+            |> String.trim_trailing()
+          end
 
         # Build and return the final report string using multiline heredoc (`"""`).
         # `#{expression}` is used for string interpolation.
@@ -69,11 +93,53 @@ defmodule AgentOS.Inventory do
         LAST RUN STATE:
         Total Records: #{records_count}
         Last Digest: #{last_digest}
+        #{last_run_details}
         """
 
       {:error, reason} ->
         # Return a formatted error message string if manifest loading failed.
         "ERROR: Could not load manifest at #{manifest_path}: #{inspect(reason)}"
+    end
+  end
+
+  defp parse_last_run(run_log_path) do
+    if File.exists?(run_log_path) do
+      File.stream!(run_log_path)
+      |> Enum.to_list()
+      |> Enum.reverse()
+      |> Enum.find(fn line -> String.contains?(line, "status=") end)
+      |> case do
+        nil ->
+          %{status: "unknown"}
+
+        line ->
+          status = extract_field(line, ~r/status=([^\s]+)/)
+          actions = extract_field(line, ~r/actions=([^\s]+)/)
+          trigger = extract_field(line, ~r/trigger=([^\s]+)/)
+          exit_code = extract_field(line, ~r/exit_code=([^\s]+)/)
+          failure_cause = extract_field(line, ~r/failure_cause=([^\s]+)/)
+          items_in = extract_field(line, ~r/items_in=([^\s]+)/)
+          items_dropped = extract_field(line, ~r/items_dropped=([^\s]+)/)
+
+          %{
+            status: status || "unknown",
+            actions: actions || "0",
+            trigger: trigger || "timer",
+            exit_code: exit_code,
+            failure_cause: failure_cause,
+            items_in: items_in || "0",
+            items_dropped: items_dropped || "0"
+          }
+      end
+    else
+      %{status: "unknown"}
+    end
+  end
+
+  defp extract_field(line, regex) do
+    case Regex.run(regex, line) do
+      [_, val] -> val
+      _ -> nil
     end
   end
 end

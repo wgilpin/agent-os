@@ -4,3 +4,8 @@
 - [2026-06-27T23:32:55.458548Z] status=ok actions=1 run complete
 - [2026-06-28T07:00:00.283249Z] status=ok actions=2 run complete
 - [2026-06-28T07:00:00.283444Z] status=ok actions=2 run complete
+- [2026-06-28T14:23:56.743618Z] status=ok actions=1 trigger=manual exit_code=0 items_in=3 items_dropped=1 run complete
+- [2026-06-28T14:25:29.804327Z] status=ok actions=1 trigger=manual exit_code=0 items_in=3 items_dropped=1 run complete
+- [2026-06-28T14:26:20.477650Z] status=ok actions=1 trigger=manual exit_code=0 items_in=0 items_dropped=0 run complete
+- [2026-06-28T14:27:02.843620Z] status=ok actions=1 trigger=manual exit_code=0 items_in=2 items_dropped=0 run complete
+- [2026-06-28T14:27:20.752887Z] status=ok actions=1 trigger=manual exit_code=0 items_in=2 items_dropped=0 run complete

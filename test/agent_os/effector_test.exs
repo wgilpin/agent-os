@@ -6,7 +6,9 @@ defmodule AgentOS.EffectorTest do
   alias AgentOS.StateStore
 
   setup do
-    tmp = Path.join(System.tmp_dir!(), "roster_effector_#{System.unique_integer([:positive])}.term")
+    tmp =
+      Path.join(System.tmp_dir!(), "roster_effector_#{System.unique_integer([:positive])}.term")
+
     on_exit(fn -> File.rm(tmp) end)
 
     # Start Registry and StateStore

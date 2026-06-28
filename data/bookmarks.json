@@ -1,0 +1,14 @@
+[
+  {
+    "id": "valid_1",
+    "author": "jane_doe",
+    "text": "The Agent OS project now compiles completely and has sandboxed python discovery agents running in docker none networks!",
+    "urls": ["https://github.com/google/agent_os"]
+  },
+  {
+    "id": "valid_2",
+    "author": "john_developer",
+    "text": "DeepMind published a great new paper on agentic code generation and safety boundaries.",
+    "urls": ["https://deepmind.google/research"]
+  }
+]

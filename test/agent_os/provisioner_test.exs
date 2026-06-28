@@ -21,8 +21,8 @@ defmodule AgentOS.ProvisionerTest do
     config = Provisioner.agent_config()
     assert is_map(config)
     assert config.manifest_path == "manifests/discovery.md"
-    assert config.agent_cmd == "uv"
-    assert config.agent_args == ["run", "python", "agents/discovery/main.py"]
+    assert config.agent_cmd == "docker"
+    assert config.agent_args == []
     assert config.tz == "Etc/UTC"
     assert config.run_hour == 7
     assert config.connectors == ["record_signal"]

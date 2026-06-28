@@ -48,12 +48,12 @@ defmodule AgentOS.RunSupervisor do
   def handle_cast({:start_run, opts}, state) do
     # Merge options passed in start_run/1 with default options from server startup state.
     merged_opts = Keyword.merge(state.default_opts, opts)
-    
+
     # Executing the run pipeline can be slow. To avoid blocking the GenServer loop
     # (which would prevent it from processing other casts), we spawn a separate,
     # concurrent process using spawn/1 to handle the retry loop.
     spawn(fn -> run_loop(merged_opts, 0) end)
-    
+
     # Return {:noreply, state} signifying that we don't return a value to the caller.
     {:noreply, state}
   end
@@ -76,7 +76,10 @@ defmodule AgentOS.RunSupervisor do
       {:error, reason} ->
         # If we have attempted less than twice (attempts start at 0, retry runs at attempts = 1):
         if attempts < 1 do
-          Logger.warning("RunWorker failed (attempt #{attempts + 1}/2), retrying once... Reason: #{inspect(reason)}")
+          Logger.warning(
+            "RunWorker failed (attempt #{attempts + 1}/2), retrying once... Reason: #{inspect(reason)}"
+          )
+
           # Recursively call run_loop with attempts incremented.
           run_loop(opts, attempts + 1)
         else

@@ -20,7 +20,7 @@ defmodule AgentOS.PortRunner do
   def run(input_json, cmd, args, opts \\ []) do
     # Extract the timeout, defaulting to 30 seconds.
     timeout_ms = Keyword.get(opts, :timeout_ms, 30_000)
-    
+
     # Resolve the path to the bash wrapper script in the build's priv/ directory.
     wrapper = Path.join(:code.priv_dir(:agent_os), "port_wrapper.sh")
 

@@ -48,3 +48,38 @@ def test_subprocess_execution_happy_path():
     assert len(output["actions"]) == 1
     assert output["actions"][0]["type"] == "append_digest"
     assert "alice" in output["actions"][0]["payload"]["text"]
+
+
+from pydantic import ValidationError
+import pytest
+from agents.discovery.models import BookmarkItem, DiscoveryInput
+
+def test_bookmark_item_validation():
+    # Valid item
+    item = BookmarkItem(id="1", author="a", text="hello")
+    assert item.id == "1"
+
+    # Too long id
+    with pytest.raises(ValidationError):
+        BookmarkItem(id="a" * 257, author="a", text="hello")
+
+    # Too long author
+    with pytest.raises(ValidationError):
+        BookmarkItem(id="1", author="a" * 257, text="hello")
+
+    # Too long text
+    with pytest.raises(ValidationError):
+        BookmarkItem(id="1", author="a", text="a" * 10001)
+
+def test_discovery_input_validation():
+    # Valid input
+    payload = {
+        "state": {"records": []},
+        "items": [{"id": "1", "author": "a", "text": "hello"}]
+    }
+    DiscoveryInput.model_validate(payload)
+
+    # Missing state
+    with pytest.raises(ValidationError):
+        DiscoveryInput.model_validate({"items": []})
+

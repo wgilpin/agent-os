@@ -6,7 +6,10 @@ defmodule AgentOS.PortRunnerTest do
   @tag :integration
   test "happy path runs python discovery agent" do
     input = ~s({"roster": []})
-    assert {:ok, output} = PortRunner.run(input, ".venv/bin/python", ["agents/discovery/main.py"], [])
+
+    assert {:ok, output} =
+             PortRunner.run(input, ".venv/bin/python", ["agents/discovery/main.py"], [])
+
     assert output =~ "actions"
   end
 

@@ -20,14 +20,14 @@ defmodule AgentOS.Application do
       if Application.get_env(:agent_os, :autostart, true) do
         [
           {Registry, keys: :unique, name: AgentOS.StateStoreRegistry},
-          {AgentOS.StateStore, 
-            name: "roster_trust", 
-            path: Application.get_env(:agent_os, :roster_path, "data/roster.term"), 
-            initial: %{records: []}},
-          
+          {AgentOS.StateStore,
+           name: "roster_trust",
+           path: Application.get_env(:agent_os, :roster_path, "data/roster.term"),
+           initial: %{records: []}},
+
           # RunSupervisor handles starting and retrying worker execution tasks.
           AgentOS.RunSupervisor,
-          
+
           # Scheduler is the GenServer running the daily 07:00 self-rescheduling timer loop.
           {AgentOS.Scheduler, []}
         ]
@@ -39,7 +39,7 @@ defmodule AgentOS.Application do
     # Configure the supervisor strategy.
     # :one_for_one means if a child process terminates/crashes, only that child is restarted.
     opts = [strategy: :one_for_one, name: AgentOS.Supervisor]
-    
+
     # Start the supervisor with the child specifications.
     Supervisor.start_link(children, opts)
   end
