@@ -56,11 +56,15 @@ The system always presents a standing inventory of what exists and a legible tra
 what it did, read WITHOUT asking the agent. If only one principle survives, this is it.
 
 ### IX. The Substrate Owns State & Lifecycle
-The substrate owns all persistent state and all scheduling. Single writer per mutable
-store (roster/trust = a single-writer GenServer mutated only via messages; the
-append-only digest = git-backed markdown; no external database). Agents are
-invocation-scoped pure functions that run once and die — "looping" is a trigger
-re-invoking them, never a long-lived process.
+The substrate owns all persistent state and all scheduling: a single writer per mutable
+store, mutated only via messages; append-only logs are git-backed markdown; no external
+database. Agents are invocation-scoped pure functions that run once and die — "looping" is
+a trigger re-invoking them, never a long-lived process. The substrate is
+**agent-agnostic**: an agent's domain vocabulary (e.g. one agent's "roster" or "digest")
+lives only in its manifest and workload — never hard-coded in kernel code. Store names,
+mount paths, and output action types come from the manifest, not from substrate
+identifiers. The literal name of any single agent's concept appearing in `lib/agent_os/`
+is a leak.
 
 ### X. No Ambient Authority
 An agent's manifest grants are its entire power — capability-based in the seL4 sense.
@@ -105,5 +109,5 @@ and a version bump. Any complexity or deviation must be justified against Princi
 Specs, plans, and reviews verify compliance with these principles; an unjustified
 violation blocks the change.
 
-**Version**: 1.1.0 | **Ratified**: 2026-06-28 | **Last Amended**: 2026-06-28
+**Version**: 1.2.0 | **Ratified**: 2026-06-28 | **Last Amended**: 2026-06-28
 ```
