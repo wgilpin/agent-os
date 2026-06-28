@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mix compile*)",
+      "Bash(mix test*)",
+      "Bash(mix format*)",
+      "Bash(mix deps.get*)",
+      "Bash(mix deps.compile*)",
+      "Bash(mix run*)",
+      "Bash(mix new*)",
+      "Bash(uv run pytest*)",
+      "Bash(uv sync*)"
+    ]
+  }
+}
