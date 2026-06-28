@@ -12,6 +12,8 @@ agent_os-*.tar
 # Mutable substrate state (run_log.md stays tracked — it's the legible run trace)
 /data/roster.term
 /data/roster.term.tmp
+/data/spend_ledger.term
+/data/spend_ledger.term.tmp
 
 # Python-generated files
 __pycache__/
