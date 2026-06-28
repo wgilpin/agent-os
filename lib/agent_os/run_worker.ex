@@ -12,7 +12,6 @@ defmodule AgentOS.RunWorker do
   alias AgentOS.Manifest
   alias AgentOS.StateStore
   alias AgentOS.PortRunner
-  alias AgentOS.OutputCheck
   alias AgentOS.Effector
   alias AgentOS.RunLog
 
@@ -153,32 +152,97 @@ defmodule AgentOS.RunWorker do
 
          # 4. Decode output actions JSON.
          # Jason.decode!/1 parses the string into an Elixir map.
-         %{"actions" => actions} <- Jason.decode!(stdout),
+         %{"actions" => actions} <- Jason.decode!(stdout) do
+      # --- Gate & Effector Execution Phase ---
+      spend_ledger = StateStore.snapshot("spend_ledger")
+      agent_name = Path.basename(manifest_path, ".md")
+      agent_entry = Map.get(spend_ledger, agent_name, %{spent: 0, window_start: DateTime.utc_now()})
+      spent = Map.get(agent_entry, :spent, 0)
+      registry = AgentOS.Connector.registry()
 
-         # 5. Filter and validate actions against the loaded manifest rules.
-         {:ok, accepted} <- OutputCheck.validate(actions, manifest) do
-      # --- Happy Path: All matches succeeded ---
-      # Execute all accepted actions sequentially.
-      Effector.act_all(accepted)
+      {approved, parked, rejected, breached} =
+        AgentOS.Gate.partition_batch(actions, manifest, registry, %{spent: spent})
 
       items_in = length(items) + dropped_count
 
-      # Append a success trace to the run log.
-      RunLog.append(
-        %{
-          status: :ok,
-          actions: length(accepted),
-          trigger: trigger,
-          exit_code: 0,
-          items_in: items_in,
-          items_dropped: dropped_count,
-          note: "run complete"
-        },
-        path: run_log_path
-      )
+      cond do
+        # 1. Breach check
+        breached != [] ->
+          RunLog.append(
+            %{
+              status: :killed,
+              actions: 0,
+              trigger: trigger,
+              exit_code: 0,
+              failure_cause: :spend_breach,
+              items_in: items_in,
+              items_dropped: dropped_count + length(actions),
+              approved_count: 0,
+              rejected_count: length(rejected),
+              parked_count: length(parked),
+              breached_count: length(breached),
+              gate_reasons: [:spend_breach],
+              note: "killed: :spend_breach"
+            },
+            path: run_log_path
+          )
 
-      # Return success atom.
-      :ok
+          :ok
+
+        true ->
+          # Execute approved actions
+          Effector.act_all(approved)
+
+          # Increment spend ledger for executed actions
+          total_approved_cost =
+            Enum.reduce(approved, 0, fn %{action: action}, acc ->
+              acc + get_cost(action.type, registry)
+            end)
+
+          if total_approved_cost > 0 do
+            new_spent = spent + total_approved_cost
+            updated_entry = Map.put(agent_entry, :spent, new_spent)
+            StateStore.apply_action("spend_ledger", {:put, agent_name, updated_entry})
+          end
+
+          # If there are parked actions (US5), we add them to pending approvals state store
+          if parked != [] do
+            pending_store = StateStore.snapshot("pending_approvals")
+            approvals = Map.get(pending_store, :approvals, %{})
+
+            # For each parked action, generate a unique ref and store it.
+            # Reference: PendApproval {ref, action, grant}
+            updated_approvals =
+              Enum.reduce(parked, approvals, fn %{action: act, grant: grt}, acc ->
+                ref = "ref_#{System.unique_integer([:positive])}"
+                Map.put(acc, ref, %{ref: ref, action: act, grant: grt})
+              end)
+
+            StateStore.apply_action("pending_approvals", {:put, :approvals, updated_approvals})
+          end
+
+          reasons = Enum.map(rejected, fn {_raw, reason} -> reason end) |> Enum.uniq()
+
+          RunLog.append(
+            %{
+              status: :ok,
+              actions: length(approved),
+              trigger: trigger,
+              exit_code: 0,
+              items_in: items_in,
+              items_dropped: dropped_count + length(rejected) + length(parked),
+              approved_count: length(approved),
+              rejected_count: length(rejected),
+              parked_count: length(parked),
+              breached_count: 0,
+              gate_reasons: reasons,
+              note: "run complete"
+            },
+            path: run_log_path
+          )
+
+          :ok
+      end
     else
       # --- Error Path: One of the matches failed ---
       # Catch standard error tuples.
@@ -230,6 +294,13 @@ defmodule AgentOS.RunWorker do
         )
 
         {:error, other}
+    end
+  end
+
+  defp get_cost(type, registry) do
+    case Map.get(registry, type) do
+      nil -> 0
+      conn -> Map.get(conn, :cost, 0)
     end
   end
 end

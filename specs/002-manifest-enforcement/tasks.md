@@ -27,9 +27,9 @@ Single project, BEAM control plane (`lib/agent_os/`, `test/agent_os/`) + Python 
 **Purpose**: Wire the new substrate-owned state mounts and config so later phases have somewhere
 to persist spend and parked approvals.
 
-- [ ] T001 Add `spend_ledger` and `pending_approvals` StateStore mounts to the supervision tree in `lib/agent_os/application.ex` (single-writer per mount, isolated term-files), mirroring the existing `roster_trust` mount. Model `pending_approvals` data as a map keyed by `ref` (`%{ref => entry}`) stored under one key, so add/clear are whole-map `{:put, ...}` writes — no new StateStore delete op required (resolves the missing-delete gap)
-- [ ] T002 [P] Add mount paths + spend defaults (`window: daily`, `on_breach: kill`) and the `:test` autostart=false handling for the new mounts in `config/config.exs`
-- [ ] T003 [P] In `test/test_helper.exs`, add per-test startup helpers for the `spend_ledger` and `pending_approvals` mounts against isolated temp term-files (never live state)
+- [x] T001 Add `spend_ledger` and `pending_approvals` StateStore mounts to the supervision tree in `lib/agent_os/application.ex` (single-writer per mount, isolated term-files), mirroring the existing `roster_trust` mount. Model `pending_approvals` data as a map keyed by `ref` (`%{ref => entry}`) stored under one key, so add/clear are whole-map `{:put, ...}` writes — no new StateStore delete op required (resolves the missing-delete gap)
+- [x] T002 [P] Add mount paths + spend defaults (`window: daily`, `on_breach: kill`) and the `:test` autostart=false handling for the new mounts in `config/config.exs`
+- [x] T003 [P] In `test/test_helper.exs`, add per-test startup helpers for the `spend_ledger` and `pending_approvals` mounts against isolated temp term-files (never live state)
 
 **Checkpoint**: App boots with the two new mounts; tests can start them in isolation.
 
@@ -41,14 +41,14 @@ to persist spend and parked approvals.
 (intrinsic danger). Everything downstream — gate, credential proxy, spend, triggers — depends on
 these. NO user story can proceed until this phase is complete.
 
-- [ ] T004 [P] Write `AgentOS.Manifest.Grant` struct (`connector`, `recipients`, `methods`; typespec, `@moduledoc`) in `lib/agent_os/manifest/grant.ex` per data-model.md
-- [ ] T005 [P] Write `AgentOS.Manifest.Spend` struct (`cap`, `window`, `on_breach`; typespec, `@moduledoc`) in `lib/agent_os/manifest/spend.ex` per data-model.md
-- [ ] T006 [P] Write manifest-parser tests in `test/agent_os/manifest_test.exs`: parse `grants[]` → `Grant` structs, `spend{cap,window,on_breach}` → `Spend`, `triggers` incl. `event`/`message`; malformed/missing grants or `spend`, or a `connector` absent from the registry → **loud failure** (FR-016)
-- [ ] T007 Extend `lib/agent_os/manifest.ex` to parse frontmatter into `Grant`/`Spend` structs + typed triggers and fail loudly on malformed input (make T006 green); keep `Manifest.load/1` mechanism
-- [ ] T008 [P] Write connector-registry tests in `test/agent_os/connector_test.exs`: registry exposes `%{mutating?, requires_approval?, credential, cost}` per connector; generic names; lookup of an unknown connector errors (per contracts/connector-registry.md)
-- [ ] T009 Implement `AgentOS.Connector` behaviour + capability registry in `lib/agent_os/connector.ex`: entries `kv_append` (mutating, no approval, no credential, cost 1) and `external_send` (mutating, requires_approval, credential `:outbound_token`, cost 2, backed by a **mock sink**); generic names only (make T008 green)
-- [ ] T010 Update `manifests/discovery.md` to the v2 schema: `grants:` as `{connector, recipients, methods}` (kv_append; external_send→owner-inbox), `spend:{cap,window,on_breach}`, and a `message` trigger (per contracts/manifest-schema.md)
-- [ ] T011 Update the hard-wired `config :agent` grant shape in `config/config.exs` and rewrite `Provisioner.check_drift/0` in `lib/agent_os/provisioner.ex` to compare the new `{connector, recipients, methods}` + `spend{cap,window,on_breach}` shape; add a drift test to `test/agent_os/provisioner_test.exs`
+- [x] T004 [P] Write `AgentOS.Manifest.Grant` struct (`connector`, `recipients`, `methods`; typespec, `@moduledoc`) in `lib/agent_os/manifest/grant.ex` per data-model.md
+- [x] T005 [P] Write `AgentOS.Manifest.Spend` struct (`cap`, `window`, `on_breach`; typespec, `@moduledoc`) in `lib/agent_os/manifest/spend.ex` per data-model.md
+- [x] T006 [P] Write manifest-parser tests in `test/agent_os/manifest_test.exs`: parse `grants[]` → `Grant` structs, `spend{cap,window,on_breach}` → `Spend`, `triggers` incl. `event`/`message`; malformed/missing grants or `spend`, or a `connector` absent from the registry → **loud failure** (FR-016)
+- [x] T007 Extend `lib/agent_os/manifest.ex` to parse frontmatter into `Grant`/`Spend` structs + typed triggers and fail loudly on malformed input (make T006 green); keep `Manifest.load/1` mechanism
+- [x] T008 [P] Write connector-registry tests in `test/agent_os/connector_test.exs`: registry exposes `%{mutating?, requires_approval?, credential, cost}` per connector; generic names; lookup of an unknown connector errors (per contracts/connector-registry.md)
+- [x] T009 Implement `AgentOS.Connector` behaviour + capability registry in `lib/agent_os/connector.ex`: entries `kv_append` (mutating, no approval, no credential, cost 1) and `external_send` (mutating, requires_approval, credential `:outbound_token`, cost 2, backed by a **mock sink**); generic names only (make T008 green)
+- [x] T010 Update `manifests/discovery.md` to the v2 schema: `grants:` as `{connector, recipients, methods}` (kv_append; external_send→owner-inbox), `spend:{cap,window,on_breach}`, and a `message` trigger (per contracts/manifest-schema.md)
+- [x] T011 Update the hard-wired `config :agent` grant shape in `config/config.exs` and rewrite `Provisioner.check_drift/0` in `lib/agent_os/provisioner.ex` to compare the new `{connector, recipients, methods}` + `spend{cap,window,on_breach}` shape; add a drift test to `test/agent_os/provisioner_test.exs`
 
 **Checkpoint**: Manifest parses into typed structs; registry classifies connectors; provisioning
 loads the enforced manifest and fails loud on malformed. Foundational complete.
@@ -65,15 +65,15 @@ executes (default-deny).
 wrong method, ungranted connector); assert the in-scope one reaches the effector and each
 out-of-scope one is rejected with a logged reason — deterministic stub, no live model.
 
-- [ ] T012 [P] [US1] Write gate tests in `test/agent_os/gate_test.exs` covering the full decision order (shape → grant match → recipient → method → spend → approval → approve), each `:reject` reason, `:breach`, `:needs_approval`, default-deny, and "scope from grant / danger from registry"; the gate consumes a typed `AgentOS.ProposedAction` (per contracts/gate.md)
-- [ ] T012a [P] [US1] Write `AgentOS.ProposedAction` struct (`type`, `recipient`, `method`, `payload`; typespec, `@moduledoc`) in `lib/agent_os/proposed_action.ex`, with a `from_map/1` that validates the decoded agent output into the struct (untrusted input → typed, Principle V)
-- [ ] T013 [US1] Implement `AgentOS.Gate.evaluate/4` (`%ProposedAction{}, manifest, registry, spend_ledger`) returning `{:approve,grant}|{:needs_approval,grant}|{:reject,reason}|{:breach,:spend}` with loud logging on every reject/breach (make T012 green) in `lib/agent_os/gate.ex`
-- [ ] T014 [US1] Add a list-level partition helper to `lib/agent_os/gate.ex` that splits a batch of proposed actions into approved / parked / rejected / breached, preserving order
-- [ ] T015 [US1] Refactor `lib/agent_os/effector.ex` to dispatch by the grant's connector via the registry (remove the hard-coded `"record_signal"`/`"append_digest"` clauses — Principle IX de-leak); execute only gate-approved actions
-- [ ] T016 [US1] Update `test/agent_os/effector_test.exs` to assert only gate-approved actions execute and dispatch goes through the registry (replace the old type-membership expectations)
-- [ ] T017 [US1] Wire `Gate` into `lib/agent_os/run_worker.ex` in place of the bare `OutputCheck.validate` call: decode agent output and build typed `AgentOS.ProposedAction` structs via `from_map/1` (T012a), load registry, snapshot spend ledger, evaluate batch, act on approvals; fold/retire `lib/agent_os/output_check.ex` shape-check into the gate
-- [ ] T018 [US1] Update `agents/discovery/main.py` so the stub emits actions typed by **connector** (`kv_append`, optional `external_send`) with `recipient`/`method` fields per the published action schema in `contracts/boundary.md` (the schema IS that contract — no separate artifact); keep domain vocabulary (digest/roster) in the payload only
-- [ ] T019 [P] [US1] Extend the run-log schema/append in `lib/agent_os/run_log.ex` to record gate decisions (approved/rejected count + reasons) for legibility (Principle VIII)
+- [x] T012 [P] [US1] Write gate tests in `test/agent_os/gate_test.exs` covering the full decision order (shape → grant match → recipient → method → spend → approval → approve), each `:reject` reason, `:breach`, `:needs_approval`, default-deny, and "scope from grant / danger from registry"; the gate consumes a typed `AgentOS.ProposedAction` (per contracts/gate.md)
+- [x] T012a [P] [US1] Write `AgentOS.ProposedAction` struct (`type`, `recipient`, `method`, `payload`; typespec, `@moduledoc`) in `lib/agent_os/proposed_action.ex`, with a `from_map/1` that validates the decoded agent output into the struct (untrusted input → typed, Principle V)
+- [x] T013 [US1] Implement `AgentOS.Gate.evaluate/4` (`%ProposedAction{}, manifest, registry, spend_ledger`) returning `{:approve,grant}|{:needs_approval,grant}|{:reject,reason}|{:breach,:spend}` with loud logging on every reject/breach (make T012 green) in `lib/agent_os/gate.ex`
+- [x] T014 [US1] Add a list-level partition helper to `lib/agent_os/gate.ex` that splits a batch of proposed actions into approved / parked / rejected / breached, preserving order
+- [x] T015 [US1] Refactor `lib/agent_os/effector.ex` to dispatch by the grant's connector via the registry (remove the hard-coded `"record_signal"`/`"append_digest"` clauses — Principle IX de-leak); execute only gate-approved actions
+- [x] T016 [US1] Update `test/agent_os/effector_test.exs` to assert only gate-approved actions execute and dispatch goes through the registry (replace the old type-membership expectations)
+- [x] T017 [US1] Wire `Gate` into `lib/agent_os/run_worker.ex` in place of the bare `OutputCheck.validate` call: decode agent output and build typed `AgentOS.ProposedAction` structs via `from_map/1` (T012a), load registry, snapshot spend ledger, evaluate batch, act on approvals; fold/retire `lib/agent_os/output_check.ex` shape-check into the gate
+- [x] T018 [US1] Update `agents/discovery/main.py` so the stub emits actions typed by **connector** (`kv_append`, optional `external_send`) with `recipient`/`method` fields per the published action schema in `contracts/boundary.md` (the schema IS that contract — no separate artifact); keep domain vocabulary (digest/roster) in the payload only
+- [x] T019 [P] [US1] Extend the run-log schema/append in `lib/agent_os/run_log.ex` to record gate decisions (approved/rejected count + reasons) for legibility (Principle VIII)
 
 **Checkpoint**: US1 independently testable — the gate enforces the envelope end-to-end; out-of-scope
 actions never reach the effector. **This is the MVP.**

@@ -20,11 +20,7 @@ defmodule AgentOS.IsolationTest do
       File.rm(tmp_roster)
     end)
 
-    start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})
-
-    start_supervised!(
-      {AgentOS.StateStore, name: "roster_trust", path: tmp_roster, initial: %{records: []}}
-    )
+    AgentOS.TestHelper.start_mounts!()
 
     {:ok, cidfile: cidfile}
   end

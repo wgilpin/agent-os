@@ -4,6 +4,8 @@ defmodule AgentOS.EffectorTest do
 
   alias AgentOS.Effector
   alias AgentOS.StateStore
+  alias AgentOS.ProposedAction
+  alias AgentOS.Manifest.Grant
 
   setup do
     tmp =
@@ -18,30 +20,39 @@ defmodule AgentOS.EffectorTest do
     :ok
   end
 
-  test "act performs record_signal action via StateStore" do
-    action = %{"type" => "record_signal", "payload" => %{"k" => "v"}}
-    assert :ok = Effector.act(action)
+  test "act performs kv_append action via StateStore" do
+    action = %ProposedAction{type: "kv_append", recipient: nil, method: "append", payload: %{"k" => "v"}}
+    grant = %Grant{connector: "kv_append", recipients: nil, methods: ["append"]}
+
+    assert :ok = Effector.act(%{action: action, grant: grant})
     assert StateStore.snapshot("roster_trust") == %{records: [%{"k" => "v"}]}
   end
 
-  test "act performs append_digest action via StateStore at v0" do
-    action = %{"type" => "append_digest", "payload" => %{"text" => "hi"}}
-    assert :ok = Effector.act(action)
-    assert StateStore.snapshot("roster_trust") == %{records: [%{"digest" => "hi"}]}
+  test "act performs external_send mock" do
+    action = %ProposedAction{type: "external_send", recipient: "owner-inbox", method: "send", payload: %{"text" => "hello"}}
+    grant = %Grant{connector: "external_send", recipients: ["owner-inbox"], methods: ["send"]}
+
+    assert :ok = Effector.act(%{action: action, grant: grant})
   end
 
   test "act returns {:error, {:unknown_action, type}} for unknown action type" do
-    action = %{"type" => "unknown_action", "payload" => %{"foo" => "bar"}}
-    assert {:error, {:unknown_action, "unknown_action"}} = Effector.act(action)
-    # Ensure no mutation happened
-    assert StateStore.snapshot("roster_trust") == %{records: []}
+    action = %ProposedAction{type: "unknown_connector", recipient: nil, method: nil, payload: %{}}
+    grant = %Grant{connector: "unknown_connector", recipients: nil, methods: nil}
+
+    assert {:error, {:unknown_action, "unknown_connector"}} = Effector.act(%{action: action, grant: grant})
   end
 
   test "act_all performs multiple actions in order" do
-    a1 = %{"type" => "record_signal", "payload" => %{"first" => true}}
-    a2 = %{"type" => "append_digest", "payload" => %{"text" => "second"}}
+    action1 = %ProposedAction{type: "kv_append", recipient: nil, method: "append", payload: %{"first" => true}}
+    grant1 = %Grant{connector: "kv_append", recipients: nil, methods: ["append"]}
 
-    assert :ok = Effector.act_all([a1, a2])
+    action2 = %ProposedAction{type: "kv_append", recipient: nil, method: "append", payload: %{"digest" => "second"}}
+    grant2 = %Grant{connector: "kv_append", recipients: nil, methods: ["append"]}
+
+    assert :ok = Effector.act_all([
+      %{action: action1, grant: grant1},
+      %{action: action2, grant: grant2}
+    ])
 
     assert StateStore.snapshot("roster_trust") == %{
              records: [

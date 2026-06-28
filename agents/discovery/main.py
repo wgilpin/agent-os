@@ -17,6 +17,8 @@ from agents.discovery.models import DiscoveryInput
 
 class Action(BaseModel):
     type: str
+    recipient: str | None = None
+    method: str | None = None
     payload: dict
 
 
@@ -61,7 +63,7 @@ def build_actions(input_data) -> list[Action]:
 
     if not items:
         actions.append(
-            Action(type="append_digest", payload={"text": "no input"})
+            Action(type="kv_append", method="append", payload={"digest": "no input"})
         )
         return actions
 
@@ -77,12 +79,20 @@ def build_actions(input_data) -> list[Action]:
         lower_text = text.lower()
         if any(w in lower_text for w in ["high", "valid", "signal", "breakthrough", "plain string", "alice"]):
             actions.append(
-                Action(type="append_digest", payload={"text": f"high-signal: {text}"})
+                Action(
+                    type="kv_append",
+                    method="append",
+                    payload={"digest": f"high-signal: {text}"}
+                )
             )
 
     if not actions:
         actions.append(
-            Action(type="append_digest", payload={"text": "no high-signal input"})
+            Action(
+                type="kv_append",
+                method="append",
+                payload={"digest": "no high-signal input"}
+            )
         )
 
     return actions

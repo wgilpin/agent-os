@@ -5,7 +5,10 @@ import Config
 config :agent_os,
   manifest_path: "manifests/discovery.md",
   roster_path: "data/roster.term",
+  spend_ledger_path: "data/spend_ledger.term",
+  pending_approvals_path: "data/pending_approvals.term",
   bookmarks_path: "data/bookmarks.json",
+  spend_defaults: %{window: :daily, on_breach: :kill},
   autostart: true
 
 # Hard-wired agent configuration (manifest path, command, timezone, schedule, and capabilities)
@@ -15,9 +18,11 @@ config :agent_os, :agent,
   agent_args: [],
   tz: "Etc/UTC",
   run_hour: 7,
-  connectors: ["record_signal"],
-  outputs: ["append_digest"],
-  spend_cap: 5
+  grants: [
+    %{connector: "kv_append", recipients: nil, methods: ["append"]},
+    %{connector: "external_send", recipients: ["owner-inbox"], methods: ["send"]}
+  ],
+  spend: %{cap: 5, window: :daily, on_breach: :kill}
 
 # In tests, the supervision tree does not auto-start the singleton state process — each
 # test starts its own StateStore against an isolated temp term-file (never live state).

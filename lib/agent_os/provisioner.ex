@@ -24,14 +24,13 @@ defmodule AgentOS.Provisioner do
       agent_args: Keyword.fetch!(config, :agent_args),
       tz: Keyword.fetch!(config, :tz),
       run_hour: Keyword.fetch!(config, :run_hour),
-      connectors: Keyword.fetch!(config, :connectors),
-      outputs: Keyword.fetch!(config, :outputs),
-      spend_cap: Keyword.fetch!(config, :spend_cap)
+      grants: Keyword.fetch!(config, :grants),
+      spend: Keyword.fetch!(config, :spend)
     }
   end
 
   @doc """
-  Compares the hard-wired config grants (connectors, outputs, spend_cap) against
+  Compares the hard-wired config grants (grants, spend) against
   the fields declared in manifests/discovery.md. Logs a warning on drift.
 
   ## Returns
@@ -49,30 +48,29 @@ defmodule AgentOS.Provisioner do
         # Initialize an empty list to accumulate mismatches
         mismatched = []
 
-        # 1. Compare connectors list.
-        # `[:connectors | mismatched]` prepends `:connectors` to the list (cons cell).
+        # 1. Compare grants list.
+        manifest_grants =
+          Enum.map(manifest.grants, fn g ->
+            %{connector: g.connector, recipients: g.recipients, methods: g.methods}
+          end)
+
         mismatched =
-          if manifest["connectors"] != config.connectors do
-            [:connectors | mismatched]
+          if manifest_grants != config.grants do
+            [:grants | mismatched]
           else
             mismatched
           end
 
-        # 2. Compare outputs list.
-        mismatched =
-          if manifest["outputs"] != config.outputs do
-            [:outputs | mismatched]
-          else
-            mismatched
-          end
-
-        # 3. Compare spend cap.
-        # get_in/2 performs a nested map lookup safely using string keys.
-        manifest_cap = get_in(manifest, ["spend", "cap"])
+        # 2. Compare spend.
+        manifest_spend = %{
+          cap: manifest.spend.cap,
+          window: manifest.spend.window,
+          on_breach: manifest.spend.on_breach
+        }
 
         mismatched =
-          if manifest_cap != config.spend_cap do
-            [:spend_cap | mismatched]
+          if manifest_spend != config.spend do
+            [:spend | mismatched]
           else
             mismatched
           end

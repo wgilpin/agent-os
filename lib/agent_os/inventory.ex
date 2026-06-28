@@ -82,13 +82,12 @@ defmodule AgentOS.Inventory do
         """
         Agent OS Standing Inventory
         ===========================
-        PURPOSE: #{manifest["purpose"]}
-        TRIGGERS: #{inspect(manifest["triggers"])}
-        CONNECTORS: #{inspect(manifest["connectors"])}
-        MOUNTS: #{inspect(manifest["mounts"])}
-        OUTPUTS: #{inspect(manifest["outputs"])}
-        SPEND CAP: #{get_in(manifest, ["spend", "cap"])}
-        OWNER/SUPERVISION: #{manifest["owner"]} / #{manifest["supervision"]}
+        PURPOSE: #{manifest.purpose}
+        TRIGGERS: #{inspect(manifest.triggers)}
+        GRANTS: #{inspect(manifest.grants)}
+        MOUNTS: #{inspect(manifest.mounts)}
+        SPEND CAP: #{manifest.spend.cap}
+        OWNER/SUPERVISION: #{manifest.owner} / #{manifest.supervision}
 
         LAST RUN STATE:
         Total Records: #{records_count}

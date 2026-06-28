@@ -50,14 +50,7 @@ defmodule AgentOS.SchedulerTest do
     log_path = Path.join(System.tmp_dir!(), "manual_scheduler_test.md")
     on_exit(fn -> File.rm(log_path) end)
 
-    start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})
-
-    start_supervised!(
-      {AgentOS.StateStore,
-       name: "roster_trust",
-       path: Path.join(System.tmp_dir!(), "manual_roster.term"),
-       initial: %{records: []}}
-    )
+    AgentOS.TestHelper.start_mounts!()
 
     # Start RunSupervisor to support manual runs
     start_supervised!(AgentOS.RunSupervisor)
@@ -82,14 +75,7 @@ defmodule AgentOS.SchedulerTest do
     log_path = Path.join(System.tmp_dir!(), "timer_scheduler_test.md")
     on_exit(fn -> File.rm(log_path) end)
 
-    start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})
-
-    start_supervised!(
-      {AgentOS.StateStore,
-       name: "roster_trust",
-       path: Path.join(System.tmp_dir!(), "timer_roster.term"),
-       initial: %{records: []}}
-    )
+    AgentOS.TestHelper.start_mounts!()
 
     # Start RunSupervisor
     start_supervised!(AgentOS.RunSupervisor)

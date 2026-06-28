@@ -1,0 +1,34 @@
+# Version control
+.git
+.gitignore
+
+# macOS
+.DS_Store
+
+# Elixir / Mix build artifacts and deps
+_build
+deps
+cover
+erl_crash.dump
+*.ez
+
+# Mutable state
+data
+
+# Python-generated files and virtual environments
+__pycache__/
+*.py[cod]
+.venv
+venv
+build/
+dist/
+wheels/
+*.egg-info
+
+# Dockerfiles and ignore files
+Dockerfile*
+.dockerignore
+
+# Logs and env
+*.log
+.env*

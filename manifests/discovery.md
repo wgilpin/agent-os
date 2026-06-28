@@ -3,14 +3,19 @@ purpose: "Surface high-signal AI/ML content from the people-roster; read-and-dig
 triggers:
   - type: time
     at: "07:00"
-connectors:
-  - record_signal
+  - type: message
+grants:
+  - connector: kv_append
+    methods: [append]
+  - connector: external_send
+    recipients: ["owner-inbox"]
+    methods: [send]
 mounts:
   - roster_trust
-outputs:
-  - append_digest
 spend:
   cap: 5
+  window: daily
+  on_breach: kill
 owner: human
 supervision: restart-once-and-alert
 ---

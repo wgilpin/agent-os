@@ -44,9 +44,21 @@ defmodule AgentOS.RunLog do
 
     trigger_str = if trig = Map.get(entry_map, :trigger), do: " trigger=#{trig}", else: ""
 
+    gate_str =
+      if Map.has_key?(entry_map, :approved_count) do
+        ac = Map.get(entry_map, :approved_count, 0)
+        rc = Map.get(entry_map, :rejected_count, 0)
+        pc = Map.get(entry_map, :parked_count, 0)
+        bc = Map.get(entry_map, :breached_count, 0)
+        reasons = Map.get(entry_map, :gate_reasons, [])
+        " approved_count=#{ac} rejected_count=#{rc} parked_count=#{pc} breached_count=#{bc} gate_reasons=#{inspect(reasons)}"
+      else
+        ""
+      end
+
     # Format the line as a markdown list item.
     line =
-      "- [#{timestamp}] status=#{status} actions=#{actions}#{trigger_str}#{exit_code_str}#{cause_str}#{items_str} #{note}"
+      "- [#{timestamp}] status=#{status} actions=#{actions}#{trigger_str}#{exit_code_str}#{cause_str}#{items_str}#{gate_str} #{note}"
 
     # Ensure the parent directories of the file exist (equivalent to mkdir -p).
     File.mkdir_p!(Path.dirname(path))

@@ -29,10 +29,16 @@ defmodule AgentOS.OutputCheck do
     # Combine manifest outputs and connectors list, and build a MapSet (hash set)
     # for O(1) membership lookup. Map.get/2 is used with a fallback to avoid nil errors.
     allowed =
-      MapSet.new(
-        (Map.get(manifest, "outputs") || []) ++
-          (Map.get(manifest, "connectors") || [])
-      )
+      case manifest do
+        %AgentOS.Manifest{} ->
+          MapSet.new(Enum.map(manifest.grants, fn g -> g.connector end))
+
+        _ ->
+          MapSet.new(
+            (Map.get(manifest, "outputs") || []) ++
+              (Map.get(manifest, "connectors") || [])
+          )
+      end
 
     # Filter actions. If the anonymous function returns true, the item is kept;
     # if false, the item is dropped from the list.

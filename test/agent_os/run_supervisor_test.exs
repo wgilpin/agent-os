@@ -6,12 +6,6 @@ defmodule AgentOS.RunSupervisorTest do
   alias AgentOS.StateStore
 
   setup do
-    tmp_roster =
-      Path.join(
-        System.tmp_dir!(),
-        "roster_super_#{System.unique_integer([:positive])}.term"
-      )
-
     tmp_log =
       Path.join(
         System.tmp_dir!(),
@@ -19,19 +13,14 @@ defmodule AgentOS.RunSupervisorTest do
       )
 
     on_exit(fn ->
-      File.rm(tmp_roster)
       File.rm(tmp_log)
     end)
 
-    start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})
-
-    start_supervised!(
-      {StateStore, name: "roster_trust", path: tmp_roster, initial: %{records: []}}
-    )
+    paths = AgentOS.TestHelper.start_mounts!()
 
     start_supervised!(RunSupervisor)
 
-    {:ok, roster_path: tmp_roster, log_path: tmp_log}
+    {:ok, roster_path: paths.roster_path, log_path: tmp_log}
   end
 
   # --- Task 2: RunWorker Tests ---
@@ -136,8 +125,13 @@ defmodule AgentOS.RunSupervisorTest do
     File.write!(tmp_manifest, """
     ---
     purpose: "Empty manifest"
-    connectors: []
-    outputs: []
+    owner: human
+    supervision: restart-once-and-alert
+    grants: []
+    spend:
+      cap: 5
+      window: daily
+      on_breach: kill
     ---
     """)
 

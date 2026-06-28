@@ -24,6 +24,14 @@ defmodule AgentOS.Application do
            name: "roster_trust",
            path: Application.get_env(:agent_os, :roster_path, "data/roster.term"),
            initial: %{records: []}},
+          {AgentOS.StateStore,
+           name: "spend_ledger",
+           path: Application.get_env(:agent_os, :spend_ledger_path, "data/spend_ledger.term"),
+           initial: %{}},
+          {AgentOS.StateStore,
+           name: "pending_approvals",
+           path: Application.get_env(:agent_os, :pending_approvals_path, "data/pending_approvals.term"),
+           initial: %{approvals: %{}}},
 
           # RunSupervisor handles starting and retrying worker execution tasks.
           AgentOS.RunSupervisor,
