@@ -2,6 +2,11 @@ defmodule AgentOS.Manifest do
   @moduledoc """
   Parser for the hand-written, human-kept declarative manifest.
   Enforces the v2 schema and validates constraints/connectors.
+
+  ### Boundary Invariant
+  The manifest is privileged-read for the gate only (substrate-only) and never
+  crosses the port boundary into the agent container.
+  Enforced by `test/agent_os/boundary_test.exs` (FR-007, VR-007).
   """
 
   alias AgentOS.Manifest.Grant
@@ -65,18 +70,18 @@ defmodule AgentOS.Manifest do
     supervision = Map.get(raw_map, "supervision") || raise "Missing required field: supervision"
 
     grants_raw = Map.get(raw_map, "grants") || raise "Missing required field: grants"
-    if not is_list(grants_raw), do: raise "Field 'grants' must be a list"
+    if not is_list(grants_raw), do: raise("Field 'grants' must be a list")
     grants = Enum.map(grants_raw, &parse_grant!/1)
 
     spend_raw = Map.get(raw_map, "spend") || raise "Missing required field: spend"
-    if not is_map(spend_raw), do: raise "Field 'spend' must be a map"
+    if not is_map(spend_raw), do: raise("Field 'spend' must be a map")
     spend = parse_spend!(spend_raw)
 
     mounts = Map.get(raw_map, "mounts", [])
     triggers_raw = Map.get(raw_map, "triggers", [])
     triggers = Enum.map(triggers_raw, &parse_trigger!/1)
 
-    struct!(__MODULE__, [
+    struct!(__MODULE__,
       purpose: purpose,
       owner: owner,
       supervision: supervision,
@@ -84,13 +89,13 @@ defmodule AgentOS.Manifest do
       spend: spend,
       mounts: mounts,
       triggers: triggers
-    ])
+    )
   end
 
   defp parse_grant!(raw_grant) do
-    if not is_map(raw_grant), do: raise "Each grant must be a map"
+    if not is_map(raw_grant), do: raise("Each grant must be a map")
     connector = Map.get(raw_grant, "connector") || raise "Grant is missing 'connector' field"
-    if not is_binary(connector), do: raise "Grant 'connector' must be a string"
+    if not is_binary(connector), do: raise("Grant 'connector' must be a string")
 
     case Connector.get(connector) do
       {:ok, _} -> :ok
@@ -98,23 +103,26 @@ defmodule AgentOS.Manifest do
     end
 
     recipients = Map.get(raw_grant, "recipients")
-    if recipients != nil and not is_list(recipients), do: raise "Grant 'recipients' must be a list"
+
+    if recipients != nil and not is_list(recipients),
+      do: raise("Grant 'recipients' must be a list")
 
     methods = Map.get(raw_grant, "methods")
-    if methods != nil and not is_list(methods), do: raise "Grant 'methods' must be a list"
+    if methods != nil and not is_list(methods), do: raise("Grant 'methods' must be a list")
 
-    struct!(Grant, [
+    struct!(Grant,
       connector: connector,
       recipients: recipients,
       methods: methods
-    ])
+    )
   end
 
   defp parse_spend!(raw_spend) do
     cap = Map.get(raw_spend, "cap") || raise "Spend is missing 'cap' field"
-    if not is_number(cap) or cap < 0, do: raise "Spend 'cap' must be a non-negative number"
+    if not is_number(cap) or cap < 0, do: raise("Spend 'cap' must be a non-negative number")
 
     window = Map.get(raw_spend, "window") || raise "Spend is missing 'window' field"
+
     window_atom =
       case window do
         "daily" -> :daily
@@ -123,6 +131,7 @@ defmodule AgentOS.Manifest do
       end
 
     on_breach = Map.get(raw_spend, "on_breach") || raise "Spend is missing 'on_breach' field"
+
     on_breach_atom =
       case on_breach do
         "kill" -> :kill
@@ -130,25 +139,29 @@ defmodule AgentOS.Manifest do
         other -> raise "Unsupported spend on_breach: #{inspect(other)}"
       end
 
-    struct!(Spend, [
+    struct!(Spend,
       cap: cap,
       window: window_atom,
       on_breach: on_breach_atom
-    ])
+    )
   end
 
   defp parse_trigger!(raw_trigger) do
-    if not is_map(raw_trigger), do: raise "Each trigger must be a map"
+    if not is_map(raw_trigger), do: raise("Each trigger must be a map")
     type = Map.get(raw_trigger, "type") || raise "Trigger is missing 'type' field"
+
     case type do
       "time" ->
         at = Map.get(raw_trigger, "at") || raise "Time trigger is missing 'at' field"
         %{type: :time, at: at}
+
       "event" ->
         name = Map.get(raw_trigger, "name") || raise "Event trigger is missing 'name' field"
         %{type: :event, name: name}
+
       "message" ->
         %{type: :message}
+
       other ->
         raise "Unsupported trigger type: #{inspect(other)}"
     end

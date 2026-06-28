@@ -6,6 +6,12 @@ defmodule AgentOS.RunWorker do
   Exposes `run_once/1` which returns `:ok | {:error, reason}` without raising,
   and a supervised `start_link/1` wrapper which raises on error to drive transient
   restart-once supervision.
+
+  ### Boundary Invariant
+  The manifest is gate-only (substrate-only) and never crosses the port boundary
+  into the agent container. The agent-bound payload is exactly `{state, items}`
+  plus the published action schema; it never carries envelope data (grants, spend, etc.).
+  Enforced by `test/agent_os/boundary_test.exs` (FR-007, VR-007).
   """
 
   alias AgentOS.Provisioner
@@ -138,10 +144,7 @@ defmodule AgentOS.RunWorker do
          input_json <-
            (if cmd == "docker" do
               # Send the structured state + items payload as required by boundary contract
-              Jason.encode!(%{
-                "state" => %{"records" => snapshot.records || []},
-                "items" => items
-              })
+              Jason.encode!(build_payload(snapshot, items))
             else
               # Send the list of records directly under the "roster" key (legacy)
               Jason.encode!(%{"roster" => snapshot.records || []})
@@ -156,7 +159,10 @@ defmodule AgentOS.RunWorker do
       # --- Gate & Effector Execution Phase ---
       spend_ledger = StateStore.snapshot("spend_ledger")
       agent_name = Path.basename(manifest_path, ".md")
-      agent_entry = Map.get(spend_ledger, agent_name, %{spent: 0, window_start: DateTime.utc_now()})
+
+      agent_entry =
+        Map.get(spend_ledger, agent_name, %{spent: 0, window_start: DateTime.utc_now()})
+
       spent = Map.get(agent_entry, :spent, 0)
       registry = AgentOS.Connector.registry()
 
@@ -295,6 +301,18 @@ defmodule AgentOS.RunWorker do
 
         {:error, other}
     end
+  end
+
+  @doc """
+  Builds the payload that will cross the boundary into the agent container.
+  Contains exactly the state snapshot records and the sanitized bookmark items.
+  """
+  @spec build_payload(map(), list()) :: map()
+  def build_payload(snapshot, items) do
+    %{
+      "state" => %{"records" => snapshot.records || []},
+      "items" => items
+    }
   end
 
   defp get_cost(type, registry) do
