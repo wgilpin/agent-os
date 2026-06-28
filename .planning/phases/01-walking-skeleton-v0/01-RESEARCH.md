@@ -6,7 +6,7 @@
 
 ## Summary
 
-This phase builds the thinnest real end-to-end slice of an "agent OS": an Elixir/OTP supervision tree that, on a daily 07:00 timer, fires a single supervisor → a single Erlang `Port` → a hand-written Python discovery agent, which reasons over hand-fed input and emits enumerated proposed actions as structured data. The substrate (not the agent) then performs the privileged action deterministically after a minimal output check, mounts roster/trust state behind a single-writer GenServer, writes a legible run-log + standing inventory, and restarts-once-and-alerts on child failure. It is a STRUCTURAL milestone — the test is "does the one-supervisor / one-store / one-port skeleton feel right?", not "is the agent good." [CITED: docs/agent-os-design.md §c]
+This phase builds the thinnest real end-to-end slice of an "agent OS": an Elixir/OTP supervision tree that, on a daily 07:00 timer, fires a single supervisor → a single Erlang `Port` → a hand-written Python discovery agent, which reasons over hand-fed input and emits enumerated proposed actions as structured data. The substrate (not the agent) then performs the privileged action deterministically after a minimal output check, mounts state mount behind a single-writer GenServer, writes a legible run-log + standing inventory, and restarts-once-and-alerts on child failure. It is a STRUCTURAL milestone — the test is "does the one-supervisor / one-store / one-port skeleton feel right?", not "is the agent good." [CITED: docs/agent-os-design.md §c]
 
 The single load-bearing technical question is **cross-boundary failure semantics**: how a Python crash/OOM/kill surfaces to the BEAM supervisor as a clean process exit so let-it-crash works, without leaking orphaned OS processes. The good news for v0: the daily one-shot invocation model (run-to-completion, not a long-lived server) makes this dramatically simpler than the long-lived case. A plain Erlang `Port` with `:exit_status` + a tiny stdin-guard wrapper script gives clean exit-code surfacing and no orphans, with zero added dependencies. [VERIFIED: hexdocs Port docs; multiple ecosystem sources]
 
@@ -71,7 +71,7 @@ The single load-bearing technical question is **cross-boundary failure semantics
 | Capability | Primary Tier | Secondary Tier | Rationale |
 |------------|-------------|----------------|-----------|
 | Scheduling (07:00 trigger) | BEAM substrate | — | Substrate owns all scheduling (DEC). Triggers are data. |
-| Roster/trust state ownership | BEAM substrate (single-writer GenServer) | term-file/ETS | Substrate is the only persistent thing; contended mutable state needs one owner. |
+| State mount ownership | BEAM substrate (single-writer GenServer) | term-file/ETS | Substrate is the only persistent thing; contended mutable state needs one owner. |
 | Supervision / restart / alert | BEAM substrate (OTP supervisor) | — | This is exactly what OTP supervision trees are for. |
 | LLM reasoning over input | Python agent (across port) | — | Heavy ML work; "mad to do in Erlang" (design doc). |
 | Proposing enumerated actions | Python agent | — | Agent's only job: reason + propose. It never acts. |
@@ -196,7 +196,7 @@ agent_os/                      # single Mix app (NOT umbrella)
 │       ├── run_supervisor.ex   # supervises the per-run worker (restart-once-and-alert)
 │       ├── run_worker.ex       # opens Port, collects output, runs check, acts-on-behalf
 │       ├── port_runner.ex      # thin Port wrapper: open/await/exit_status
-│       ├── roster_store.ex     # single-writer GenServer (mounted state)
+│       ├── state_store.ex     # single-writer GenServer (mounted state)
 │       ├── manifest.ex         # parse YAML frontmatter from manifests/*.md
 │       ├── output_check.ex     # minimal deterministic action validation
 │       ├── effector.ex         # deterministic act-on-behalf
@@ -261,18 +261,18 @@ kill -KILL "$pid" 2>/dev/null       # stdin closed ⇒ tear the child down
 (Make executable; ship via `priv/`. For v0's one-shot model this is sufficient — Phase 2 may replace it with MuonTrap/cgroups or container kill.)
 
 ### Pattern 3: Single-writer GenServer for roster/trust
-**What:** One process owns the mutable roster/trust state. All reads and mutations go through its mailbox; serialization is by construction, no locks.
+**What:** One process owns the mutable state mount. All reads and mutations go through its mailbox; serialization is by construction, no locks.
 **When to use:** The mounted state (REQ-mount-state). The design doc is explicit: a KG doesn't git-merge, the trust engine has numerically-sensitive contended state, lost-update is real corruption. [CITED: CON-state-store-concurrency-profiles]
 **Example:**
 ```elixir
-defmodule AgentOS.RosterStore do
+defmodule AgentOS.StateStore do
   use GenServer
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
   # reads: snapshot for the agent run (agent gets a copy, never the live state)
   def snapshot(), do: GenServer.call(__MODULE__, :snapshot)
   # writes: the ONLY mutation path — substrate acts on behalf
-  def apply_action(action), do: GenServer.call(__MODULE__, {:apply, action})
+  def apply_action(mount, action), do: GenServer.call(__MODULE__, {:apply, action})
 
   @impl true
   def init(_), do: {:ok, load_from_term_file()}
@@ -418,7 +418,7 @@ end
 defmodule AgentOS.Effector do
   @doc "Substrate performs the privileged action ON the agent's behalf, deterministically."
   def act(%{"type" => "record_signal"} = a),
-    do: AgentOS.RosterStore.apply_action({:record, a["payload"]})
+    do: AgentOS.StateStore.apply_action({:record, a["payload"]})
   def act(%{"type" => "append_digest"} = a),
     do: AgentOS.RunLog.append_digest(a["payload"])
   # the agent never holds a credential; the effector is the only thing that mutates the world
@@ -523,7 +523,7 @@ if __name__ == "__main__":
    - What's unclear: should an out-of-grant action be dropped, or executed-with-a-warning, at v0?
    - Recommendation: drop-and-log (don't execute ungranted actions) — it pre-shapes the act-on-behalf path toward the v2 gate without claiming to be the gate. Confirm with user.
 
-4. **Roster/trust state shape and size.**
+4. **State mount shape and size.**
    - What we know: it's a contended KG behind one writer; term-file persistence is the minimal choice.
    - What's unclear: initial schema/size — affects whether term-file or ETS+DETS is right.
    - Recommendation: define the minimal roster schema during planning; start with term-file.
@@ -560,7 +560,7 @@ if __name__ == "__main__":
 ### Phase Requirements → Test Map
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
-| REQ-mount-state | Single-writer GenServer serializes mutations; agent gets snapshot only | unit | `mix test test/agent_os/roster_store_test.exs` | ❌ Wave 0 |
+| REQ-mount-state | Single-writer GenServer serializes mutations; agent gets snapshot only | unit | `mix test test/agent_os/state_store_test.exs` | ❌ Wave 0 |
 | REQ-trigger-time | Scheduler computes next-0700 ms and self-reschedules | unit | `mix test test/agent_os/scheduler_test.exs` | ❌ Wave 0 |
 | REQ-hand-input + REQ-propose-enumerated-actions | Port runs wrapper→python, collects JSON, surfaces exit_status | integration | `mix test test/agent_os/port_runner_test.exs` | ❌ Wave 0 |
 | REQ-validate-action-vs-grants | Minimal check accepts granted action types, drops/logs ungranted | unit | `mix test test/agent_os/output_check_test.exs` | ❌ Wave 0 |

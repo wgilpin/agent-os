@@ -38,7 +38,7 @@ created: 2026-06-27
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 1-01-xx | 01 | 1 | REQ-mount-state | T-1-04 | Only single-writer GenServer mutates; agent gets snapshot only | unit | `mix test test/agent_os/roster_store_test.exs` | ❌ W0 | ⬜ pending |
+| 1-01-xx | 01 | 1 | REQ-mount-state | T-1-04 | Only single-writer GenServer mutates; agent gets snapshot only | unit | `mix test test/agent_os/state_store_test.exs` | ❌ W0 | ⬜ pending |
 | 1-02-xx | 02 | — | REQ-trigger-time | — | Scheduler computes next-0700 ms and self-reschedules | unit | `mix test test/agent_os/scheduler_test.exs` | ❌ W0 | ⬜ pending |
 | 1-02-xx | 02 | — | REQ-write-manifest, REQ-state-purpose, REQ-grant-connectors-mounts, REQ-set-spend-cap | — | Manifest YAML frontmatter parses into the 7 fields | unit | `mix test test/agent_os/manifest_test.exs` | ❌ W0 | ⬜ pending |
 | 1-03-xx | 03 | — | REQ-hand-input, REQ-propose-enumerated-actions, REQ-instantiate-from-declaration | T-1-02 | Port runs wrapper→python, collects JSON, surfaces exit_status; no orphan | integration | `mix test test/agent_os/port_runner_test.exs` | ❌ W0 | ⬜ pending |

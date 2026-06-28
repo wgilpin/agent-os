@@ -20,7 +20,7 @@ enforcement precedes generation, always.
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Walking Skeleton (v0)** - BEAM substrate runs one hand-written discovery agent end-to-end on a daily timer
+- [x] **Phase 1: Walking Skeleton (v0)** - BEAM substrate runs one hand-written discovery agent end-to-end on a daily timer
 - [ ] **Phase 2: Isolation (v1)** - Containerise the child agent so it is safe against the live web and daily-usable
 - [ ] **Phase 3: Manifest Enforcement (v2)** - Deterministic gate enforces the manifest from outside the agent; world-B airtight
 - [ ] **Phase 4: Generation MVP (v3)** - OS synthesises novel agents from a stated purpose behind the proven gate
@@ -40,11 +40,11 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 5 plans (4 waves)
 
 Plans:
-- [ ] 01-01-PLAN.md — Scaffold single Mix app + single-writer RosterStore GenServer + manifest parser & 7-field manifest (wave 1)
-- [ ] 01-02-PLAN.md — Hard-wired provisioning + manifest-drift check + daily 07:00 self-rescheduling timer (wave 2)
-- [ ] 01-03-PLAN.md — Port boundary (stdin-guard wrapper + PortRunner) → human-written Python discovery agent (wave 2)
-- [ ] 01-04-PLAN.md — Deterministic minimal output check + act-on-behalf effector (ring split) (wave 3)
-- [ ] 01-05-PLAN.md — Legible run-log + standing inventory + end-to-end run pipeline + restart-once-and-alert (wave 4)
+- [x] 01-01-PLAN.md — Scaffold single Mix app + single-writer RosterStore GenServer + manifest parser & 7-field manifest (wave 1)
+- [x] 01-02-PLAN.md — Hard-wired provisioning + manifest-drift check + daily 07:00 self-rescheduling timer (wave 2)
+- [x] 01-03-PLAN.md — Port boundary (stdin-guard wrapper + PortRunner) → human-written Python discovery agent (wave 2)
+- [x] 01-04-PLAN.md — Deterministic minimal output check + act-on-behalf effector (ring split) (wave 3)
+- [x] 01-05-PLAN.md — Legible run-log + standing inventory + end-to-end run pipeline + restart-once-and-alert (wave 4)
 
 ### Phase 2: Isolation (v1)
 **Goal**: The child discovery agent runs sandboxed in a container, making it the first version safe to leave running against the live web (it reads untrusted X input now). The discovery agent becomes daily-runnable for the user. A child OOM/crash surfaces cleanly so let-it-crash works.
@@ -122,7 +122,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Walking Skeleton (v0) | 0/5 | Planned | - |
+| 1. Walking Skeleton (v0) | 5/5 | Complete | 2026-06-28 |
 | 2. Isolation (v1) | 0/3 | Not started | - |
 | 3. Manifest Enforcement (v2) | 0/6 | Not started | - |
 | 4. Generation MVP (v3) | 0/6 | Not started | - |
