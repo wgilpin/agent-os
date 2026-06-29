@@ -67,6 +67,7 @@ defmodule AgentOS.StateStore do
   Supported operations:
     - `{:append, list_key, item}`: Appends `item` to the list at `list_key` in the state map.
     - `{:put, key, value}`: Sets `key` to `value` in the state map.
+    - `{:delete_in, path}`: Deletes a nested key at the given keypath `path` (list).
   """
   def apply_action(name, action) do
     # Send a synchronous call to perform the action.
@@ -119,6 +120,18 @@ defmodule AgentOS.StateStore do
   def handle_call({:apply, {:put, key, value}}, _from, state) do
     # Map.put/3 adds or replaces the key with the value.
     new_data = Map.put(state.data, key, value)
+
+    # Persist state.
+    :ok = persist(state.path, new_data)
+
+    # Reply and update state.
+    {:reply, :ok, %{state | data: new_data}}
+  end
+
+  @impl true
+  def handle_call({:apply, {:delete_in, path}}, _from, state) when is_list(path) do
+    # pop_in/2 removes the element at the nested path and returns a tuple with the element and the new map.
+    {_popped, new_data} = pop_in(state.data, path)
 
     # Persist state.
     :ok = persist(state.path, new_data)

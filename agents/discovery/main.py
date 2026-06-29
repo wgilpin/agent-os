@@ -174,6 +174,12 @@ def main() -> int:
         sys.stderr.flush()
         return 1
 
+    # Read optional trigger_input field from the stdin JSON
+    trigger_input = input_dict.get("trigger_input")
+    if trigger_input is not None:
+        sys.stderr.write(f"Read trigger_input of type: {type(trigger_input)}\n")
+        sys.stderr.flush()
+
     actions = build_actions(input_data)
 
     output = {"actions": [action.model_dump() for action in actions]}

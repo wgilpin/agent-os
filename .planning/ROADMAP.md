@@ -89,8 +89,8 @@ Plans:
 - [x] 03-03: Credential proxy holds caps + injects at the chokepoint — spec 004-credential-proxy (commit 1a17e04)
 - [x] 03-04: Spend {cap, window, on_breach} — meter at chokepoint, per-agent visibility, real kill-on-breach — spec 005-spend-metering (commit 32b2d81)
 - [x] 03-04a: Dollar spend metering via an inference chokepoint — spend becomes real dollars (tokens × price), metered trustlessly at a substrate-side inference broker — spec 006-dollar-spend-metering (commit 93baa16)
-- [ ] 03-05: Event-trigger + approval-as-event-trigger + message-trigger — ⬅ **NEXT**
-- [ ] 03-06: World-B verification — gate physically prevents breach regardless of agent code (last)
+- [x] 03-05: Event-trigger + approval-as-event-trigger + message-trigger — spec 007 (commit f114c6d)
+- [ ] 03-06: World-B verification — gate physically prevents breach regardless of agent code (last) — ⬅ **NEXT**
 
 ### Phase 4: Generation MVP (v3)
 **Goal**: The OS becomes itself: a non-coder declares a purpose and the OS synthesises a NOVEL agent (new code, not template/compose) behind the deterministic gate proven in Phase 3. The six-stage pipeline runs human-out-of-the-loop after the conversation: elicit spec → write manifest → write judge → write novel agent → security-review → deploy-on-green. Security-review (reads code pre-deploy, gate-on-green) and the conformance-auditor (reads run-traces post-deploy, flag-only) are distinct components; neither is the firewall. Auto-deploy-on-green is sound ONLY in world B.
@@ -126,5 +126,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Walking Skeleton (v0) | 5/5 | Complete | 2026-06-28 |
 | 2. Isolation (v1) | 3/3 | Complete | 2026-06-28 |
-| 3. Manifest Enforcement (v2) | 5/6 (+US2, +006) | In progress — next: 03-05 triggers | - |
+| 3. Manifest Enforcement (v2) | 7/8 | In progress — next: 03-06 world-B | - |
 | 4. Generation MVP (v3) | 0/6 | Not started | - |

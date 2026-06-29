@@ -43,6 +43,9 @@ defmodule AgentOS.Application do
           # RunSupervisor handles starting and retrying worker execution tasks.
           AgentOS.RunSupervisor,
 
+          # TriggerGateway handles incoming trigger signals (event, message, approval-resume).
+          AgentOS.TriggerGateway,
+
           # Scheduler is the GenServer running the daily 07:00 self-rescheduling timer loop.
           {AgentOS.Scheduler, []}
         ]

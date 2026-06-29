@@ -10,24 +10,22 @@ See: .planning/PROJECT.md (updated 2026-06-27)
 ## Current Position
 
 Phase: 3 of 4 (Manifest Enforcement — v2)
-Status: In progress — the gate, provisioning, and manifest-invisibility have landed; spend/triggers/world-B remain.
+Status: In progress — the gate, provisioning, manifest-invisibility, credential proxy, spend metering, and triggers have landed; world-B remains.
 
-**➡️ NEXT: roadmap plan `03-03` — Credential proxy (US3).** No LLM-running component holds a
-mutating credential; the proxy holds caps and injects at the chokepoint. P1, load-bearing.
-This is the next thing to `/speckit-specify` (carve into spec `004-credential-proxy`, like US2 → 003).
+**➡️ NEXT: roadmap plan `03-06` — World-B verification.** The gate must physically prevent any manifest breach regardless of agent code (last; the real "v2 done" bar).
 
-Phase 3 plan status (6 plans, roadmap order):
+Phase 3 plan status (8 plans, roadmap order):
 - [x] 03-01 Gate validates every action vs grants/constraints — spec 002
 - [x] 03-02 Substrate provisions from enforced manifest — spec 002
 - [x] (US2) Manifest invisible to the agent — boundary invariant — spec 003 (commit a78afe9)
-- [ ] 03-03 Credential proxy — **NEXT**
-- [ ] 03-04 Spend {cap, window, on_breach} + kill-on-breach
-- [ ] 03-05 Event/message triggers + approval-as-event ("ph5")
-- [ ] 03-06 World-B verification — gate holds vs a hostile agent (last; the real "v2 done" bar)
+- [x] 03-03 Credential proxy — spec 004 (commit 1a17e04)
+- [x] 03-04 Spend {cap, window, on_breach} + kill-on-breach — spec 005 (commit 32b2d81)
+- [x] 03-05 Event/message triggers + approval-as-event — spec 007 (commit f114c6d)
+- [ ] 03-06 World-B verification — gate holds vs a hostile agent (last; the real "v2 done" bar) — **NEXT**
 
-Last activity: 2026-06-29 — boundary invisibility invariants (commit a78afe9); reconciled stale tracking.
+Last activity: 2026-06-29 — Event/message and approval-as-event triggers implemented (commit f114c6d); updated tracking.
 
-Progress: [██████░░░░] Phases 1–2 complete; Phase 3 ~half (2/6 plans + US2 invariant).
+Progress: [█████████░] Phases 1–2 complete; Phase 3 almost complete (7/8 plans completed).
 
 ## Numbering decoder (read this before asking "what is phN")
 

@@ -4,6 +4,8 @@ triggers:
   - type: time
     at: "07:00"
   - type: message
+  - type: event
+    name: bookmark_saved
 grants:
   - connector: kv_append
     methods: [append]

@@ -17,6 +17,12 @@ defmodule AgentOS.InventoryTest do
         "spend_ledger_inventory_#{System.unique_integer([:positive])}.term"
       )
 
+    tmp_approvals =
+      Path.join(
+        System.tmp_dir!(),
+        "pending_approvals_inventory_#{System.unique_integer([:positive])}.term"
+      )
+
     on_exit(fn ->
       try do
         File.rm(tmp_roster)
@@ -29,6 +35,12 @@ defmodule AgentOS.InventoryTest do
       rescue
         _ -> :ok
       end
+
+      try do
+        File.rm(tmp_approvals)
+      rescue
+        _ -> :ok
+      end
     end)
 
     start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})
@@ -38,7 +50,12 @@ defmodule AgentOS.InventoryTest do
     )
 
     start_supervised!({StateStore, name: "spend_ledger", path: tmp_spend, initial: %{}})
-    {:ok, tmp_roster: tmp_roster, tmp_spend: tmp_spend}
+
+    start_supervised!(
+      {StateStore, name: "pending_approvals", path: tmp_approvals, initial: %{approvals: %{}}}
+    )
+
+    {:ok, tmp_roster: tmp_roster, tmp_spend: tmp_spend, tmp_approvals: tmp_approvals}
   end
 
   test "render/1 returns standing inventory text" do
@@ -92,5 +109,33 @@ defmodule AgentOS.InventoryTest do
       report = Inventory.render(manifest_path: "manifests/discovery.md", now: now)
       assert report =~ "SPEND: $0.0 / $0.5 per daily"
     end
+  end
+
+  test "renders pending approvals on standing inventory" do
+    mock_action = %AgentOS.ProposedAction{
+      type: "external_send",
+      recipient: "owner-inbox",
+      method: "send",
+      payload: %{"text" => "hello"}
+    }
+
+    mock_grant = %AgentOS.Manifest.Grant{
+      connector: "external_send",
+      recipients: ["owner-inbox"],
+      methods: ["send"]
+    }
+
+    :ok =
+      StateStore.apply_action(
+        "pending_approvals",
+        {:put, :approvals,
+         %{"ref_42" => %{ref: "ref_42", action: mock_action, grant: mock_grant}}}
+      )
+
+    report = Inventory.render(manifest_path: "manifests/discovery.md")
+
+    assert report =~ "Pending approvals:"
+    assert report =~ "ref_42"
+    assert report =~ "external_send → owner-inbox"
   end
 end

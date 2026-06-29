@@ -220,7 +220,7 @@ defmodule AgentOS.RunWorker do
       with snapshot <- StateStore.snapshot("roster_trust"),
            input_json <-
              (if cmd == "docker" do
-                Jason.encode!(build_payload(snapshot, items))
+                Jason.encode!(build_payload(snapshot, items, Keyword.get(opts, :trigger_input)))
               else
                 Jason.encode!(%{"roster" => snapshot.records || []})
               end),
@@ -378,10 +378,21 @@ defmodule AgentOS.RunWorker do
   """
   @spec build_payload(map(), list()) :: map()
   def build_payload(snapshot, items) do
-    %{
+    build_payload(snapshot, items, nil)
+  end
+
+  @spec build_payload(map(), list(), term()) :: map()
+  def build_payload(snapshot, items, trigger_input) do
+    payload = %{
       "state" => %{"records" => snapshot.records || []},
       "items" => items
     }
+
+    if is_nil(trigger_input) do
+      payload
+    else
+      Map.put(payload, "trigger_input", trigger_input)
+    end
   end
 
   defp get_cost(type, registry) do

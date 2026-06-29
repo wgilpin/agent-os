@@ -42,7 +42,18 @@ defmodule AgentOS.RunLog do
         ""
       end
 
-    trigger_str = if trig = Map.get(entry_map, :trigger), do: " trigger=#{trig}", else: ""
+    trigger_str =
+      if trig = Map.get(entry_map, :trigger) do
+        trig_str = to_string(trig)
+
+        if String.contains?(trig_str, " ") do
+          raise ArgumentError, "trigger provenance cannot contain whitespace: #{inspect(trig)}"
+        end
+
+        " trigger=#{trig_str}"
+      else
+        ""
+      end
 
     gate_str =
       if Map.has_key?(entry_map, :approved_count) do

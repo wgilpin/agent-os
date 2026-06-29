@@ -83,6 +83,25 @@ defmodule AgentOS.Inventory do
         raw_entry = Map.get(spend_ledger, agent_name, %{spent: 0, window_start: now})
         entry = AgentOS.SpendLedger.current_entry(raw_entry, now, manifest.spend.window)
 
+        pending_store = AgentOS.StateStore.snapshot("pending_approvals")
+        approvals = Map.get(pending_store, :approvals, %{})
+
+        pending_approvals_str =
+          if map_size(approvals) == 0 do
+            ""
+          else
+            lines =
+              approvals
+              |> Enum.sort_by(fn {ref, _} -> ref end)
+              |> Enum.map(fn {ref, %{action: action}} ->
+                recipient_part = if action.recipient, do: " → #{action.recipient}", else: ""
+                "  #{ref}  #{action.type}#{recipient_part}"
+              end)
+              |> Enum.join("\n")
+
+            "\nPending approvals:\n" <> lines <> "\n"
+          end
+
         # Build and return the final report string using multiline heredoc (`"""`).
         # `#{expression}` is used for string interpolation.
         """
@@ -100,6 +119,9 @@ defmodule AgentOS.Inventory do
         Last Digest: #{last_digest}
         #{last_run_details}
         """
+        |> String.trim_trailing()
+        |> Kernel.<>(pending_approvals_str)
+        |> Kernel.<>("\n")
 
       {:error, reason} ->
         # Return a formatted error message string if manifest loading failed.

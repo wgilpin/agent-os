@@ -37,4 +37,26 @@ defmodule AgentOS.RunLogTest do
     assert Enum.at(lines, 0) =~ "first"
     assert Enum.at(lines, 1) =~ "second"
   end
+
+  test "extended trigger provenance values round-trip append to parse", %{tmp: tmp} do
+    for trigger <- ["event:bookmark_saved", "message", "approval-resume"] do
+      try do
+        File.rm(tmp)
+      rescue
+        _ -> :ok
+      end
+
+      assert :ok = RunLog.append(%{status: :ok, actions: 1, trigger: trigger}, path: tmp)
+      content = File.read!(tmp)
+
+      # Parse the trigger out using regex (similar to Inventory.parse_last_run)
+      parsed_trigger =
+        case Regex.run(~r/trigger=([^\s]+)/, content) do
+          [_, val] -> val
+          _ -> nil
+        end
+
+      assert parsed_trigger == trigger
+    end
+  end
 end
