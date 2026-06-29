@@ -51,6 +51,7 @@ defmodule AgentOS.RunLog do
         pc = Map.get(entry_map, :parked_count, 0)
         bc = Map.get(entry_map, :breached_count, 0)
         reasons = Map.get(entry_map, :gate_reasons, [])
+
         " approved_count=#{ac} rejected_count=#{rc} parked_count=#{pc} breached_count=#{bc} gate_reasons=#{inspect(reasons)}"
       else
         ""

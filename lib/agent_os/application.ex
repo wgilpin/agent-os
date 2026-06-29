@@ -30,8 +30,14 @@ defmodule AgentOS.Application do
            initial: %{}},
           {AgentOS.StateStore,
            name: "pending_approvals",
-           path: Application.get_env(:agent_os, :pending_approvals_path, "data/pending_approvals.term"),
+           path:
+             Application.get_env(
+               :agent_os,
+               :pending_approvals_path,
+               "data/pending_approvals.term"
+             ),
            initial: %{approvals: %{}}},
+          AgentOS.CredentialProxy,
 
           # RunSupervisor handles starting and retrying worker execution tasks.
           AgentOS.RunSupervisor,

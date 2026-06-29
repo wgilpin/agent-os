@@ -5,16 +5,47 @@
 See: .planning/PROJECT.md (updated 2026-06-27)
 
 **Core value:** The control plane is the product — everything an agent is and does is declared, enforced, observable, and killable; never "ask the agent."
-**Current focus:** Phase 1 — Walking Skeleton (v0)
+**Current focus:** Phase 3 — Manifest Enforcement (v2)
 
 ## Current Position
 
-Phase: 1 of 4 (Walking Skeleton — v0)
-Plan: 0 of 5 in current phase
-Status: Ready to plan
-Last activity: 2026-06-27 — Roadmap initialized from ingest (PROJECT, REQUIREMENTS, ROADMAP, STATE created)
+Phase: 3 of 4 (Manifest Enforcement — v2)
+Status: In progress — the gate, provisioning, and manifest-invisibility have landed; spend/triggers/world-B remain.
 
-Progress: [░░░░░░░░░░] 0%
+**➡️ NEXT: roadmap plan `03-03` — Credential proxy (US3).** No LLM-running component holds a
+mutating credential; the proxy holds caps and injects at the chokepoint. P1, load-bearing.
+This is the next thing to `/speckit-specify` (carve into spec `004-credential-proxy`, like US2 → 003).
+
+Phase 3 plan status (6 plans, roadmap order):
+- [x] 03-01 Gate validates every action vs grants/constraints — spec 002
+- [x] 03-02 Substrate provisions from enforced manifest — spec 002
+- [x] (US2) Manifest invisible to the agent — boundary invariant — spec 003 (commit a78afe9)
+- [ ] 03-03 Credential proxy — **NEXT**
+- [ ] 03-04 Spend {cap, window, on_breach} + kill-on-breach
+- [ ] 03-05 Event/message triggers + approval-as-event ("ph5")
+- [ ] 03-06 World-B verification — gate holds vs a hostile agent (last; the real "v2 done" bar)
+
+Last activity: 2026-06-29 — boundary invisibility invariants (commit a78afe9); reconciled stale tracking.
+
+Progress: [██████░░░░] Phases 1–2 complete; Phase 3 ~half (2/6 plans + US2 invariant).
+
+## Numbering decoder (read this before asking "what is phN")
+
+One piece of work has up to four names. They are NOT the same scale — always anchor on the **roadmap plan**:
+
+| Roadmap plan | Roadmap phase | Spec folder | `002/tasks.md` phase / User Story |
+|---|---|---|---|
+| 03-01 gate | Phase 3 | 002 | Phase 3 / US1 |
+| 03-02 provisioning | Phase 3 | 002 | Phase 2 (foundational) |
+| (invisibility) | Phase 3 | **003** | Phase 4 / US2 |
+| 03-03 credential proxy | Phase 3 | 004 (next) | Phase 5 / US3 |
+| 03-04 spend | Phase 3 | — | Phase 6 / US4 |
+| 03-05 triggers ("ph5") | Phase 3 | — | Phase 7 / US5 |
+| 03-06 world-B | Phase 3 | — | Phase 8 / US6 |
+
+"ph5" historically meant `002/tasks.md` Phase 5 (US3, credential proxy) in one session and roadmap
+plan 03-05 (triggers) in another — that ambiguity is the whole problem. **Going forward, refer to
+work by roadmap plan id (e.g. "03-03"), not "phN".**
 
 ## Performance Metrics
 

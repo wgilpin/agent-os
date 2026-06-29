@@ -83,12 +83,13 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 03-01: Deterministic gate validates every action vs enumerated grants + constraints (manifest non-agent-readable)
-- [ ] 03-02: Substrate provisions from the enforced manifest; manifest gains constraints sub-block
-- [ ] 03-03: Credential proxy holds caps + injects at the chokepoint
+- [x] 03-01: Deterministic gate validates every action vs enumerated grants + constraints (manifest non-agent-readable) — spec 002
+- [x] 03-02: Substrate provisions from the enforced manifest; manifest gains constraints sub-block — spec 002
+- [x] (US2) Manifest invisible to the agent — boundary invariant — spec 003-manifest-invisibility (commit a78afe9)
+- [ ] 03-03: Credential proxy holds caps + injects at the chokepoint — ⬅ **NEXT** (carve into spec 004)
 - [ ] 03-04: Spend {cap, window, on_breach} — meter at chokepoint, per-agent visibility, real kill-on-breach
 - [ ] 03-05: Event-trigger + approval-as-event-trigger + message-trigger
-- [ ] 03-06: World-B verification — gate physically prevents breach regardless of agent code
+- [ ] 03-06: World-B verification — gate physically prevents breach regardless of agent code (last)
 
 ### Phase 4: Generation MVP (v3)
 **Goal**: The OS becomes itself: a non-coder declares a purpose and the OS synthesises a NOVEL agent (new code, not template/compose) behind the deterministic gate proven in Phase 3. The six-stage pipeline runs human-out-of-the-loop after the conversation: elicit spec → write manifest → write judge → write novel agent → security-review → deploy-on-green. Security-review (reads code pre-deploy, gate-on-green) and the conformance-auditor (reads run-traces post-deploy, flag-only) are distinct components; neither is the firewall. Auto-deploy-on-green is sound ONLY in world B.
@@ -124,5 +125,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Walking Skeleton (v0) | 5/5 | Complete | 2026-06-28 |
 | 2. Isolation (v1) | 3/3 | Complete | 2026-06-28 |
-| 3. Manifest Enforcement (v2) | 0/6 | Not started | - |
+| 3. Manifest Enforcement (v2) | 2/6 (+US2) | In progress — next: 03-03 credential proxy | - |
 | 4. Generation MVP (v3) | 0/6 | Not started | - |

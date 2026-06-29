@@ -53,7 +53,9 @@ defmodule AgentOS.ManifestTest do
     assert length(m.grants) == 2
     [grant1, grant2] = m.grants
     assert %Grant{connector: "kv_append", recipients: nil, methods: ["append"]} = grant1
-    assert %Grant{connector: "external_send", recipients: ["owner-inbox"], methods: ["send"]} = grant2
+
+    assert %Grant{connector: "external_send", recipients: ["owner-inbox"], methods: ["send"]} =
+             grant2
 
     # Spend
     assert %Spend{cap: 5, window: :daily, on_breach: :kill} = m.spend
@@ -71,6 +73,7 @@ defmodule AgentOS.ManifestTest do
       on_breach: kill
     ---
     """
+
     assert_raise RuntimeError, ~r/grants/i, fn -> load_content!(content) end
   end
 
@@ -84,6 +87,7 @@ defmodule AgentOS.ManifestTest do
       - connector: kv_append
     ---
     """
+
     assert_raise RuntimeError, ~r/spend/i, fn -> load_content!(content) end
   end
 
@@ -101,6 +105,7 @@ defmodule AgentOS.ManifestTest do
       on_breach: kill
     ---
     """
+
     assert_raise RuntimeError, ~r/unknown_connector_xyz/i, fn -> load_content!(content) end
   end
 
@@ -118,6 +123,7 @@ defmodule AgentOS.ManifestTest do
       on_breach: kill
     ---
     """
+
     assert_raise RuntimeError, ~r/cap/i, fn -> load_content!(content) end
   end
 
@@ -135,6 +141,7 @@ defmodule AgentOS.ManifestTest do
       on_breach: kill
     ---
     """
+
     assert_raise RuntimeError, ~r/window/i, fn -> load_content!(content) end
   end
 
@@ -152,12 +159,14 @@ defmodule AgentOS.ManifestTest do
       on_breach: alert
     ---
     """
+
     assert_raise RuntimeError, ~r/on_breach/i, fn -> load_content!(content) end
   end
 
   defp load_content!(content) do
     tmp = Path.join(System.tmp_dir!(), "manifest_test_#{System.unique_integer([:positive])}.md")
     File.write!(tmp, content)
+
     try do
       Manifest.load(tmp)
     after

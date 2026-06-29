@@ -52,15 +52,23 @@ defmodule AgentOS.GateTest do
     grant = %Grant{connector: "kv_append", recipients: nil, methods: ["append"]}
     manifest = mock_manifest([grant])
 
-    assert {:reject, :unknown_action} = Gate.evaluate(action, manifest, mock_registry(), %{spent: 0})
+    assert {:reject, :unknown_action} =
+             Gate.evaluate(action, manifest, mock_registry(), %{spent: 0})
   end
 
   test "rejects action when recipient is out of scope" do
-    action = %ProposedAction{type: "external_send", recipient: "malicious-inbox", method: "send", payload: %{}}
+    action = %ProposedAction{
+      type: "external_send",
+      recipient: "malicious-inbox",
+      method: "send",
+      payload: %{}
+    }
+
     grant = %Grant{connector: "external_send", recipients: ["owner-inbox"], methods: ["send"]}
     manifest = mock_manifest([grant])
 
-    assert {:reject, :recipient_out_of_scope} = Gate.evaluate(action, manifest, mock_registry(), %{spent: 0})
+    assert {:reject, :recipient_out_of_scope} =
+             Gate.evaluate(action, manifest, mock_registry(), %{spent: 0})
   end
 
   test "rejects action when method is out of scope" do
@@ -68,7 +76,8 @@ defmodule AgentOS.GateTest do
     grant = %Grant{connector: "kv_append", recipients: nil, methods: ["append"]}
     manifest = mock_manifest([grant])
 
-    assert {:reject, :method_out_of_scope} = Gate.evaluate(action, manifest, mock_registry(), %{spent: 0})
+    assert {:reject, :method_out_of_scope} =
+             Gate.evaluate(action, manifest, mock_registry(), %{spent: 0})
   end
 
   test "returns breach when action cost exceeds spend cap" do
@@ -90,11 +99,18 @@ defmodule AgentOS.GateTest do
   end
 
   test "parks action requiring approval" do
-    action = %ProposedAction{type: "external_send", recipient: "owner-inbox", method: "send", payload: %{}}
+    action = %ProposedAction{
+      type: "external_send",
+      recipient: "owner-inbox",
+      method: "send",
+      payload: %{}
+    }
+
     grant = %Grant{connector: "external_send", recipients: ["owner-inbox"], methods: ["send"]}
     manifest = mock_manifest([grant])
 
-    assert {:needs_approval, ^grant} = Gate.evaluate(action, manifest, mock_registry(), %{spent: 0})
+    assert {:needs_approval, ^grant} =
+             Gate.evaluate(action, manifest, mock_registry(), %{spent: 0})
   end
 
   test "partition_batch correctly splits proposed actions" do
@@ -102,7 +118,9 @@ defmodule AgentOS.GateTest do
       %Grant{connector: "kv_append", recipients: nil, methods: ["append"]},
       %Grant{connector: "external_send", recipients: ["owner-inbox"], methods: ["send"]}
     ]
-    manifest = mock_manifest(grants, 3) # cap = 3
+
+    # cap = 3
+    manifest = mock_manifest(grants, 3)
 
     raw_actions = [
       # 1. Approved (cost 1, spent cumulative = 1)
@@ -118,19 +136,30 @@ defmodule AgentOS.GateTest do
     ]
 
     # Partition the batch
-    {approved, parked, rejected, breached} = Gate.partition_batch(raw_actions, manifest, mock_registry(), %{spent: 0})
+    {approved, parked, rejected, breached} =
+      Gate.partition_batch(raw_actions, manifest, mock_registry(), %{spent: 0})
 
     # Assert approved
     assert length(approved) == 1
-    assert [%{action: %ProposedAction{type: "kv_append"}, grant: %Grant{connector: "kv_append"}}] = approved
+
+    assert [%{action: %ProposedAction{type: "kv_append"}, grant: %Grant{connector: "kv_append"}}] =
+             approved
 
     # Assert parked
     assert length(parked) == 1
-    assert [%{action: %ProposedAction{type: "external_send"}, grant: %Grant{connector: "external_send"}}] = parked
+
+    assert [
+             %{
+               action: %ProposedAction{type: "external_send"},
+               grant: %Grant{connector: "external_send"}
+             }
+           ] = parked
 
     # Assert rejected
     assert length(rejected) == 2
-    assert [{%{"foo" => "bar"}, :bad_shape}, {%{"type" => "unknown_connector"}, :unknown_action}] = rejected
+
+    assert [{%{"foo" => "bar"}, :bad_shape}, {%{"type" => "unknown_connector"}, :unknown_action}] =
+             rejected
 
     # Assert breached
     assert length(breached) == 1

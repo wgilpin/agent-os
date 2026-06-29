@@ -53,4 +53,20 @@ defmodule AgentOS.Connector do
   def registered_names do
     Map.keys(@registry)
   end
+
+  @doc """
+  Executes the mock sink for external_send.
+  Sends the action and injected credential to the test-registered process if configured.
+  """
+  @spec external_send_sink(any(), String.t()) :: :ok
+  def external_send_sink(action, secret) when is_binary(secret) do
+    case Application.get_env(:agent_os, :external_send_sink_pid) do
+      pid when is_pid(pid) ->
+        send(pid, {:external_send, %{action: action, credential: secret}})
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
 end

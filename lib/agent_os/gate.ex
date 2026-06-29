@@ -20,33 +20,49 @@ defmodule AgentOS.Gate do
     # 1. Grant match
     case Enum.find(manifest.grants, fn g -> g.connector == action.type end) do
       nil ->
-        Logger.warning("dropped proposed action: ungranted (type '#{action.type}' not allowed by manifest)")
+        Logger.warning(
+          "dropped proposed action: ungranted (type '#{action.type}' not allowed by manifest)"
+        )
+
         {:reject, :unknown_action}
 
       grant ->
         # 2. Recipient scope
         cond do
           grant.recipients != nil and action.recipient not in grant.recipients ->
-            Logger.warning("dropped proposed action: recipient_out_of_scope (type '#{action.type}', recipient '#{action.recipient}')")
+            Logger.warning(
+              "dropped proposed action: recipient_out_of_scope (type '#{action.type}', recipient '#{action.recipient}')"
+            )
+
             {:reject, :recipient_out_of_scope}
 
           # 3. Method scope
           grant.methods != nil and action.method not in grant.methods ->
-            Logger.warning("dropped proposed action: method_out_of_scope (type '#{action.type}', method '#{action.method}')")
+            Logger.warning(
+              "dropped proposed action: method_out_of_scope (type '#{action.type}', method '#{action.method}')"
+            )
+
             {:reject, :method_out_of_scope}
 
           true ->
             # Look up registry danger metadata
             case Map.get(registry, action.type) do
               nil ->
-                Logger.warning("dropped proposed action: unknown_action in registry (type '#{action.type}')")
+                Logger.warning(
+                  "dropped proposed action: unknown_action in registry (type '#{action.type}')"
+                )
+
                 {:reject, :unknown_action}
 
               connector ->
                 # 4. Spend check
                 cost = Map.get(connector, :cost, 0)
+
                 if spent + cost > manifest.spend.cap do
-                  Logger.warning("breached spend cap: type '#{action.type}' with cost #{cost} exceeds cap #{manifest.spend.cap} (spent: #{spent})")
+                  Logger.warning(
+                    "breached spend cap: type '#{action.type}' with cost #{cost} exceeds cap #{manifest.spend.cap} (spent: #{spent})"
+                  )
+
                   {:breach, :spend}
                 else
                   # 5. Approval check
@@ -67,15 +83,18 @@ defmodule AgentOS.Gate do
   """
   @spec partition_batch([map()], Manifest.t(), map(), map()) ::
           {[%{action: ProposedAction.t(), grant: Grant.t()}],
-           [%{action: ProposedAction.t(), grant: Grant.t()}],
-           [{map(), atom()}],
+           [%{action: ProposedAction.t(), grant: Grant.t()}], [{map(), atom()}],
            [ProposedAction.t()]}
   def partition_batch(actions, %Manifest{} = manifest, registry, %{spent: initial_spent}) do
     {approved, parked, rejected, breached, _spent} =
-      Enum.reduce(actions, {[], [], [], [], initial_spent}, fn raw_action, {app, park, rej, bre, cur_spent} ->
+      Enum.reduce(actions, {[], [], [], [], initial_spent}, fn raw_action,
+                                                               {app, park, rej, bre, cur_spent} ->
         case ProposedAction.from_map(raw_action) do
           {:error, :bad_shape} ->
-            Logger.warning("dropped proposed action: bad_shape (not a map or missing type): #{inspect(raw_action)}")
+            Logger.warning(
+              "dropped proposed action: bad_shape (not a map or missing type): #{inspect(raw_action)}"
+            )
+
             {app, park, [{raw_action, :bad_shape} | rej], bre, cur_spent}
 
           {:ok, action} ->

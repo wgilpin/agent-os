@@ -40,7 +40,10 @@ defmodule AgentOS.ProvisionerTest do
 
   test "check_drift/0 returns {:drift, fields} when grants drift" do
     config = Application.get_env(:agent_os, :agent)
-    updated_config = Keyword.put(config, :grants, [%{connector: "kv_append", recipients: nil, methods: []}])
+
+    updated_config =
+      Keyword.put(config, :grants, [%{connector: "kv_append", recipients: nil, methods: []}])
+
     Application.put_env(:agent_os, :agent, updated_config)
 
     assert {:drift, [:grants]} = Provisioner.check_drift()

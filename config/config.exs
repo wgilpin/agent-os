@@ -2,6 +2,7 @@ import Config
 
 # Hard-wired v0 provisioning surface. At v0 the substrate is configured by hand and the
 # manifest is kept in sync manually; later phases provision from the manifest itself.
+# Secrets/tokens for capabilities are sourced from OS env, never committed directly.
 config :agent_os,
   manifest_path: "manifests/discovery.md",
   roster_path: "data/roster.term",
@@ -9,7 +10,10 @@ config :agent_os,
   pending_approvals_path: "data/pending_approvals.term",
   bookmarks_path: "data/bookmarks.json",
   spend_defaults: %{window: :daily, on_breach: :kill},
-  autostart: true
+  autostart: true,
+  credentials: %{
+    outbound_token: System.get_env("OUTBOUND_TOKEN")
+  }
 
 # Hard-wired agent configuration (manifest path, command, timezone, schedule, and capabilities)
 config :agent_os, :agent,
@@ -29,5 +33,9 @@ config :agent_os, :agent,
 if config_env() == :test do
   config :agent_os,
     autostart: false,
-    bookmarks_path: "test/fixtures/hostile_bookmarks.json"
+    bookmarks_path: "test/fixtures/hostile_bookmarks.json",
+    credentials: %{
+      outbound_token: "test_secret_outbound_token_value",
+      model_key: "test_secret_model_key_value"
+    }
 end

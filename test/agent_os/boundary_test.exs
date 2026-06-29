@@ -1,9 +1,15 @@
 defmodule AgentOS.BoundaryTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias AgentOS.Manifest
   alias AgentOS.Sandbox
   alias AgentOS.RunWorker
+  alias AgentOS.CredentialProxy
+
+  setup do
+    start_supervised!(CredentialProxy)
+    :ok
+  end
 
   test "boundary invariants: manifest never crosses to the agent" do
     # 1. Anti-vacuousness check: load real manifest and assert grants and spend are populated (VR-006)
@@ -77,6 +83,20 @@ defmodule AgentOS.BoundaryTest do
     for arg <- argv do
       refute String.contains?(arg, "outbound_token"),
              "Sandbox argv leaked mutating credential ID: #{arg}"
+    end
+
+    # C1: Assert that mutating and inference-only credential values are absent from the real agent-bound payload and the container env (argv)
+    refute String.contains?(json, "test_secret_outbound_token_value"),
+           "Payload leaked outbound token value"
+
+    refute String.contains?(json, "test_secret_model_key_value"), "Payload leaked model key value"
+
+    for arg <- argv do
+      refute String.contains?(arg, "test_secret_outbound_token_value"),
+             "Sandbox argv leaked outbound token value: #{arg}"
+
+      refute String.contains?(arg, "test_secret_model_key_value"),
+             "Sandbox argv leaked model key value: #{arg}"
     end
   end
 end

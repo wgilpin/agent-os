@@ -18,12 +18,23 @@ defmodule AgentOS.TestHelper do
     end)
 
     if Process.whereis(AgentOS.StateStoreRegistry) == nil do
-      ExUnit.Callbacks.start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})
+      ExUnit.Callbacks.start_supervised!(
+        {Registry, keys: :unique, name: AgentOS.StateStoreRegistry}
+      )
     end
 
-    ExUnit.Callbacks.start_supervised!({AgentOS.StateStore, name: "roster_trust", path: roster_path, initial: %{records: []}})
-    ExUnit.Callbacks.start_supervised!({AgentOS.StateStore, name: "spend_ledger", path: spend_path, initial: initial_spend})
-    ExUnit.Callbacks.start_supervised!({AgentOS.StateStore, name: "pending_approvals", path: approvals_path, initial: initial_approvals})
+    ExUnit.Callbacks.start_supervised!(
+      {AgentOS.StateStore, name: "roster_trust", path: roster_path, initial: %{records: []}}
+    )
+
+    ExUnit.Callbacks.start_supervised!(
+      {AgentOS.StateStore, name: "spend_ledger", path: spend_path, initial: initial_spend}
+    )
+
+    ExUnit.Callbacks.start_supervised!(
+      {AgentOS.StateStore,
+       name: "pending_approvals", path: approvals_path, initial: initial_approvals}
+    )
 
     %{
       roster_path: roster_path,
