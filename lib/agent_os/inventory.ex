@@ -9,7 +9,7 @@ defmodule AgentOS.Inventory do
   Renders a human-readable standing inventory report.
 
   ## Parameters
-    - `opts`: Keyword list that can override the `:manifest_path`.
+    - `opts`: Keyword list that can override the `:manifest_path` or `:now` clock.
 
   ## Returns
     - A multi-line string containing the rendered report.
@@ -77,6 +77,12 @@ defmodule AgentOS.Inventory do
             |> String.trim_trailing()
           end
 
+        now = Keyword.get(opts, :now, DateTime.utc_now())
+        spend_ledger = AgentOS.StateStore.snapshot("spend_ledger")
+        agent_name = Path.basename(manifest_path, ".md")
+        raw_entry = Map.get(spend_ledger, agent_name, %{spent: 0, window_start: now})
+        entry = AgentOS.SpendLedger.current_entry(raw_entry, now, manifest.spend.window)
+
         # Build and return the final report string using multiline heredoc (`"""`).
         # `#{expression}` is used for string interpolation.
         """
@@ -86,7 +92,7 @@ defmodule AgentOS.Inventory do
         TRIGGERS: #{inspect(manifest.triggers)}
         GRANTS: #{inspect(manifest.grants)}
         MOUNTS: #{inspect(manifest.mounts)}
-        SPEND CAP: #{manifest.spend.cap}
+        SPEND: #{entry.spent} / #{manifest.spend.cap} per #{manifest.spend.window}
         OWNER/SUPERVISION: #{manifest.owner} / #{manifest.supervision}
 
         LAST RUN STATE:

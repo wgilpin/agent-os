@@ -55,6 +55,10 @@ defmodule AgentOS.RunWorker do
       :ok ->
         :ok
 
+      # Intentional stop: exits with :ok which Erlang translates to :normal exit status.
+      {:killed, _reason} ->
+        :ok
+
       # Abnormal exit: raises an exception, causing the process to fail.
       {:error, reason} ->
         raise "RunWorker failed: #{inspect(reason)}"
@@ -68,7 +72,7 @@ defmodule AgentOS.RunWorker do
   ## Parameters
     - `opts`: Keyword list of configuration overrides.
   """
-  @spec run_once(keyword()) :: :ok | {:error, any()}
+  @spec run_once(keyword()) :: :ok | {:killed, :spend_breach} | {:error, any()}
   def run_once(opts \\ []) do
     # Load default configuration. We rescue errors to provide testing defaults
     # if the system environment is not fully populated.
@@ -157,13 +161,20 @@ defmodule AgentOS.RunWorker do
          # Jason.decode!/1 parses the string into an Elixir map.
          %{"actions" => actions} <- Jason.decode!(stdout) do
       # --- Gate & Effector Execution Phase ---
+      now = Keyword.get(opts, :now, DateTime.utc_now())
       spend_ledger = StateStore.snapshot("spend_ledger")
       agent_name = Path.basename(manifest_path, ".md")
 
-      agent_entry =
-        Map.get(spend_ledger, agent_name, %{spent: 0, window_start: DateTime.utc_now()})
+      raw_entry =
+        Map.get(spend_ledger, agent_name, %{spent: 0, window_start: now})
 
-      spent = Map.get(agent_entry, :spent, 0)
+      agent_entry = AgentOS.SpendLedger.current_entry(raw_entry, now, manifest.spend.window)
+
+      if agent_entry != raw_entry do
+        StateStore.apply_action("spend_ledger", {:put, agent_name, agent_entry})
+      end
+
+      spent = agent_entry.spent
       registry = AgentOS.Connector.registry()
 
       {approved, parked, rejected, breached} =
@@ -174,26 +185,17 @@ defmodule AgentOS.RunWorker do
       cond do
         # 1. Breach check
         breached != [] ->
-          RunLog.append(
-            %{
-              status: :killed,
-              actions: 0,
-              trigger: trigger,
-              exit_code: 0,
-              failure_cause: :spend_breach,
-              items_in: items_in,
-              items_dropped: dropped_count + length(actions),
-              approved_count: 0,
-              rejected_count: length(rejected),
-              parked_count: length(parked),
-              breached_count: length(breached),
-              gate_reasons: [:spend_breach],
-              note: "killed: :spend_breach"
-            },
-            path: run_log_path
+          dispatch_on_breach(
+            manifest.spend.on_breach,
+            run_log_path,
+            trigger,
+            items_in,
+            actions,
+            rejected,
+            parked,
+            breached,
+            dropped_count
           )
-
-          :ok
 
         true ->
           # Execute approved actions
@@ -320,5 +322,38 @@ defmodule AgentOS.RunWorker do
       nil -> 0
       conn -> Map.get(conn, :cost, 0)
     end
+  end
+
+  defp dispatch_on_breach(
+         :kill,
+         run_log_path,
+         trigger,
+         items_in,
+         actions,
+         rejected,
+         parked,
+         breached,
+         dropped_count
+       ) do
+    RunLog.append(
+      %{
+        status: :killed,
+        actions: 0,
+        trigger: trigger,
+        exit_code: 0,
+        failure_cause: :spend_breach,
+        items_in: items_in,
+        items_dropped: dropped_count + length(actions),
+        approved_count: 0,
+        rejected_count: length(rejected),
+        parked_count: length(parked),
+        breached_count: length(breached),
+        gate_reasons: [:spend_breach],
+        note: "killed: :spend_breach"
+      },
+      path: run_log_path
+    )
+
+    {:killed, :spend_breach}
   end
 end

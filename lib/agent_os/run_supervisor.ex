@@ -72,6 +72,10 @@ defmodule AgentOS.RunSupervisor do
       :ok ->
         :ok
 
+      # If intentionally killed, exit cleanly without retries or alerts.
+      {:killed, _reason} ->
+        :ok
+
       # If an error tuple is returned:
       {:error, reason} ->
         # If we have attempted less than twice (attempts start at 0, retry runs at attempts = 1):

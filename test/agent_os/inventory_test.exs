@@ -5,17 +5,40 @@ defmodule AgentOS.InventoryTest do
   alias AgentOS.StateStore
 
   setup do
-    tmp =
+    tmp_roster =
       Path.join(
         System.tmp_dir!(),
         "roster_inventory_#{System.unique_integer([:positive])}.term"
       )
 
-    on_exit(fn -> File.rm(tmp) end)
+    tmp_spend =
+      Path.join(
+        System.tmp_dir!(),
+        "spend_ledger_inventory_#{System.unique_integer([:positive])}.term"
+      )
+
+    on_exit(fn ->
+      try do
+        File.rm(tmp_roster)
+      rescue
+        _ -> :ok
+      end
+
+      try do
+        File.rm(tmp_spend)
+      rescue
+        _ -> :ok
+      end
+    end)
 
     start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})
-    start_supervised!({StateStore, name: "roster_trust", path: tmp, initial: %{records: []}})
-    {:ok, tmp: tmp}
+
+    start_supervised!(
+      {StateStore, name: "roster_trust", path: tmp_roster, initial: %{records: []}}
+    )
+
+    start_supervised!({StateStore, name: "spend_ledger", path: tmp_spend, initial: %{}})
+    {:ok, tmp_roster: tmp_roster, tmp_spend: tmp_spend}
   end
 
   test "render/1 returns standing inventory text" do
@@ -31,8 +54,43 @@ defmodule AgentOS.InventoryTest do
     assert report =~ "Agent OS Standing Inventory"
     assert report =~ "PURPOSE: Surface high-signal"
     assert report =~ "GRANTS: ["
-    assert report =~ "SPEND CAP: 5"
+    assert report =~ "SPEND: 0 / 5 per daily"
     assert report =~ "Total Records: 1"
     assert report =~ "Last Digest: test digest text"
+  end
+
+  describe "spend visibility (User Story 3)" do
+    test "renders spend from spend_ledger correctly and resets after rollover" do
+      now = ~U[2026-06-29 12:00:00Z]
+
+      # (a) seed spend_ledger with spent: 3
+      :ok =
+        StateStore.apply_action(
+          "spend_ledger",
+          {:put, "discovery", %{spent: 3, window_start: now}}
+        )
+
+      report_a = Inventory.render(manifest_path: "manifests/discovery.md", now: now)
+      assert report_a =~ "SPEND: 3 / 5 per daily"
+
+      # (b) seed spent: 5, window_start: 25 hours ago -> resets to 0 on display
+      past_time = DateTime.add(now, -25 * 3600, :second)
+
+      :ok =
+        StateStore.apply_action(
+          "spend_ledger",
+          {:put, "discovery", %{spent: 5, window_start: past_time}}
+        )
+
+      report_b = Inventory.render(manifest_path: "manifests/discovery.md", now: now)
+      assert report_b =~ "SPEND: 0 / 5 per daily"
+    end
+
+    test "renders spend with empty ledger as 0" do
+      now = ~U[2026-06-29 12:00:00Z]
+      # empty ledger (discovery not present)
+      report = Inventory.render(manifest_path: "manifests/discovery.md", now: now)
+      assert report =~ "SPEND: 0 / 5 per daily"
+    end
   end
 end
