@@ -12,8 +12,14 @@ config :agent_os,
   spend_defaults: %{window: :daily, on_breach: :kill},
   autostart: true,
   credentials: %{
-    outbound_token: System.get_env("OUTBOUND_TOKEN")
-  }
+    outbound_token: System.get_env("OUTBOUND_TOKEN"),
+    model_key: System.get_env("MODEL_KEY")
+  },
+  # Prod placeholder for the real Gemini 3-series model in micro-dollars
+  inference_prices:
+    %{
+      # "gemini-3-flash" => %{input: 75, output: 250}
+    }
 
 # Hard-wired agent configuration (manifest path, command, timezone, schedule, and capabilities)
 config :agent_os, :agent,
@@ -26,7 +32,7 @@ config :agent_os, :agent,
     %{connector: "kv_append", recipients: nil, methods: ["append"]},
     %{connector: "external_send", recipients: ["owner-inbox"], methods: ["send"]}
   ],
-  spend: %{cap: 5, window: :daily, on_breach: :kill}
+  spend: %{cap: 500_000, window: :daily, on_breach: :kill}
 
 # In tests, the supervision tree does not auto-start the singleton state process — each
 # test starts its own StateStore against an isolated temp term-file (never live state).
@@ -37,5 +43,8 @@ if config_env() == :test do
     credentials: %{
       outbound_token: "test_secret_outbound_token_value",
       model_key: "test_secret_model_key_value"
+    },
+    inference_prices: %{
+      "mock-model" => %{input: 10, output: 30}
     }
 end

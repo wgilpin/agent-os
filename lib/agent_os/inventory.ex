@@ -92,7 +92,7 @@ defmodule AgentOS.Inventory do
         TRIGGERS: #{inspect(manifest.triggers)}
         GRANTS: #{inspect(manifest.grants)}
         MOUNTS: #{inspect(manifest.mounts)}
-        SPEND: #{entry.spent} / #{manifest.spend.cap} per #{manifest.spend.window}
+        SPEND: #{format_dollars(entry.spent)} / #{format_dollars(manifest.spend.cap)} per #{manifest.spend.window}
         OWNER/SUPERVISION: #{manifest.owner} / #{manifest.supervision}
 
         LAST RUN STATE:
@@ -146,5 +146,10 @@ defmodule AgentOS.Inventory do
       [_, val] -> val
       _ -> nil
     end
+  end
+
+  defp format_dollars(micro_dollars) do
+    dollars = micro_dollars / 1_000_000
+    "$" <> :erlang.float_to_binary(dollars, [:compact, decimals: 6])
   end
 end

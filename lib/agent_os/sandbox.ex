@@ -17,7 +17,8 @@ defmodule AgentOS.Sandbox do
     :user,
     :env,
     :entrypoint,
-    :cmd_args
+    :cmd_args,
+    :mounts
   ]
 
   @type t() :: %__MODULE__{
@@ -29,7 +30,8 @@ defmodule AgentOS.Sandbox do
           user: binary() | nil,
           env: map() | nil,
           entrypoint: binary() | nil,
-          cmd_args: [binary()] | nil
+          cmd_args: [binary()] | nil,
+          mounts: [{binary(), binary()}] | nil
         }
 
   @doc """
@@ -102,7 +104,12 @@ defmodule AgentOS.Sandbox do
       (sandbox.env || %{})
       |> Enum.flat_map(fn {key, val} -> ["-e", "#{key}=#{val}"] end)
 
-    # Reconstruct arguments: base docker run arguments + env vars + image name + command arguments
-    base_args ++ env_args ++ [sandbox.image] ++ cmd_args
+    # Convert mounts list (e.g. [{"/host", "/container"}]) to flat lists of arguments `["-v", "/host:/container", ...]`
+    mount_args =
+      (sandbox.mounts || [])
+      |> Enum.flat_map(fn {host, container} -> ["-v", "#{host}:#{container}"] end)
+
+    # Reconstruct arguments: base docker run arguments + mount args + env vars + image name + command arguments
+    base_args ++ mount_args ++ env_args ++ [sandbox.image] ++ cmd_args
   end
 end

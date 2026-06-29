@@ -9,14 +9,14 @@ defmodule AgentOS.ConnectorTest do
     assert kv.mutating? == true
     assert kv.requires_approval? == false
     assert kv.credential == nil
-    assert kv.cost == 1
+    assert kv.cost == 0
 
     assert {:ok, ext} = Connector.get("external_send")
     assert ext.name == "external_send"
     assert ext.mutating? == true
     assert ext.requires_approval? == true
     assert ext.credential == :outbound_token
-    assert ext.cost == 2
+    assert ext.cost == 2000
   end
 
   test "returns error for unknown connector" do

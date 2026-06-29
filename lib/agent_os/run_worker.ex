@@ -14,6 +14,8 @@ defmodule AgentOS.RunWorker do
   Enforced by `test/agent_os/boundary_test.exs` (FR-007, VR-007).
   """
 
+  require Logger
+
   alias AgentOS.Provisioner
   alias AgentOS.Manifest
   alias AgentOS.StateStore
@@ -74,8 +76,6 @@ defmodule AgentOS.RunWorker do
   """
   @spec run_once(keyword()) :: :ok | {:killed, :spend_breach} | {:error, any()}
   def run_once(opts \\ []) do
-    # Load default configuration. We rescue errors to provide testing defaults
-    # if the system environment is not fully populated.
     cfg =
       try do
         Provisioner.agent_config()
@@ -88,34 +88,90 @@ defmodule AgentOS.RunWorker do
           }
       end
 
-    # Resolve the execution target. If the user explicitly passed a non-docker command
-    # override, execute it on the host directly (helps keep legacy tests passing).
-    # Otherwise, package the run inside the isolated Docker sandbox wrapper.
-    {cmd, args} =
-      if Keyword.has_key?(opts, :agent_cmd) and Keyword.get(opts, :agent_cmd) != "docker" do
-        {Keyword.get(opts, :agent_cmd), Keyword.get(opts, :agent_args)}
-      else
-        # Ensure temporary file path for the container ID tracking file
-        cidfile =
-          Keyword.get(opts, :cidfile) ||
-            Path.join(System.tmp_dir!(), "cidfile_#{System.unique_integer([:positive])}.txt")
-
-        sandbox = %AgentOS.Sandbox{
-          image: Keyword.get(opts, :image, "agent-discovery:dev"),
-          cidfile: cidfile,
-          network: Keyword.get(opts, :network, "none"),
-          memory_mb: Keyword.get(opts, :memory_mb, 128),
-          cpus: Keyword.get(opts, :cpus, "0.5"),
-          user: Keyword.get(opts, :user, "1000:1000"),
-          env: Keyword.get(opts, :env, %{}),
-          entrypoint: Keyword.get(opts, :entrypoint),
-          cmd_args: Keyword.get(opts, :cmd_args)
-        }
-
-        {"docker", AgentOS.Sandbox.build_argv(sandbox)}
-      end
-
     manifest_path = Keyword.get(opts, :manifest_path, cfg.manifest_path)
+    agent_name = Path.basename(manifest_path, ".md")
+
+    case Manifest.load(manifest_path) do
+      {:error, reason} ->
+        {:error, reason}
+
+      {:ok, manifest} ->
+        run_token = Base.encode16(:crypto.strong_rand_bytes(16))
+
+        if GenServer.whereis(AgentOS.InferenceBroker) do
+          AgentOS.InferenceBroker.register(run_token, agent_name, manifest)
+        end
+
+        original_run_token = System.get_env("RUN_TOKEN")
+        original_inf_socket = System.get_env("INFERENCE_SOCKET")
+
+        System.put_env("RUN_TOKEN", run_token)
+
+        System.put_env(
+          "INFERENCE_SOCKET",
+          Path.expand(Application.get_env(:agent_os, :inference_uds_path, "data/inference.sock"))
+        )
+
+        opts_with_env =
+          Keyword.update(
+            opts,
+            :env,
+            %{"RUN_TOKEN" => run_token, "INFERENCE_SOCKET" => "/tmp/inference.sock"},
+            fn existing_env ->
+              existing_env
+              |> Map.put("RUN_TOKEN", run_token)
+              |> Map.put("INFERENCE_SOCKET", "/tmp/inference.sock")
+            end
+          )
+
+        {cmd, args} =
+          if Keyword.has_key?(opts_with_env, :agent_cmd) and
+               Keyword.get(opts_with_env, :agent_cmd) != "docker" do
+            {Keyword.get(opts_with_env, :agent_cmd), Keyword.get(opts_with_env, :agent_args)}
+          else
+            cidfile =
+              Keyword.get(opts_with_env, :cidfile) ||
+                Path.join(System.tmp_dir!(), "cidfile_#{System.unique_integer([:positive])}.txt")
+
+            sandbox = %AgentOS.Sandbox{
+              image: Keyword.get(opts_with_env, :image, "agent-discovery:dev"),
+              cidfile: cidfile,
+              network: Keyword.get(opts_with_env, :network, "none"),
+              memory_mb: Keyword.get(opts_with_env, :memory_mb, 128),
+              cpus: Keyword.get(opts_with_env, :cpus, "0.5"),
+              user: Keyword.get(opts_with_env, :user, "1000:1000"),
+              env: Keyword.get(opts_with_env, :env, %{}),
+              entrypoint: Keyword.get(opts_with_env, :entrypoint),
+              cmd_args: Keyword.get(opts_with_env, :cmd_args),
+              mounts: [
+                {Path.expand(
+                   Application.get_env(:agent_os, :inference_uds_path, "data/inference.sock")
+                 ), "/tmp/inference.sock"}
+              ]
+            }
+
+            {"docker", AgentOS.Sandbox.build_argv(sandbox)}
+          end
+
+        res = execute_run(cmd, args, manifest, agent_name, opts_with_env)
+
+        if original_run_token,
+          do: System.put_env("RUN_TOKEN", original_run_token),
+          else: System.delete_env("RUN_TOKEN")
+
+        if original_inf_socket,
+          do: System.put_env("INFERENCE_SOCKET", original_inf_socket),
+          else: System.delete_env("INFERENCE_SOCKET")
+
+        if GenServer.whereis(AgentOS.InferenceBroker) do
+          AgentOS.InferenceBroker.unregister(run_token)
+        end
+
+        res
+    end
+  end
+
+  defp execute_run(cmd, args, manifest, agent_name, opts) do
     run_log_path = Keyword.get(opts, :run_log_path, Path.join(["data", "run_log.md"]))
     timeout_ms = Keyword.get(opts, :timeout_ms, 30_000)
 
@@ -125,7 +181,6 @@ defmodule AgentOS.RunWorker do
 
     trigger = Keyword.get(opts, :trigger, :timer)
 
-    # Load and sanitize bookmark items outside 'with' to keep scope in the 'else' block
     {items, dropped_count} =
       if cmd == "docker" do
         case Keyword.get(opts, :items) do
@@ -136,172 +191,184 @@ defmodule AgentOS.RunWorker do
         {[], 0}
       end
 
-    # `with` is a special Elixir expression used to chain a sequence of pattern matches.
-    # Each clause is evaluated in order. If all match, the `do` block is executed.
-    # If any match fails, execution halts immediately and jumps to the `else` block,
-    # returning the value of the failed match.
-    with {:ok, manifest} <- Manifest.load(manifest_path),
-         # 1. Take a snapshot of the current roster state.
-         snapshot <- StateStore.snapshot("roster_trust"),
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+    spend_ledger = StateStore.snapshot("spend_ledger")
+    raw_entry = Map.get(spend_ledger, agent_name, %{spent: 0, window_start: now})
+    agent_entry = AgentOS.SpendLedger.current_entry(raw_entry, now, manifest.spend.window)
 
-         # 2. Encode input into a JSON binary.
-         input_json <-
-           (if cmd == "docker" do
-              # Send the structured state + items payload as required by boundary contract
-              Jason.encode!(build_payload(snapshot, items))
-            else
-              # Send the list of records directly under the "roster" key (legacy)
-              Jason.encode!(%{"roster" => snapshot.records || []})
-            end),
+    if agent_entry != raw_entry do
+      StateStore.apply_action("spend_ledger", {:put, agent_name, agent_entry})
+    end
 
-         # 3. Run the python workload via PortRunner, capturing output or returning timeout/exits.
-         {:ok, stdout} <- PortRunner.run(input_json, cmd, args, timeout_ms: timeout_ms),
+    if agent_entry.spent >= manifest.spend.cap do
+      Logger.warning(
+        "Inference pre-check breach: agent '#{agent_name}' spent (#{agent_entry.spent}) >= cap (#{manifest.spend.cap})"
+      )
 
-         # 4. Decode output actions JSON.
-         # Jason.decode!/1 parses the string into an Elixir map.
-         %{"actions" => actions} <- Jason.decode!(stdout) do
-      # --- Gate & Effector Execution Phase ---
-      now = Keyword.get(opts, :now, DateTime.utc_now())
-      spend_ledger = StateStore.snapshot("spend_ledger")
-      agent_name = Path.basename(manifest_path, ".md")
+      dispatch_on_breach(
+        manifest.spend.on_breach,
+        run_log_path,
+        trigger,
+        length(items) + dropped_count,
+        [],
+        [],
+        [],
+        [:inference],
+        dropped_count
+      )
+    else
+      with snapshot <- StateStore.snapshot("roster_trust"),
+           input_json <-
+             (if cmd == "docker" do
+                Jason.encode!(build_payload(snapshot, items))
+              else
+                Jason.encode!(%{"roster" => snapshot.records || []})
+              end),
+           {:ok, stdout} <- PortRunner.run(input_json, cmd, args, timeout_ms: timeout_ms),
+           %{"actions" => actions} <- Jason.decode!(stdout) do
+        # Re-fetch spend ledger in case inference during the run pushed us over cap
+        spend_ledger = StateStore.snapshot("spend_ledger")
+        raw_entry = Map.get(spend_ledger, agent_name, %{spent: 0, window_start: now})
+        agent_entry = AgentOS.SpendLedger.current_entry(raw_entry, now, manifest.spend.window)
+        spent = agent_entry.spent
 
-      raw_entry =
-        Map.get(spend_ledger, agent_name, %{spent: 0, window_start: now})
+        if spent >= manifest.spend.cap do
+          Logger.warning(
+            "Inference mid-run breach: agent '#{agent_name}' spent (#{spent}) >= cap (#{manifest.spend.cap})"
+          )
 
-      agent_entry = AgentOS.SpendLedger.current_entry(raw_entry, now, manifest.spend.window)
-
-      if agent_entry != raw_entry do
-        StateStore.apply_action("spend_ledger", {:put, agent_name, agent_entry})
-      end
-
-      spent = agent_entry.spent
-      registry = AgentOS.Connector.registry()
-
-      {approved, parked, rejected, breached} =
-        AgentOS.Gate.partition_batch(actions, manifest, registry, %{spent: spent})
-
-      items_in = length(items) + dropped_count
-
-      cond do
-        # 1. Breach check
-        breached != [] ->
           dispatch_on_breach(
             manifest.spend.on_breach,
             run_log_path,
             trigger,
-            items_in,
+            length(items) + dropped_count,
             actions,
-            rejected,
-            parked,
-            breached,
+            [],
+            [],
+            [:inference],
             dropped_count
           )
+        else
+          registry = AgentOS.Connector.registry()
 
-        true ->
-          # Execute approved actions
-          Effector.act_all(approved)
+          {approved, parked, rejected, breached} =
+            AgentOS.Gate.partition_batch(actions, manifest, registry, %{spent: spent})
 
-          # Increment spend ledger for executed actions
-          total_approved_cost =
-            Enum.reduce(approved, 0, fn %{action: action}, acc ->
-              acc + get_cost(action.type, registry)
-            end)
+          items_in = length(items) + dropped_count
 
-          if total_approved_cost > 0 do
-            new_spent = spent + total_approved_cost
-            updated_entry = Map.put(agent_entry, :spent, new_spent)
-            StateStore.apply_action("spend_ledger", {:put, agent_name, updated_entry})
+          cond do
+            breached != [] ->
+              dispatch_on_breach(
+                manifest.spend.on_breach,
+                run_log_path,
+                trigger,
+                items_in,
+                actions,
+                rejected,
+                parked,
+                breached,
+                dropped_count
+              )
+
+            true ->
+              Effector.act_all(approved)
+
+              total_approved_cost =
+                Enum.reduce(approved, 0, fn %{action: action}, acc ->
+                  acc + get_cost(action.type, registry)
+                end)
+
+              if total_approved_cost > 0 do
+                new_spent = spent + total_approved_cost
+                updated_entry = Map.put(agent_entry, :spent, new_spent)
+                StateStore.apply_action("spend_ledger", {:put, agent_name, updated_entry})
+              end
+
+              if parked != [] do
+                pending_store = StateStore.snapshot("pending_approvals")
+                approvals = Map.get(pending_store, :approvals, %{})
+
+                updated_approvals =
+                  Enum.reduce(parked, approvals, fn %{action: act, grant: grt}, acc ->
+                    ref = "ref_#{System.unique_integer([:positive])}"
+                    Map.put(acc, ref, %{ref: ref, action: act, grant: grt})
+                  end)
+
+                StateStore.apply_action(
+                  "pending_approvals",
+                  {:put, :approvals, updated_approvals}
+                )
+              end
+
+              reasons = Enum.map(rejected, fn {_raw, reason} -> reason end) |> Enum.uniq()
+
+              RunLog.append(
+                %{
+                  status: :ok,
+                  actions: length(approved),
+                  trigger: trigger,
+                  exit_code: 0,
+                  items_in: items_in,
+                  items_dropped: dropped_count + length(rejected) + length(parked),
+                  approved_count: length(approved),
+                  rejected_count: length(rejected),
+                  parked_count: length(parked),
+                  breached_count: 0,
+                  gate_reasons: reasons,
+                  note: "run complete"
+                },
+                path: run_log_path
+              )
+
+              :ok
           end
+        end
+      else
+        {:error, reason} ->
+          {exit_code, failure_cause} =
+            case reason do
+              {:exit_status, 137} -> {137, "oom"}
+              {:exit_status, code} -> {code, "crash"}
+              :timeout -> {nil, "timeout"}
+              _other -> {nil, "other"}
+            end
 
-          # If there are parked actions (US5), we add them to pending approvals state store
-          if parked != [] do
-            pending_store = StateStore.snapshot("pending_approvals")
-            approvals = Map.get(pending_store, :approvals, %{})
-
-            # For each parked action, generate a unique ref and store it.
-            # Reference: PendApproval {ref, action, grant}
-            updated_approvals =
-              Enum.reduce(parked, approvals, fn %{action: act, grant: grt}, acc ->
-                ref = "ref_#{System.unique_integer([:positive])}"
-                Map.put(acc, ref, %{ref: ref, action: act, grant: grt})
-              end)
-
-            StateStore.apply_action("pending_approvals", {:put, :approvals, updated_approvals})
-          end
-
-          reasons = Enum.map(rejected, fn {_raw, reason} -> reason end) |> Enum.uniq()
+          items_in = length(items) + dropped_count
 
           RunLog.append(
             %{
-              status: :ok,
-              actions: length(approved),
+              status: :error,
+              actions: 0,
               trigger: trigger,
-              exit_code: 0,
+              exit_code: exit_code,
+              failure_cause: failure_cause,
               items_in: items_in,
-              items_dropped: dropped_count + length(rejected) + length(parked),
-              approved_count: length(approved),
-              rejected_count: length(rejected),
-              parked_count: length(parked),
-              breached_count: 0,
-              gate_reasons: reasons,
-              note: "run complete"
+              items_dropped: dropped_count,
+              note: "run failed: #{inspect(reason)}"
             },
             path: run_log_path
           )
 
-          :ok
+          {:error, reason}
+
+        other ->
+          items_in = length(items) + dropped_count
+
+          RunLog.append(
+            %{
+              status: :error,
+              actions: 0,
+              trigger: trigger,
+              failure_cause: "unexpected_stage_result",
+              items_in: items_in,
+              items_dropped: dropped_count,
+              note: "unexpected pipeline stage result: #{inspect(other)}"
+            },
+            path: run_log_path
+          )
+
+          {:error, other}
       end
-    else
-      # --- Error Path: One of the matches failed ---
-      # Catch standard error tuples.
-      {:error, reason} ->
-        # Classify the error reason to extract exit code and failure cause
-        {exit_code, failure_cause} =
-          case reason do
-            {:exit_status, 137} -> {137, "oom"}
-            {:exit_status, code} -> {code, "crash"}
-            :timeout -> {nil, "timeout"}
-            _other -> {nil, "other"}
-          end
-
-        items_in = length(items) + dropped_count
-
-        # Log failure to the run log file.
-        RunLog.append(
-          %{
-            status: :error,
-            actions: 0,
-            trigger: trigger,
-            exit_code: exit_code,
-            failure_cause: failure_cause,
-            items_in: items_in,
-            items_dropped: dropped_count,
-            note: "run failed: #{inspect(reason)}"
-          },
-          path: run_log_path
-        )
-
-        # Return the error tuple.
-        {:error, reason}
-
-      # Catch any other unexpected values returned by the chain.
-      other ->
-        items_in = length(items) + dropped_count
-
-        RunLog.append(
-          %{
-            status: :error,
-            actions: 0,
-            trigger: trigger,
-            failure_cause: "unexpected_stage_result",
-            items_in: items_in,
-            items_dropped: dropped_count,
-            note: "unexpected pipeline stage result: #{inspect(other)}"
-          },
-          path: run_log_path
-        )
-
-        {:error, other}
     end
   end
 

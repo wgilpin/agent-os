@@ -8,7 +8,8 @@ defmodule AgentOS.Connector do
           mutating?: boolean(),
           requires_approval?: boolean(),
           credential: atom() | nil,
-          cost: number()
+          # cost in integer micro-dollars (1e-6 USD); 0 means free
+          cost: integer()
         }
 
   @registry %{
@@ -17,14 +18,14 @@ defmodule AgentOS.Connector do
       mutating?: true,
       requires_approval?: false,
       credential: nil,
-      cost: 1
+      cost: 0
     },
     "external_send" => %{
       name: "external_send",
       mutating?: true,
       requires_approval?: true,
       credential: :outbound_token,
-      cost: 2
+      cost: 2000
     }
   }
 
@@ -32,7 +33,9 @@ defmodule AgentOS.Connector do
   Returns the complete connector registry map.
   """
   @spec registry() :: %{String.t() => capability()}
-  def registry, do: @registry
+  def registry do
+    Application.get_env(:agent_os, :connector_registry, @registry)
+  end
 
   @doc """
   Looks up a connector by name in the registry.

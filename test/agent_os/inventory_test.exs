@@ -54,7 +54,7 @@ defmodule AgentOS.InventoryTest do
     assert report =~ "Agent OS Standing Inventory"
     assert report =~ "PURPOSE: Surface high-signal"
     assert report =~ "GRANTS: ["
-    assert report =~ "SPEND: 0 / 5 per daily"
+    assert report =~ "SPEND: $0.0 / $0.5 per daily"
     assert report =~ "Total Records: 1"
     assert report =~ "Last Digest: test digest text"
   end
@@ -71,7 +71,7 @@ defmodule AgentOS.InventoryTest do
         )
 
       report_a = Inventory.render(manifest_path: "manifests/discovery.md", now: now)
-      assert report_a =~ "SPEND: 3 / 5 per daily"
+      assert report_a =~ "SPEND: $0.000003 / $0.5 per daily"
 
       # (b) seed spent: 5, window_start: 25 hours ago -> resets to 0 on display
       past_time = DateTime.add(now, -25 * 3600, :second)
@@ -83,14 +83,14 @@ defmodule AgentOS.InventoryTest do
         )
 
       report_b = Inventory.render(manifest_path: "manifests/discovery.md", now: now)
-      assert report_b =~ "SPEND: 0 / 5 per daily"
+      assert report_b =~ "SPEND: $0.0 / $0.5 per daily"
     end
 
     test "renders spend with empty ledger as 0" do
       now = ~U[2026-06-29 12:00:00Z]
       # empty ledger (discovery not present)
       report = Inventory.render(manifest_path: "manifests/discovery.md", now: now)
-      assert report =~ "SPEND: 0 / 5 per daily"
+      assert report =~ "SPEND: $0.0 / $0.5 per daily"
     end
   end
 end

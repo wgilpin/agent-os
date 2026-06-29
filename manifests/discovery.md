@@ -13,7 +13,7 @@ grants:
 mounts:
   - roster_trust
 spend:
-  cap: 5
+  cap: 500000
   window: daily
   on_breach: kill
 owner: human

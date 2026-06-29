@@ -31,7 +31,7 @@ defmodule AgentOS.ProvisionerTest do
              %{connector: "external_send", recipients: ["owner-inbox"], methods: ["send"]}
            ]
 
-    assert config.spend == %{cap: 5, window: :daily, on_breach: :kill}
+    assert config.spend == %{cap: 500_000, window: :daily, on_breach: :kill}
   end
 
   test "check_drift/0 returns :ok when config matches manifest" do
