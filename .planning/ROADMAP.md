@@ -86,9 +86,10 @@ Plans:
 - [x] 03-01: Deterministic gate validates every action vs enumerated grants + constraints (manifest non-agent-readable) — spec 002
 - [x] 03-02: Substrate provisions from the enforced manifest; manifest gains constraints sub-block — spec 002
 - [x] (US2) Manifest invisible to the agent — boundary invariant — spec 003-manifest-invisibility (commit a78afe9)
-- [ ] 03-03: Credential proxy holds caps + injects at the chokepoint — ⬅ **NEXT** (carve into spec 004)
-- [ ] 03-04: Spend {cap, window, on_breach} — meter at chokepoint, per-agent visibility, real kill-on-breach
-- [ ] 03-05: Event-trigger + approval-as-event-trigger + message-trigger
+- [x] 03-03: Credential proxy holds caps + injects at the chokepoint — spec 004-credential-proxy (commit 1a17e04)
+- [x] 03-04: Spend {cap, window, on_breach} — meter at chokepoint, per-agent visibility, real kill-on-breach — spec 005-spend-metering (commit 32b2d81)
+- [x] 03-04a: Dollar spend metering via an inference chokepoint — spend becomes real dollars (tokens × price), metered trustlessly at a substrate-side inference broker — spec 006-dollar-spend-metering (commit 93baa16)
+- [ ] 03-05: Event-trigger + approval-as-event-trigger + message-trigger — ⬅ **NEXT**
 - [ ] 03-06: World-B verification — gate physically prevents breach regardless of agent code (last)
 
 ### Phase 4: Generation MVP (v3)
@@ -125,5 +126,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Walking Skeleton (v0) | 5/5 | Complete | 2026-06-28 |
 | 2. Isolation (v1) | 3/3 | Complete | 2026-06-28 |
-| 3. Manifest Enforcement (v2) | 2/6 (+US2) | In progress — next: 03-03 credential proxy | - |
+| 3. Manifest Enforcement (v2) | 5/6 (+US2, +006) | In progress — next: 03-05 triggers | - |
 | 4. Generation MVP (v3) | 0/6 | Not started | - |
