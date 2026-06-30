@@ -11,5 +11,5 @@ workloads. **The language boundary is the trust boundary** — do not infer the 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-`specs/012-elicit-spec/plan.md`
+`specs/015-write-novel-agent/plan.md`
 <!-- SPECKIT END -->
