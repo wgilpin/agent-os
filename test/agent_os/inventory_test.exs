@@ -252,4 +252,50 @@ defmodule AgentOS.InventoryTest do
       assert report =~ "DEPLOY PROVENANCE: reviewed=human"
     end
   end
+
+  describe "judge results visibility (Stage 3)" do
+    test "renders JUDGE: unrun when no judge result is recorded" do
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ "JUDGE: unrun"
+    end
+
+    test "renders JUDGE: pass with last-run timestamp and disclaimer" do
+      tmp_judge =
+        Path.join(System.tmp_dir!(), "judge_inventory_#{System.unique_integer([:positive])}.term")
+
+      on_exit(fn -> File.rm(tmp_judge) end)
+      start_supervised!({StateStore, name: "judge_results", path: tmp_judge, initial: %{}})
+
+      :ok =
+        StateStore.apply_action(
+          "judge_results",
+          {:put, "discovery",
+           %{status: :pass, last_run: ~U[2026-06-30 22:15:00Z], reasoning: "all checks passed"}}
+        )
+
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ "JUDGE: pass (last run: 2026-06-30T22:15:00Z)"
+
+      assert report =~
+               "Scope: CODE-MATCHES-MANIFEST. This does not verify human intent correctness."
+    end
+
+    test "renders JUDGE: fail when the persisted verdict failed" do
+      tmp_judge =
+        Path.join(System.tmp_dir!(), "judge_inventory_#{System.unique_integer([:positive])}.term")
+
+      on_exit(fn -> File.rm(tmp_judge) end)
+      start_supervised!({StateStore, name: "judge_results", path: tmp_judge, initial: %{}})
+
+      :ok =
+        StateStore.apply_action(
+          "judge_results",
+          {:put, "discovery",
+           %{status: :fail, last_run: ~U[2026-06-30 22:15:00Z], reasoning: "x"}}
+        )
+
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ "JUDGE: fail (last run: 2026-06-30T22:15:00Z)"
+    end
+  end
 end

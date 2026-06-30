@@ -7,6 +7,8 @@ defmodule AgentOS.Inventory do
 
   alias AgentOS.ConformanceAuditor.Verdict
 
+  @judge_disclaimer "Scope: CODE-MATCHES-MANIFEST. This does not verify human intent correctness."
+
   @doc """
   Renders a human-readable standing inventory report.
 
@@ -164,6 +166,8 @@ defmodule AgentOS.Inventory do
               "CONFORMANCE: flagged\n" <> flag_lines
           end
 
+        judge_str = render_judge(agent_name)
+
         # Build and return the final report string using multiline heredoc (`"""`).
         # `#{expression}` is used for string interpolation.
         """
@@ -182,6 +186,7 @@ defmodule AgentOS.Inventory do
         Last Digest: #{last_digest}
         #{last_run_details}
         #{conformance_str}
+        #{judge_str}
         """
         |> String.trim_trailing()
         |> Kernel.<>(pending_approvals_str)
@@ -252,6 +257,41 @@ defmodule AgentOS.Inventory do
   defp try_get_provenance(agent_name) do
     try do
       AgentOS.StateStore.snapshot("provenance")[agent_name]
+    rescue
+      _ -> nil
+    catch
+      :exit, _ -> nil
+    end
+  end
+
+  defp render_judge(agent_name) do
+    case try_get_judge(agent_name) do
+      nil ->
+        "JUDGE: unrun"
+
+      entry ->
+        status_str =
+          case Map.get(entry, :status) do
+            :pass -> "pass"
+            :fail -> "fail"
+            :error -> "error"
+            :unrun -> "unrun"
+            other -> to_string(other)
+          end
+
+        run_detail =
+          case Map.get(entry, :last_run) do
+            %DateTime{} = dt -> " (last run: #{DateTime.to_iso8601(dt)})"
+            _ -> ""
+          end
+
+        "JUDGE: #{status_str}#{run_detail}\n#{@judge_disclaimer}"
+    end
+  end
+
+  defp try_get_judge(agent_name) do
+    try do
+      AgentOS.StateStore.snapshot("judge_results")[agent_name]
     rescue
       _ -> nil
     catch

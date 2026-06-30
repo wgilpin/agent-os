@@ -45,6 +45,11 @@ defmodule AgentOS.Application do
            name: "provenance",
            path: Application.get_env(:agent_os, :provenance_path, "data/provenance.term"),
            initial: %{}},
+          {AgentOS.StateStore,
+           name: "judge_results",
+           path:
+             Application.get_env(:agent_os, :judge_results_path, "data/judge_results.term"),
+           initial: %{}},
           AgentOS.CredentialProxy,
           AgentOS.InferenceBroker,
 

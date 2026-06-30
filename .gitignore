@@ -37,6 +37,10 @@ wheels/
 /data/conformance.term
 /data/conformance.term.tmp
 
+# Judge Results terms
+/data/judge_results.term
+/data/judge_results.term.tmp
+
 # Universal
 Thumbs.db
 *.tmp

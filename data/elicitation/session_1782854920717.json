@@ -1,0 +1,65 @@
+{
+  "original_purpose": "reply to recruiter emails",
+  "session_id": "session_1782854920717",
+  "spec_draft": {
+    "boundaries": {
+      "egress_domains": [
+        "gmail.googleapis.com"
+      ],
+      "target_locations": []
+    },
+    "capabilities": [
+      "gmail_read",
+      "gmail_draft"
+    ],
+    "confirmed": true,
+    "purpose": "reply to recruiter emails and save drafts",
+    "spend_limits": {
+      "dollar_cap": 0.05,
+      "token_limit": 100000
+    }
+  },
+  "status": "confirmed",
+  "transcript": [
+    {
+      "content": "reply to recruiter emails",
+      "role": "user",
+      "timestamp": "2026-06-30 21:28:40.717837Z"
+    },
+    {
+      "content": "Which email service do you use? (e.g. Gmail)",
+      "role": "assistant",
+      "timestamp": "2026-06-30 21:28:40.818991Z"
+    },
+    {
+      "content": "Gmail",
+      "role": "user",
+      "timestamp": "2026-06-30 21:28:40.819025Z"
+    },
+    {
+      "content": "Should the agent send emails directly or just save drafts?",
+      "role": "assistant",
+      "timestamp": "2026-06-30 21:28:40.905409Z"
+    },
+    {
+      "content": "save drafts",
+      "role": "user",
+      "timestamp": "2026-06-30 21:28:40.905439Z"
+    },
+    {
+      "content": "Do you confirm this minimised specification?",
+      "role": "assistant",
+      "timestamp": "2026-06-30 21:28:40.987697Z"
+    },
+    {
+      "content": "yes",
+      "role": "user",
+      "timestamp": "2026-06-30 21:28:40.987715Z"
+    },
+    {
+      "content": "",
+      "role": "assistant",
+      "timestamp": "2026-06-30 21:28:41.067041Z"
+    }
+  ]
+}

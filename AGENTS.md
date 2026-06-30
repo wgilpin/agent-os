@@ -11,6 +11,6 @@ workloads. **The language boundary is the trust boundary** — do not infer the 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-[plan.md](file:///Users/will/projects/agent_os/specs/013-write-manifest/plan.md)
+[plan.md](file:///Users/will/projects/agent_os/specs/014-write-judge/plan.md)
 <!-- SPECKIT END -->
 
