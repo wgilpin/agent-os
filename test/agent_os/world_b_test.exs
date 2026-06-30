@@ -476,4 +476,21 @@ defmodule AgentOS.WorldBTest do
       assert executed == []
     end
   end
+
+  describe "deploy review modes safety" do
+    test "even under dangerously-skip-review, manifest breaches are still blocked at runtime",
+         context do
+      registry = AgentOS.Connector.registry()
+
+      disallowed_action = %AgentOS.ProposedAction{
+        type: "unknown_connector",
+        recipient: "nil",
+        method: "nil",
+        payload: %{}
+      }
+
+      assert {:reject, :unknown_action} =
+               Gate.evaluate(disallowed_action, context.manifest, registry, %{spent: 0})
+    end
+  end
 end

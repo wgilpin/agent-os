@@ -91,83 +91,111 @@ defmodule AgentOS.RunWorker do
     manifest_path = Keyword.get(opts, :manifest_path, cfg.manifest_path)
     agent_name = Path.basename(manifest_path, ".md")
 
-    case Manifest.load(manifest_path) do
-      {:error, reason} ->
-        {:error, reason}
+    review_mode =
+      Keyword.get(opts, :review_mode) ||
+        Application.get_env(:agent_os, :review_mode, :always_review)
 
-      {:ok, manifest} ->
-        run_token = Base.encode16(:crypto.strong_rand_bytes(16))
+    case AgentOS.Provisioner.deploy(manifest_path, review_mode, opts) do
+      {:blocked, ref} ->
+        run_log_path = Keyword.get(opts, :run_log_path, Path.join(["data", "run_log.md"]))
+        trigger = Keyword.get(opts, :trigger, :timer)
 
-        if GenServer.whereis(AgentOS.InferenceBroker) do
-          AgentOS.InferenceBroker.register(run_token, agent_name, manifest)
-        end
-
-        original_run_token = System.get_env("RUN_TOKEN")
-        original_inf_socket = System.get_env("INFERENCE_SOCKET")
-
-        System.put_env("RUN_TOKEN", run_token)
-
-        System.put_env(
-          "INFERENCE_SOCKET",
-          Path.expand(Application.get_env(:agent_os, :inference_uds_path, "data/inference.sock"))
+        AgentOS.RunLog.append(
+          %{
+            status: :error,
+            actions: 0,
+            trigger: trigger,
+            note: "deploy blocked: ref=#{ref}"
+          },
+          path: run_log_path
         )
 
-        opts_with_env =
-          Keyword.update(
-            opts,
-            :env,
-            %{"RUN_TOKEN" => run_token, "INFERENCE_SOCKET" => "/tmp/inference.sock"},
-            fn existing_env ->
-              existing_env
-              |> Map.put("RUN_TOKEN", run_token)
-              |> Map.put("INFERENCE_SOCKET", "/tmp/inference.sock")
+        {:error, {:deploy_blocked, ref}}
+
+      _ ->
+        case Manifest.load(manifest_path) do
+          {:error, reason} ->
+            {:error, reason}
+
+          {:ok, manifest} ->
+            run_token = Base.encode16(:crypto.strong_rand_bytes(16))
+
+            if GenServer.whereis(AgentOS.InferenceBroker) do
+              AgentOS.InferenceBroker.register(run_token, agent_name, manifest)
             end
-          )
 
-        {cmd, args} =
-          if Keyword.has_key?(opts_with_env, :agent_cmd) and
-               Keyword.get(opts_with_env, :agent_cmd) != "docker" do
-            {Keyword.get(opts_with_env, :agent_cmd), Keyword.get(opts_with_env, :agent_args)}
-          else
-            cidfile =
-              Keyword.get(opts_with_env, :cidfile) ||
-                Path.join(System.tmp_dir!(), "cidfile_#{System.unique_integer([:positive])}.txt")
+            original_run_token = System.get_env("RUN_TOKEN")
+            original_inf_socket = System.get_env("INFERENCE_SOCKET")
 
-            sandbox = %AgentOS.Sandbox{
-              image: Keyword.get(opts_with_env, :image, "agent-discovery:dev"),
-              cidfile: cidfile,
-              network: Keyword.get(opts_with_env, :network, "none"),
-              memory_mb: Keyword.get(opts_with_env, :memory_mb, 128),
-              cpus: Keyword.get(opts_with_env, :cpus, "0.5"),
-              user: Keyword.get(opts_with_env, :user, "1000:1000"),
-              env: Keyword.get(opts_with_env, :env, %{}),
-              entrypoint: Keyword.get(opts_with_env, :entrypoint),
-              cmd_args: Keyword.get(opts_with_env, :cmd_args),
-              mounts: [
-                {Path.expand(
-                   Application.get_env(:agent_os, :inference_uds_path, "data/inference.sock")
-                 ), "/tmp/inference.sock"}
-              ]
-            }
+            System.put_env("RUN_TOKEN", run_token)
 
-            {"docker", AgentOS.Sandbox.build_argv(sandbox)}
-          end
+            System.put_env(
+              "INFERENCE_SOCKET",
+              Path.expand(
+                Application.get_env(:agent_os, :inference_uds_path, "data/inference.sock")
+              )
+            )
 
-        res = execute_run(cmd, args, manifest, agent_name, opts_with_env)
+            opts_with_env =
+              Keyword.update(
+                opts,
+                :env,
+                %{"RUN_TOKEN" => run_token, "INFERENCE_SOCKET" => "/tmp/inference.sock"},
+                fn existing_env ->
+                  existing_env
+                  |> Map.put("RUN_TOKEN", run_token)
+                  |> Map.put("INFERENCE_SOCKET", "/tmp/inference.sock")
+                end
+              )
 
-        if original_run_token,
-          do: System.put_env("RUN_TOKEN", original_run_token),
-          else: System.delete_env("RUN_TOKEN")
+            {cmd, args} =
+              if Keyword.has_key?(opts_with_env, :agent_cmd) and
+                   Keyword.get(opts_with_env, :agent_cmd) != "docker" do
+                {Keyword.get(opts_with_env, :agent_cmd), Keyword.get(opts_with_env, :agent_args)}
+              else
+                cidfile =
+                  Keyword.get(opts_with_env, :cidfile) ||
+                    Path.join(
+                      System.tmp_dir!(),
+                      "cidfile_#{System.unique_integer([:positive])}.txt"
+                    )
 
-        if original_inf_socket,
-          do: System.put_env("INFERENCE_SOCKET", original_inf_socket),
-          else: System.delete_env("INFERENCE_SOCKET")
+                sandbox = %AgentOS.Sandbox{
+                  image: Keyword.get(opts_with_env, :image, "agent-discovery:dev"),
+                  cidfile: cidfile,
+                  network: Keyword.get(opts_with_env, :network, "none"),
+                  memory_mb: Keyword.get(opts_with_env, :memory_mb, 128),
+                  cpus: Keyword.get(opts_with_env, :cpus, "0.5"),
+                  user: Keyword.get(opts_with_env, :user, "1000:1000"),
+                  env: Keyword.get(opts_with_env, :env, %{}),
+                  entrypoint: Keyword.get(opts_with_env, :entrypoint),
+                  cmd_args: Keyword.get(opts_with_env, :cmd_args),
+                  mounts: [
+                    {Path.expand(
+                       Application.get_env(:agent_os, :inference_uds_path, "data/inference.sock")
+                     ), "/tmp/inference.sock"}
+                  ]
+                }
 
-        if GenServer.whereis(AgentOS.InferenceBroker) do
-          AgentOS.InferenceBroker.unregister(run_token)
+                {"docker", AgentOS.Sandbox.build_argv(sandbox)}
+              end
+
+            res = execute_run(cmd, args, manifest, agent_name, opts_with_env)
+
+            if original_run_token,
+              do: System.put_env("RUN_TOKEN", original_run_token),
+              else: System.delete_env("RUN_TOKEN")
+
+            if original_inf_socket,
+              do: System.put_env("INFERENCE_SOCKET", original_inf_socket),
+              else: System.delete_env("INFERENCE_SOCKET")
+
+            if GenServer.whereis(AgentOS.InferenceBroker) do
+              AgentOS.InferenceBroker.unregister(run_token)
+            end
+
+            res
         end
-
-        res
     end
   end
 

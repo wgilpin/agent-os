@@ -138,4 +138,164 @@ defmodule AgentOS.Provisioner do
     AgentOS.RunSupervisor.start_run()
     :ok
   end
+
+  @doc """
+  Runs the deploy-time safety rail checking if the deployment must block on a human.
+  """
+  @spec deploy(binary(), atom() | String.t(), keyword()) ::
+          {:ok, atom()}
+          | {:blocked, binary()}
+          | {:error, any()}
+  def deploy(manifest_path, review_mode, opts \\ []) do
+    agent_name = Path.basename(manifest_path, ".md")
+
+    case AgentOS.Manifest.load(manifest_path) do
+      {:ok, manifest} ->
+        # Render and log capabilities (Constitution VIII, REQ-always-emit)
+        cap_render = AgentOS.CapabilityRender.render(manifest)
+        Logger.info("Deploying Agent '#{agent_name}' with capabilities:\n#{cap_render}")
+
+        hash = manifest_hash(manifest_path)
+        normalized_mode = normalize_mode(review_mode)
+
+        # Check if already deployed with matching manifest hash
+        case get_recorded_provenance(agent_name) do
+          %{status: status, hash: ^hash} ->
+            {:ok, status}
+
+          _ ->
+            in_envelope? = envelope_predicate?(manifest, opts)
+            conformance_flagged? = gate_breach_flagged?(agent_name, opts)
+            is_risky? = not in_envelope? or conformance_flagged?
+
+            should_block? =
+              case normalized_mode do
+                :always_review -> true
+                :review_if_risky -> is_risky?
+                :dangerously_skip_review -> false
+              end
+
+            if should_block? do
+              ref = "ref_deploy_#{agent_name}_#{System.unique_integer([:positive])}"
+
+              action = %AgentOS.ProposedAction{
+                type: "deploy",
+                recipient: agent_name,
+                method: manifest_path,
+                payload: %{"review_mode" => to_string(normalized_mode), "hash" => hash}
+              }
+
+              grant = %AgentOS.Manifest.Grant{
+                connector: "deploy",
+                recipients: nil,
+                methods: nil
+              }
+
+              pending_store = AgentOS.StateStore.snapshot("pending_approvals")
+              approvals = Map.get(pending_store, :approvals, %{})
+
+              updated_approvals =
+                Map.put(approvals, ref, %{ref: ref, action: action, grant: grant})
+
+              :ok =
+                AgentOS.StateStore.apply_action(
+                  "pending_approvals",
+                  {:put, :approvals, updated_approvals}
+                )
+
+              {:blocked, ref}
+            else
+              provenance =
+                case normalized_mode do
+                  :review_if_risky -> :skipped_in_envelope
+                  :dangerously_skip_review -> :dangerously_skipped
+                end
+
+              :ok = record_provenance(agent_name, provenance, hash)
+              {:ok, provenance}
+            end
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Pure deterministic boolean evaluator over manifest fields.
+  """
+  @spec envelope_predicate?(AgentOS.Manifest.t(), keyword()) :: boolean()
+  def envelope_predicate?(manifest, opts \\ []) do
+    # 1. Read-only: grants mutate no state
+    entries = AgentOS.CapabilityRender.entries(manifest)
+    read_only? = Enum.all?(entries, fn entry -> entry.danger == :read_only end)
+
+    # 2. No-egress: danger level not external
+    no_egress? = Enum.all?(entries, fn entry -> entry.danger != :external end)
+
+    # 3. Spend cap under threshold (default 100_000 micro-dollars / $0.10)
+    threshold = Keyword.get(opts, :spend_threshold, 100_000)
+    spend_under_threshold? = manifest.spend.cap <= threshold
+
+    read_only? and no_egress? and spend_under_threshold?
+  end
+
+  @doc """
+  Computes SHA-256 hash of the manifest file.
+  """
+  @spec manifest_hash(binary()) :: binary()
+  def manifest_hash(manifest_path) do
+    case File.read(manifest_path) do
+      {:ok, content} -> :crypto.hash(:sha256, content) |> Base.encode16()
+      _ -> ""
+    end
+  end
+
+  @doc """
+  Writes provenance metadata for the agent to the provenance StateStore.
+  """
+  @spec record_provenance(binary(), atom(), binary()) :: :ok
+  def record_provenance(agent_name, status, hash) do
+    provenance_record = %{status: status, hash: hash}
+    AgentOS.StateStore.apply_action("provenance", {:put, agent_name, provenance_record})
+  end
+
+  defp get_recorded_provenance(agent_name) do
+    try do
+      AgentOS.StateStore.snapshot("provenance")[agent_name]
+    rescue
+      _ -> nil
+    catch
+      :exit, _ -> nil
+    end
+  end
+
+  defp gate_breach_flagged?(agent_name, opts) do
+    conformance_store = Keyword.get(opts, :conformance_store, "conformance")
+
+    try do
+      case AgentOS.StateStore.snapshot(conformance_store)[agent_name] do
+        %AgentOS.ConformanceAuditor.Verdict{status: :flagged, flags: flags} ->
+          Enum.any?(flags, fn flag -> flag.type == :gate_breach end)
+
+        _ ->
+          false
+      end
+    rescue
+      _ -> false
+    catch
+      :exit, _ -> false
+    end
+  end
+
+  defp normalize_mode("--always-review"), do: :always_review
+  defp normalize_mode("always-review"), do: :always_review
+  defp normalize_mode(:always_review), do: :always_review
+  defp normalize_mode("--review-if-risky"), do: :review_if_risky
+  defp normalize_mode("review-if-risky"), do: :review_if_risky
+  defp normalize_mode(:review_if_risky), do: :review_if_risky
+  defp normalize_mode("--dangerously-skip-review"), do: :dangerously_skip_review
+  defp normalize_mode("dangerously-skip-review"), do: :dangerously_skip_review
+  defp normalize_mode(:dangerously_skip_review), do: :dangerously_skip_review
+  defp normalize_mode(_), do: :always_review
 end

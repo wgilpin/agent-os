@@ -366,5 +366,63 @@ defmodule AgentOS.TriggerGatewayTest do
       assert res == {:resolved, :unknown_ref}
       refute_receive {:effector_called, _}
     end
+
+    test "deploy approval resumption records provenance and triggers start_run" do
+      tmp_provenance =
+        Path.join(System.tmp_dir!(), "provenance_#{System.unique_integer([:positive])}.term")
+
+      on_exit(fn -> File.rm(tmp_provenance) end)
+
+      start_supervised!({StateStore, name: "provenance", path: tmp_provenance, initial: %{}})
+
+      # Start a dummy RunSupervisor so it doesn't crash on cast
+      defmodule DummyRunSupervisor do
+        use GenServer
+
+        def start_link(_opts),
+          do: GenServer.start_link(__MODULE__, nil, name: AgentOS.RunSupervisor)
+
+        def init(_), do: {:ok, nil}
+        def handle_cast({:start_run, _}, state), do: {:noreply, state}
+      end
+
+      start_supervised!(DummyRunSupervisor)
+
+      manifest_path = "manifests/discovery.md"
+      agent_name = "discovery"
+      hash = "MOCKHASH123"
+
+      action = %AgentOS.ProposedAction{
+        type: "deploy",
+        recipient: agent_name,
+        method: manifest_path,
+        payload: %{"review_mode" => "always_review", "hash" => hash}
+      }
+
+      grant = %AgentOS.Manifest.Grant{
+        connector: "deploy",
+        recipients: nil,
+        methods: nil
+      }
+
+      :ok =
+        StateStore.apply_action(
+          "pending_approvals",
+          {:put, :approvals,
+           %{"ref_deploy_test" => %{ref: "ref_deploy_test", action: action, grant: grant}}}
+        )
+
+      res = TriggerGateway.submit_sync({:approval, :approve, "ref_deploy_test"})
+
+      assert res == {:resolved, :approved}
+
+      # Verify provenance recorded in provenance StateStore
+      provenance = StateStore.snapshot("provenance")
+      assert Map.get(provenance, agent_name) == %{status: :reviewed_human, hash: hash}
+
+      # Verify entry removed from pending approvals
+      snapshot = StateStore.snapshot("pending_approvals")
+      assert Map.get(snapshot.approvals, "ref_deploy_test") == nil
+    end
   end
 end

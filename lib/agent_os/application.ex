@@ -41,6 +41,10 @@ defmodule AgentOS.Application do
            name: "conformance",
            path: Application.get_env(:agent_os, :conformance_path, "data/conformance.term"),
            initial: %{}},
+          {AgentOS.StateStore,
+           name: "provenance",
+           path: Application.get_env(:agent_os, :provenance_path, "data/provenance.term"),
+           initial: %{}},
           AgentOS.CredentialProxy,
           AgentOS.InferenceBroker,
 

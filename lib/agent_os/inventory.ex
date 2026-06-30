@@ -111,6 +111,23 @@ defmodule AgentOS.Inventory do
           |> Enum.map(&"        #{&1}")
           |> Enum.join("\n")
 
+        provenance_str =
+          case try_get_provenance(agent_name) do
+            nil ->
+              "DEPLOY PROVENANCE: unknown"
+
+            %{status: status} ->
+              provenance_val =
+                case status do
+                  :reviewed_human -> "reviewed=human"
+                  :skipped_in_envelope -> "skipped-in-envelope"
+                  :dangerously_skipped -> "dangerously-skipped"
+                  other -> to_string(other)
+                end
+
+              "DEPLOY PROVENANCE: #{provenance_val}"
+          end
+
         conformance_str =
           case try_get_conformance_verdict(agent_name) do
             nil ->
@@ -155,6 +172,7 @@ defmodule AgentOS.Inventory do
         PURPOSE: #{manifest.purpose}
         TRIGGERS: #{inspect(manifest.triggers)}
         #{capabilities_str}
+        #{provenance_str}
         MOUNTS: #{inspect(manifest.mounts)}
         SPEND: #{format_dollars(entry.spent)} / #{format_dollars(manifest.spend.cap)} per #{manifest.spend.window}
         OWNER/SUPERVISION: #{manifest.owner} / #{manifest.supervision}
@@ -224,6 +242,16 @@ defmodule AgentOS.Inventory do
   defp try_get_conformance_verdict(agent_name) do
     try do
       AgentOS.StateStore.snapshot("conformance")[agent_name]
+    rescue
+      _ -> nil
+    catch
+      :exit, _ -> nil
+    end
+  end
+
+  defp try_get_provenance(agent_name) do
+    try do
+      AgentOS.StateStore.snapshot("provenance")[agent_name]
     rescue
       _ -> nil
     catch

@@ -50,6 +50,19 @@ defmodule AgentOS.Effector do
     end
   end
 
+  def act(%{
+        action: %ProposedAction{
+          type: "deploy",
+          recipient: agent_name,
+          method: manifest_path,
+          payload: %{"hash" => hash}
+        }
+      }) do
+    :ok = AgentOS.Provisioner.record_provenance(agent_name, :reviewed_human, hash)
+    AgentOS.RunSupervisor.start_run(manifest_path: manifest_path)
+    :ok
+  end
+
   def act(%{action: %ProposedAction{type: other_type}}) do
     {:error, {:unknown_action, other_type}}
   end

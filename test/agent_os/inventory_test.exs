@@ -29,6 +29,12 @@ defmodule AgentOS.InventoryTest do
         "conformance_inventory_#{System.unique_integer([:positive])}.term"
       )
 
+    tmp_provenance =
+      Path.join(
+        System.tmp_dir!(),
+        "provenance_inventory_#{System.unique_integer([:positive])}.term"
+      )
+
     on_exit(fn ->
       try do
         File.rm(tmp_roster)
@@ -53,6 +59,12 @@ defmodule AgentOS.InventoryTest do
       rescue
         _ -> :ok
       end
+
+      try do
+        File.rm(tmp_provenance)
+      rescue
+        _ -> :ok
+      end
     end)
 
     start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})
@@ -69,11 +81,14 @@ defmodule AgentOS.InventoryTest do
 
     start_supervised!({StateStore, name: "conformance", path: tmp_conformance, initial: %{}})
 
+    start_supervised!({StateStore, name: "provenance", path: tmp_provenance, initial: %{}})
+
     {:ok,
      tmp_roster: tmp_roster,
      tmp_spend: tmp_spend,
      tmp_approvals: tmp_approvals,
-     tmp_conformance: tmp_conformance}
+     tmp_conformance: tmp_conformance,
+     tmp_provenance: tmp_provenance}
   end
 
   test "render/1 returns standing inventory text" do
@@ -212,6 +227,29 @@ defmodule AgentOS.InventoryTest do
       assert report =~ "  [trust]  gate-breach — manifest-breach attempt recorded in last 20 runs"
       assert report =~ "  [trust]  denied-approval — 3 approval-required actions denied in window"
       assert report =~ "  [health] quiet — no action in 3 consecutive runs"
+    end
+
+    test "renders DEPLOY PROVENANCE from provenance StateStore" do
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ "DEPLOY PROVENANCE: unknown"
+
+      :ok =
+        StateStore.apply_action(
+          "provenance",
+          {:put, "discovery", %{status: :skipped_in_envelope, hash: "123"}}
+        )
+
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ "DEPLOY PROVENANCE: skipped-in-envelope"
+
+      :ok =
+        StateStore.apply_action(
+          "provenance",
+          {:put, "discovery", %{status: :reviewed_human, hash: "123"}}
+        )
+
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ "DEPLOY PROVENANCE: reviewed=human"
     end
   end
 end

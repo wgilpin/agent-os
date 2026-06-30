@@ -43,7 +43,7 @@ defmodule AgentOS.Connector do
   """
   @spec get(String.t()) :: {:ok, capability()} | {:error, :unknown_connector}
   def get(name) when is_binary(name) do
-    case Map.fetch(@registry, name) do
+    case Map.fetch(registry(), name) do
       {:ok, cap} -> {:ok, cap}
       :error -> {:error, :unknown_connector}
     end
