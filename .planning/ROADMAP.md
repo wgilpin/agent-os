@@ -123,29 +123,63 @@ Plans:
 - [x] 04-04: Stage 1 — elicit the spec; the orchestrator questions the user until the purpose is KISS-clear (the load-bearing human-in-the-loop step that the co-generation caveat depends on) — REQ-elicit-spec
 - [x] 04-05: Stage 2 — write the manifest (the safety artifact, not the judge) from the elicited spec; reuses the 04-01 render for the consent view — REQ-gen-manifest
 - [ ] 04-06: Stage 3 — write the judge; eval-lite that certifies code-matches-manifest (NOT manifest-matches-intent) — **resolves OQ: judge co-generation (does the judge need an independent derivation path, or is stage-1 elicitation enough?)** — REQ-write-judge
-- [ ] 04-07: Stage 4 — write the novel agent body; synthesise NEW Python/PydanticAI code (not template, not composition) across the port boundary — REQ-write-novel-agent
+- [x] 04-07: Stage 4 — write the novel agent body; synthesise NEW Python/PydanticAI code (not template, not composition) across the port boundary — REQ-write-novel-agent (merged 2026-07-01)
 - [ ] 04-08: Stage 5 — security-review agent; reads code+manifest+purpose, judges "written to satisfy purpose without breaching manifest" as a smoke detector, not the firewall — **resolves OQ: security-review ↔ conformance-auditor shared injection/evasion surface** — REQ-security-review
 
 *Wire it shut:*
 - [ ] 04-09: Stage 6 — deploy-on-green; gate deploy on a pass from BOTH judge AND security-review, plugged into the 04-03 review-mode rail; re-verify the manifest-not-readable-by-agent invariant now holds for a MACHINE-WRITTEN manifest — REQ-deploy-on-green
 - [ ] 04-10: E2E MVP thread + world-B-on-generated — the worked example ("reply to recruiter emails") runs the full pipeline human-out-of-the-loop after the conversation, AND the spec-008 world-B suite is re-run against a *generated* agent (machine-written manifest + machine-written code) — the headline acceptance criterion: enforcement holds regardless of code the OS wrote itself
 
+### Phase 5: Live Connectivity & Client (v4)
+**Goal**: Transition from static stubs to live model calls over the internet.
+**Depends on**: Phase 4
+**Success Criteria** (what must be TRUE):
+  1. The inference broker dynamically communicates with upstream endpoints (like OpenRouter) for all agent and generation calls.
+  2. Model credentials are securely loaded at runtime without being exposed to sandboxed containers.
+**Plans**: 3
+- [ ] 05-01: HTTP Client & OpenRouter Transport — Add client dependency and implement actual HTTP routing in InferenceBroker.
+- [ ] 05-02: Secure Secret Provisioning — Dynamically load model API keys via CredentialProxy from environment/vault.
+- [ ] 05-03: Token Pricing Sync — Define dynamic model price lookups matching OpenRouter specs for spend metering.
+
+### Phase 6: Phoenix/LiveView Control Plane (v5)
+**Goal**: Build a user-facing dashboard and interactive interface for controlling the generation cycle.
+**Depends on**: Phase 5
+**Success Criteria** (what must be TRUE):
+  1. Users can interactively converse with the elicitation orchestrator through a web interface.
+  2. A secure consent screen displays exact permission grants before code execution.
+**Plans**: 3
+- [ ] 06-01: Interactive Elicitation UI — Conversational LiveView workspace for user specification elicitation.
+- [ ] 06-02: Consent Screen UI — LiveView render of the mechanical capability render for approval.
+- [ ] 06-03: Standing Inventory Dashboard — Renders active agent roster, spend status, and audit logs.
+
+### Phase 7: Hardening & Sandbox (v6)
+**Goal**: Elevate sandboxing security and communication interfaces to production standards.
+**Depends on**: Phase 6
+**Success Criteria** (what must be TRUE):
+  1. Agent container execution drops privileges and isolates the host system.
+  2. Unix socket communication is secured via runtime constraints.
+**Plans**: 2
+- [ ] 07-01: Container Privilege Restriction — Restrict docker capabilities, implement read-only filesystems, and strict CPU/memory limits.
+- [ ] 07-02: Socket Security & Permissions — Restrict socket accessibility and sanitize mounted directories inside the container.
+
 **Sequencing rationale**: the rail (04-01…03) is generation-independent and built on the existing
 discovery agent, delivering standing legibility/safety value (consent screen, auditor, review modes)
 before generation exists and de-risking the machinery that doesn't depend on generation quality. The
 generation pipeline (04-04…08) is the natural elicit→manifest→judge→agent→review thread, each stage
 consuming the prior's artifact. 04-09 plugs generation into the rail; 04-10 is the integration + the
-world-B-on-machine-written acceptance that is the whole point of v3. (Alternative ordering — pipeline
-first, rail at the end — is viable but defers the de-risking and the standalone rail value.)
+world-B-on-machine-written acceptance that is the whole point of v3. Phases 5–7 build post-MVP viability: connectivity first, followed by visual/control interfaces, ending with production-grade security sandboxing.
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Walking Skeleton (v0) | 5/5 | Complete | 2026-06-28 |
 | 2. Isolation (v1) | 3/3 | Complete | 2026-06-28 |
 | 3. Manifest Enforcement (v2) | 8/8 | Complete — world-B proven | 2026-06-29 |
-| 4. Generation MVP (v3) | 2/10 | In progress — completed: 04-01, 04-03 | - |
+| 4. Generation MVP (v3) | 5/10 | In progress — completed: 04-01, 04-03, 04-04, 04-05, 04-07 | - |
+| 5. Live Connectivity (v4) | 0/3 | Not started | - |
+| 6. LiveView Control Plane (v5) | 0/3 | Not started | - |
+| 7. Hardening & Sandbox (v6) | 0/2 | Not started | - |
