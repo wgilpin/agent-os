@@ -117,7 +117,7 @@ Plans:
 *Rail (generation-independent; built & proven on the EXISTING hand-written discovery agent — same "earn it on easy mode first" discipline as v2):*
 - [x] 04-01: Deterministic capability render — manifest → faithful/total/danger-ranked normie-readable consent view; a mechanical lookup from capability-type to phrase, NEVER LLM-written, and unable to drift from the actual grants (permission-visibility axis; always on, no flag)
 - [ ] 04-02: Conformance auditor — post-deploy, reads run-traces, compares stated purpose vs observed behaviour, FLAG-ONLY (never blesses, never auto-gates deploy); provenance rendered in the inventory — REQ-check-conformance
-- [ ] 04-03: Review modes + deterministic envelope predicate — `--always-review` (v3-launch default) | `--review-if-risky` | `--dangerously-skip-review`; the envelope is a deterministic predicate over manifest fields (read-only / no-egress / spend-under-threshold), never an LLM judgement; all three modes sit ABOVE the gate and none is permission to cross it; deploy provenance (reviewed=human | skipped-in-envelope | dangerously-skipped) recorded — **resolves OQ: envelope threshold + auditor-as-precondition for envelope-eligibility**
+- [x] 04-03: Review modes + deterministic envelope predicate — `--always-review` (v3-launch default) | `--review-if-risky` | `--dangerously-skip-review`; the envelope is a deterministic predicate over manifest fields (read-only / no-egress / spend-under-threshold), never an LLM judgement; all three modes sit ABOVE the gate and none is permission to cross it; deploy provenance (reviewed=human | skipped-in-envelope | dangerously-skipped) recorded (commit eb675cf) — **resolves OQ: envelope threshold + auditor-as-precondition for envelope-eligibility**
 
 *Generation pipeline (the novel part; the OS authors an agent):*
 - [ ] 04-04: Stage 1 — elicit the spec; the orchestrator questions the user until the purpose is KISS-clear (the load-bearing human-in-the-loop step that the co-generation caveat depends on) — REQ-elicit-spec
@@ -148,4 +148,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Walking Skeleton (v0) | 5/5 | Complete | 2026-06-28 |
 | 2. Isolation (v1) | 3/3 | Complete | 2026-06-28 |
 | 3. Manifest Enforcement (v2) | 8/8 | Complete — world-B proven | 2026-06-29 |
-| 4. Generation MVP (v3) | 0/10 | Not started — next: 04-01 capability render | - |
+| 4. Generation MVP (v3) | 2/10 | In progress — completed: 04-01, 04-03 | - |
