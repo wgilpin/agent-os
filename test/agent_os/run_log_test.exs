@@ -59,4 +59,65 @@ defmodule AgentOS.RunLogTest do
       assert parsed_trigger == trigger
     end
   end
+
+  import ExUnit.CaptureLog
+
+  test "read_records/2 parses records, excludes digest lines, and obeys window limit", %{tmp: tmp} do
+    File.write!(tmp, """
+    - [2026-06-30T10:00:00Z] digest: starting agent
+    - [2026-06-30T10:01:00Z] status=ok actions=5 trigger=manual items_in=10 items_dropped=2 notes
+    - [2026-06-30T10:02:00Z] digest: checkpoint saved
+    - [2026-06-30T10:03:00Z] status=ok actions=0 trigger=timer quiet run
+    - [2026-06-30T10:04:00Z] status=alert actions=1 trigger=approval-resume denied ref=ref_1 gate_reasons=["forbidden"] breached_count=1 note with info
+    """)
+
+    records = RunLog.read_records(tmp)
+    assert length(records) == 3
+
+    r1 = Enum.at(records, 0)
+    assert r1.status == "ok"
+    assert r1.actions == 5
+    assert r1.trigger == "manual"
+    assert r1.items_in == 10
+    assert r1.items_dropped == 2
+    assert r1.note == "notes"
+
+    r2 = Enum.at(records, 1)
+    assert r2.status == "ok"
+    assert r2.actions == 0
+    assert r2.trigger == "timer"
+    assert r2.note == "quiet run"
+
+    r3 = Enum.at(records, 2)
+    assert r3.status == "alert"
+    assert r3.actions == 1
+    assert r3.trigger == "approval-resume"
+    assert r3.breached_count == 1
+    assert r3.gate_reasons == ["forbidden"]
+    assert r3.note == "denied ref=ref_1 note with info"
+
+    limited_records = RunLog.read_records(tmp, window: 2)
+    assert length(limited_records) == 2
+    assert Enum.at(limited_records, 0).note == "quiet run"
+    assert Enum.at(limited_records, 1).note == "denied ref=ref_1 note with info"
+  end
+
+  test "read_records/2 skips malformed lines and logs a warning", %{tmp: tmp} do
+    File.write!(tmp, """
+    - [2026-06-30T10:01:00Z] status=ok actions=5 valid record
+    - [2026-06-30T10:02:00Z] status=ok actions=invalid_number malformed record
+    - [2026-06-30T10:03:00Z] status=ok actions=2 another valid record
+    """)
+
+    log =
+      capture_log(fn ->
+        records = RunLog.read_records(tmp)
+        assert length(records) == 2
+        assert Enum.at(records, 0).note == "valid record"
+        assert Enum.at(records, 1).note == "another valid record"
+      end)
+
+    assert log =~ "Failed to parse run-log line"
+    assert log =~ "actions=invalid_number"
+  end
 end

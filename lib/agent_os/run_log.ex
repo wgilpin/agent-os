@@ -110,4 +110,121 @@ defmodule AgentOS.RunLog do
     # Return :ok.
     :ok
   end
+
+  @doc """
+  Reads the run-log, keeps lines containing `status=` (excludes `digest:`),
+  parses each into a `RunRecord`, skips unparsable lines with a `Logger.warning`,
+  and returns the last `:window` records (default all) in chronological order.
+  """
+  @spec read_records(Path.t(), keyword()) :: [AgentOS.ConformanceAuditor.RunRecord.t()]
+  def read_records(run_log_path, opts \\ []) do
+    window = Keyword.get(opts, :window)
+
+    if File.exists?(run_log_path) do
+      records =
+        File.stream!(run_log_path)
+        |> Stream.filter(&String.contains?(&1, "status="))
+        |> Stream.map(&parse_record_line/1)
+        |> Stream.filter(&match?({:ok, _}, &1))
+        |> Enum.map(fn {:ok, record} -> record end)
+
+      if window do
+        Enum.take(records, -window)
+      else
+        records
+      end
+    else
+      []
+    end
+  end
+
+  defp parse_record_line(line) do
+    # Strip timestamp and extract fields
+    status = extract_field_parser(line, ~r/\bstatus=([^\s]+)/)
+    actions_str = extract_field_parser(line, ~r/\bactions=([^\s]+)/)
+
+    if status && actions_str do
+      case Integer.parse(actions_str) do
+        {actions, _} ->
+          trigger = extract_field_parser(line, ~r/\btrigger=([^\s]+)/)
+          items_in = parse_int_parser(extract_field_parser(line, ~r/\bitems_in=([^\s]+)/), 0)
+
+          items_dropped =
+            parse_int_parser(extract_field_parser(line, ~r/\bitems_dropped=([^\s]+)/), 0)
+
+          rejected_count =
+            parse_int_parser(extract_field_parser(line, ~r/\brejected_count=([^\s]+)/), 0)
+
+          parked_count =
+            parse_int_parser(extract_field_parser(line, ~r/\bparked_count=([^\s]+)/), 0)
+
+          breached_count =
+            parse_int_parser(extract_field_parser(line, ~r/\bbreached_count=([^\s]+)/), 0)
+
+          gate_reasons_str = extract_field_parser(line, ~r/\bgate_reasons=(\[[^\]]*\])/)
+
+          gate_reasons =
+            if gate_reasons_str do
+              try do
+                {list, _} = Code.eval_string(gate_reasons_str)
+                if is_list(list), do: Enum.map(list, &to_string/1), else: []
+              rescue
+                _ -> []
+              end
+            else
+              []
+            end
+
+          # Strip fields to get the note
+          fields_regex =
+            ~r/\b(status|actions|trigger|exit_code|failure_cause|items_in|items_dropped|approved_count|rejected_count|parked_count|breached_count)=\S+|\bgate_reasons=\[[^\]]*\]/
+
+          note =
+            line
+            |> String.replace(~r/^- \[.*?\]/, "")
+            |> String.replace(fields_regex, "")
+            |> String.replace(~r/\s+/, " ")
+            |> String.trim()
+
+          {:ok,
+           %AgentOS.ConformanceAuditor.RunRecord{
+             status: status,
+             actions: actions,
+             trigger: trigger,
+             items_in: items_in,
+             items_dropped: items_dropped,
+             rejected_count: rejected_count,
+             parked_count: parked_count,
+             breached_count: breached_count,
+             gate_reasons: gate_reasons,
+             note: note
+           }}
+
+        :error ->
+          require Logger
+          Logger.warning("Failed to parse run-log line actions count: #{String.trim(line)}")
+          {:error, :malformed}
+      end
+    else
+      require Logger
+      Logger.warning("Failed to parse run-log line status or actions: #{String.trim(line)}")
+      {:error, :malformed}
+    end
+  end
+
+  defp extract_field_parser(line, regex) do
+    case Regex.run(regex, line) do
+      [_, val] -> val
+      _ -> nil
+    end
+  end
+
+  defp parse_int_parser(nil, default), do: default
+
+  defp parse_int_parser(str, default) do
+    case Integer.parse(str) do
+      {val, _} -> val
+      :error -> default
+    end
+  end
 end

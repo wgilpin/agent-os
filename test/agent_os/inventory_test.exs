@@ -23,6 +23,12 @@ defmodule AgentOS.InventoryTest do
         "pending_approvals_inventory_#{System.unique_integer([:positive])}.term"
       )
 
+    tmp_conformance =
+      Path.join(
+        System.tmp_dir!(),
+        "conformance_inventory_#{System.unique_integer([:positive])}.term"
+      )
+
     on_exit(fn ->
       try do
         File.rm(tmp_roster)
@@ -41,6 +47,12 @@ defmodule AgentOS.InventoryTest do
       rescue
         _ -> :ok
       end
+
+      try do
+        File.rm(tmp_conformance)
+      rescue
+        _ -> :ok
+      end
     end)
 
     start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})
@@ -55,7 +67,13 @@ defmodule AgentOS.InventoryTest do
       {StateStore, name: "pending_approvals", path: tmp_approvals, initial: %{approvals: %{}}}
     )
 
-    {:ok, tmp_roster: tmp_roster, tmp_spend: tmp_spend, tmp_approvals: tmp_approvals}
+    start_supervised!({StateStore, name: "conformance", path: tmp_conformance, initial: %{}})
+
+    {:ok,
+     tmp_roster: tmp_roster,
+     tmp_spend: tmp_spend,
+     tmp_approvals: tmp_approvals,
+     tmp_conformance: tmp_conformance}
   end
 
   test "render/1 returns standing inventory text" do
@@ -140,5 +158,60 @@ defmodule AgentOS.InventoryTest do
     assert report =~ "Pending approvals:"
     assert report =~ "ref_42"
     assert report =~ "external_send → owner-inbox"
+  end
+
+  describe "conformance visibility" do
+    alias AgentOS.ConformanceAuditor.Verdict
+    alias AgentOS.ConformanceAuditor.Flag
+
+    test "renders insufficient data when no verdict exists" do
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ "CONFORMANCE: insufficient data (0 runs recorded)"
+    end
+
+    test "renders CONFORMANCE: clean when persisted verdict is clean" do
+      verdict = %Verdict{
+        agent: "discovery",
+        status: :clean,
+        flags: [],
+        computed_at: DateTime.utc_now()
+      }
+
+      :ok = StateStore.apply_action("conformance", {:put, "discovery", verdict})
+
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ "CONFORMANCE: clean"
+    end
+
+    test "renders CONFORMANCE: flagged with flags categorized by axis" do
+      f1 = %Flag{
+        type: :gate_breach,
+        severity: :tripwire,
+        description: "manifest-breach attempt recorded in last 20 runs"
+      }
+
+      f2 = %Flag{
+        type: :denied_approval,
+        severity: :count,
+        description: "3 approval-required actions denied in window"
+      }
+
+      f3 = %Flag{type: :quiet, severity: :health, description: "no action in 3 consecutive runs"}
+
+      verdict = %Verdict{
+        agent: "discovery",
+        status: :flagged,
+        flags: [f1, f2, f3],
+        computed_at: DateTime.utc_now()
+      }
+
+      :ok = StateStore.apply_action("conformance", {:put, "discovery", verdict})
+
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ "CONFORMANCE: flagged"
+      assert report =~ "  [trust]  gate-breach — manifest-breach attempt recorded in last 20 runs"
+      assert report =~ "  [trust]  denied-approval — 3 approval-required actions denied in window"
+      assert report =~ "  [health] quiet — no action in 3 consecutive runs"
+    end
   end
 end

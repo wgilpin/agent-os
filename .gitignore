@@ -33,6 +33,10 @@ wheels/
 /data/pending_approvals.term
 /data/pending_approvals.term.tmp
 
+# Conformance Store terms
+/data/conformance.term
+/data/conformance.term.tmp
+
 # Universal
 Thumbs.db
 *.tmp

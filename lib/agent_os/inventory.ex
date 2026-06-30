@@ -5,6 +5,8 @@ defmodule AgentOS.Inventory do
   the RosterStore without communicating with the agent process.
   """
 
+  alias AgentOS.ConformanceAuditor.Verdict
+
   @doc """
   Renders a human-readable standing inventory report.
 
@@ -109,6 +111,42 @@ defmodule AgentOS.Inventory do
           |> Enum.map(&"        #{&1}")
           |> Enum.join("\n")
 
+        conformance_str =
+          case try_get_conformance_verdict(agent_name) do
+            nil ->
+              "CONFORMANCE: insufficient data (#{records_count} runs recorded)"
+
+            %Verdict{status: :insufficient_data} ->
+              "CONFORMANCE: insufficient data (#{records_count} runs recorded)"
+
+            %Verdict{status: :clean} ->
+              "CONFORMANCE: clean"
+
+            %Verdict{status: :flagged, flags: flags} ->
+              flag_lines =
+                flags
+                |> Enum.map(fn flag ->
+                  axis =
+                    case flag.type do
+                      :quiet -> "health"
+                      :sick -> "health"
+                      :denied_approval -> "trust"
+                      :gate_breach -> "trust"
+                    end
+
+                  type_str =
+                    flag.type
+                    |> to_string()
+                    |> String.replace("_", "-")
+
+                  prefix = String.pad_trailing("  [#{axis}]", 10)
+                  "#{prefix} #{type_str} — #{flag.description}"
+                end)
+                |> Enum.join("\n")
+
+              "CONFORMANCE: flagged\n" <> flag_lines
+          end
+
         # Build and return the final report string using multiline heredoc (`"""`).
         # `#{expression}` is used for string interpolation.
         """
@@ -125,6 +163,7 @@ defmodule AgentOS.Inventory do
         Total Records: #{records_count}
         Last Digest: #{last_digest}
         #{last_run_details}
+        #{conformance_str}
         """
         |> String.trim_trailing()
         |> Kernel.<>(pending_approvals_str)
@@ -180,5 +219,15 @@ defmodule AgentOS.Inventory do
   defp format_dollars(micro_dollars) do
     dollars = micro_dollars / 1_000_000
     "$" <> :erlang.float_to_binary(dollars, [:compact, decimals: 6])
+  end
+
+  defp try_get_conformance_verdict(agent_name) do
+    try do
+      AgentOS.StateStore.snapshot("conformance")[agent_name]
+    rescue
+      _ -> nil
+    catch
+      :exit, _ -> nil
+    end
   end
 end

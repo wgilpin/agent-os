@@ -37,6 +37,10 @@ defmodule AgentOS.Application do
                "data/pending_approvals.term"
              ),
            initial: %{approvals: %{}}},
+          {AgentOS.StateStore,
+           name: "conformance",
+           path: Application.get_env(:agent_os, :conformance_path, "data/conformance.term"),
+           initial: %{}},
           AgentOS.CredentialProxy,
           AgentOS.InferenceBroker,
 
@@ -47,7 +51,10 @@ defmodule AgentOS.Application do
           AgentOS.TriggerGateway,
 
           # Scheduler is the GenServer running the daily 07:00 self-rescheduling timer loop.
-          {AgentOS.Scheduler, []}
+          {AgentOS.Scheduler, []},
+
+          # ConformanceAuditor.Scheduler reschedules itself daily to run the conformance audit.
+          {AgentOS.ConformanceAuditor.Scheduler, []}
         ]
       else
         # Empty tree for testing context.
