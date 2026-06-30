@@ -26,6 +26,20 @@ defmodule AgentOS.Connector do
       requires_approval?: true,
       credential: :outbound_token,
       cost: 2000
+    },
+    "gmail_read" => %{
+      name: "gmail_read",
+      mutating?: false,
+      requires_approval?: false,
+      credential: nil,
+      cost: 0
+    },
+    "gmail_draft" => %{
+      name: "gmail_draft",
+      mutating?: true,
+      requires_approval?: false,
+      credential: nil,
+      cost: 0
     }
   }
 

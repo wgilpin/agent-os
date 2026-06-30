@@ -59,3 +59,13 @@
 - [2026-06-30T18:28:41.864085Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
 - [2026-06-30T18:28:44.817162Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
 - [2026-06-30T18:28:44.820849Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99
+- [2026-06-30T18:45:13.000249Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99
+- [2026-06-30T18:45:13.105275Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
+- [2026-06-30T18:45:13.476568Z] status=ok actions=1 trigger=approval-resume approved ref=ref_deploy_test
+- [2026-06-30T18:45:16.715419Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
+- [2026-06-30T18:45:16.717131Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99
+- [2026-06-30T18:46:13.297235Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99
+- [2026-06-30T18:46:13.605963Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
+- [2026-06-30T18:46:13.926172Z] status=ok actions=1 trigger=approval-resume approved ref=ref_deploy_test
+- [2026-06-30T18:46:14.039363Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
+- [2026-06-30T18:46:14.043152Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99

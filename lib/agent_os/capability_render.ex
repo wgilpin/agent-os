@@ -10,7 +10,9 @@ defmodule AgentOS.CapabilityRender do
   # Keys are agent-agnostic (FR-008, Constitution IX).
   @phrases %{
     "kv_append" => "WRITE TO YOUR LOCAL STATE STORE",
-    "external_send" => "SEND MESSAGES OUT TO EXTERNAL RECIPIENTS"
+    "external_send" => "SEND MESSAGES OUT TO EXTERNAL RECIPIENTS",
+    "gmail_read" => "READ INCOMING EMAILS FROM GMAIL",
+    "gmail_draft" => "CREATE DRAFT EMAILS IN GMAIL"
   }
 
   @spec entries(Manifest.t()) :: [Entry.t()]

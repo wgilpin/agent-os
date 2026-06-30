@@ -52,9 +52,17 @@ These are locked and not re-litigated per feature:
 
 ## Stack
 
-- **Control plane:** Elixir ~> 1.20 on BEAM/OTP (`lib/agent_os/`).
-- **Agent workload:** a sandboxed Python discovery agent (`agents/discovery/`), shipped
-  as a deterministic stub for tests.
+**The language boundary is the trust boundary.** Elixir is the trusted, deterministic
+substrate; Python is untrusted agent workload, quarantined behind the BEAM port. Nothing
+in `lib/agent_os/` is agent code, and no agent code lives outside `agents/`.
+
+- **Control plane:** Elixir ~> 1.20 on BEAM/OTP (`lib/agent_os/`) — kernel, gate,
+  orchestration, scheduler, triggers. The elicitation orchestrator
+  (`elicitation_session.ex`) is a substrate-side GenServer like everything else here.
+- **Agent workloads:** sandboxed Python agents under `agents/<name>/`, run across the
+  BEAM port boundary (`port_runner.ex`) — currently the discovery agent
+  (`agents/discovery/`) and the elicitor agent (`agents/elicitor/`). Python appears
+  *only* here. Shipped as deterministic stubs for tests.
 - **Tests:** ExUnit, deterministic only — no live LLM, no network, no Docker in any test.
 
 ## Roadmap so far

@@ -120,7 +120,7 @@ Plans:
 - [x] 04-03: Review modes + deterministic envelope predicate — `--always-review` (v3-launch default) | `--review-if-risky` | `--dangerously-skip-review`; the envelope is a deterministic predicate over manifest fields (read-only / no-egress / spend-under-threshold), never an LLM judgement; all three modes sit ABOVE the gate and none is permission to cross it; deploy provenance (reviewed=human | skipped-in-envelope | dangerously-skipped) recorded (commit eb675cf) — **resolves OQ: envelope threshold + auditor-as-precondition for envelope-eligibility**
 
 *Generation pipeline (the novel part; the OS authors an agent):*
-- [ ] 04-04: Stage 1 — elicit the spec; the orchestrator questions the user until the purpose is KISS-clear (the load-bearing human-in-the-loop step that the co-generation caveat depends on) — REQ-elicit-spec
+- [x] 04-04: Stage 1 — elicit the spec; the orchestrator questions the user until the purpose is KISS-clear (the load-bearing human-in-the-loop step that the co-generation caveat depends on) — REQ-elicit-spec
 - [ ] 04-05: Stage 2 — write the manifest (the safety artifact, not the judge) from the elicited spec; reuses the 04-01 render for the consent view — REQ-gen-manifest
 - [ ] 04-06: Stage 3 — write the judge; eval-lite that certifies code-matches-manifest (NOT manifest-matches-intent) — **resolves OQ: judge co-generation (does the judge need an independent derivation path, or is stage-1 elicitation enough?)** — REQ-write-judge
 - [ ] 04-07: Stage 4 — write the novel agent body; synthesise NEW Python/PydanticAI code (not template, not composition) across the port boundary — REQ-write-novel-agent

@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.13",
+    "google-genai>=0.1.1",
 ]
 
 [dependency-groups]
