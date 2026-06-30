@@ -102,6 +102,13 @@ defmodule AgentOS.Inventory do
             "\nPending approvals:\n" <> lines <> "\n"
           end
 
+        capabilities_str =
+          manifest
+          |> AgentOS.CapabilityRender.render()
+          |> String.split("\n", trim: true)
+          |> Enum.map(&"        #{&1}")
+          |> Enum.join("\n")
+
         # Build and return the final report string using multiline heredoc (`"""`).
         # `#{expression}` is used for string interpolation.
         """
@@ -109,7 +116,7 @@ defmodule AgentOS.Inventory do
         ===========================
         PURPOSE: #{manifest.purpose}
         TRIGGERS: #{inspect(manifest.triggers)}
-        GRANTS: #{inspect(manifest.grants)}
+        #{capabilities_str}
         MOUNTS: #{inspect(manifest.mounts)}
         SPEND: #{format_dollars(entry.spent)} / #{format_dollars(manifest.spend.cap)} per #{manifest.spend.window}
         OWNER/SUPERVISION: #{manifest.owner} / #{manifest.supervision}

@@ -70,7 +70,10 @@ defmodule AgentOS.InventoryTest do
 
     assert report =~ "Agent OS Standing Inventory"
     assert report =~ "PURPOSE: Surface high-signal"
-    assert report =~ "GRANTS: ["
+    assert report =~ "CAPABILITIES:"
+    assert report =~ "WRITE TO YOUR LOCAL STATE STORE"
+    assert report =~ "SEND MESSAGES OUT TO EXTERNAL RECIPIENTS"
+    refute report =~ "GRANTS:"
     assert report =~ "SPEND: $0.0 / $0.5 per daily"
     assert report =~ "Total Records: 1"
     assert report =~ "Last Digest: test digest text"

@@ -1,5 +1,5 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-`specs/008-world-b-verification/plan.md`
+`specs/009-capability-render/plan.md`
 <!-- SPECKIT END -->

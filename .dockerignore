@@ -32,3 +32,11 @@ Dockerfile*
 # Logs and env
 *.log
 .env*
+
+# Universal
+Thumbs.db
+*.tmp
+*.swp
+.vscode/
+.idea/
+

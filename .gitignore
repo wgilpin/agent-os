@@ -32,3 +32,11 @@ wheels/
 # Pending approvals terms
 /data/pending_approvals.term
 /data/pending_approvals.term.tmp
+
+# Universal
+Thumbs.db
+*.tmp
+*.swp
+.vscode/
+.idea/
+

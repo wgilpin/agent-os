@@ -90,7 +90,7 @@ Plans:
 - [x] 03-04: Spend {cap, window, on_breach} — meter at chokepoint, per-agent visibility, real kill-on-breach — spec 005-spend-metering (commit 32b2d81)
 - [x] 03-04a: Dollar spend metering via an inference chokepoint — spend becomes real dollars (tokens × price), metered trustlessly at a substrate-side inference broker — spec 006-dollar-spend-metering (commit 93baa16)
 - [x] 03-05: Event-trigger + approval-as-event-trigger + message-trigger — spec 007 (commit f114c6d)
-- [ ] 03-06: World-B verification — gate physically prevents breach regardless of agent code (last) — ⬅ **NEXT**
+- [x] 03-06: World-B verification — gate physically prevents breach regardless of agent code (last) — spec 008-world-b-verification (merged 2026-06-29)
 
 ### Phase 4: Generation MVP (v3)
 **Goal**: The OS becomes itself: a non-coder declares a purpose and the OS synthesises a NOVEL agent (new code, not template/compose) behind the deterministic gate proven in Phase 3. The six-stage pipeline runs human-out-of-the-loop after the conversation: elicit spec → write manifest → write judge → write novel agent → security-review → deploy-on-green. Security-review (reads code pre-deploy, gate-on-green) and the conformance-auditor (reads run-traces post-deploy, flag-only) are distinct components; neither is the firewall. Auto-deploy-on-green is sound ONLY in world B.
@@ -103,19 +103,40 @@ Plans:
   4. On pass from BOTH judge and security-review, the agent deploys with no further human input — and the gate still enforces the machine-written manifest at runtime even under --dangerously-skip-review.
   5. Review mode (--always-review default | --review-if-risky | --dangerously-skip-review) governs whether deploy blocks on a human; the envelope is a deterministic predicate over manifest fields; permission visibility is always shown at deploy in every mode.
   6. The conformance auditor compares stated purpose vs observed behaviour from real run-traces, flag-only — it can raise a flag, never grant a pass, and never auto-gates deployment; provenance (reviewed=human | skipped-in-envelope | dangerously-skipped) is recorded in the inventory.
-**Plans**: TBD
+**Plans**: 10 (re-mapped 2026-06-29 from the 6 stage-placeholders)
 
-> **SCOPE NOTE (do not treat as one release):** v3 is itself an entire roadmap. The
-> six plans below are the pipeline stages, NOT a final decomposition. When v3 is next
-> worked, re-map it as its own release sequence via a dedicated milestone/roadmap pass.
+> **SCOPE NOTE (do not treat as one release):** v3 is itself an entire roadmap, and
+> scope-gravity relocates here if unchecked. The 10 plans below are the dependency-ordered
+> re-map called for by the design doc (agent-os-design.md:206); the original 6 were pipeline
+> stages, not a decomposition. Two overloaded stages were split (old 04-02 → render + gen;
+> old 04-06 → review-modes + deploy + auditor) and the three open v3 design questions are
+> folded into the plans that own them. Sequencing rationale below the list.
 
 Plans:
-- [ ] 04-01: Stage 1 — elicit the spec (question until KISS-clear)
-- [ ] 04-02: Stage 2 — write the manifest (the safety artifact) + faithful/total/danger-ranked capability render
-- [ ] 04-03: Stage 3 — write the judge (co-generation caveat: certifies code-matches-manifest)
-- [ ] 04-04: Stage 4 — write the novel agent body (Python/PydanticAI across the port boundary)
-- [ ] 04-05: Stage 5 — security-review (reads code+manifest+purpose; smoke detector, not firewall)
-- [ ] 04-06: Stage 6 — deploy-on-green + review modes + envelope predicate; conformance auditor (flag-only, post-deploy)
+
+*Rail (generation-independent; built & proven on the EXISTING hand-written discovery agent — same "earn it on easy mode first" discipline as v2):*
+- [x] 04-01: Deterministic capability render — manifest → faithful/total/danger-ranked normie-readable consent view; a mechanical lookup from capability-type to phrase, NEVER LLM-written, and unable to drift from the actual grants (permission-visibility axis; always on, no flag)
+- [ ] 04-02: Conformance auditor — post-deploy, reads run-traces, compares stated purpose vs observed behaviour, FLAG-ONLY (never blesses, never auto-gates deploy); provenance rendered in the inventory — REQ-check-conformance
+- [ ] 04-03: Review modes + deterministic envelope predicate — `--always-review` (v3-launch default) | `--review-if-risky` | `--dangerously-skip-review`; the envelope is a deterministic predicate over manifest fields (read-only / no-egress / spend-under-threshold), never an LLM judgement; all three modes sit ABOVE the gate and none is permission to cross it; deploy provenance (reviewed=human | skipped-in-envelope | dangerously-skipped) recorded — **resolves OQ: envelope threshold + auditor-as-precondition for envelope-eligibility**
+
+*Generation pipeline (the novel part; the OS authors an agent):*
+- [ ] 04-04: Stage 1 — elicit the spec; the orchestrator questions the user until the purpose is KISS-clear (the load-bearing human-in-the-loop step that the co-generation caveat depends on) — REQ-elicit-spec
+- [ ] 04-05: Stage 2 — write the manifest (the safety artifact, not the judge) from the elicited spec; reuses the 04-01 render for the consent view — REQ-gen-manifest
+- [ ] 04-06: Stage 3 — write the judge; eval-lite that certifies code-matches-manifest (NOT manifest-matches-intent) — **resolves OQ: judge co-generation (does the judge need an independent derivation path, or is stage-1 elicitation enough?)** — REQ-write-judge
+- [ ] 04-07: Stage 4 — write the novel agent body; synthesise NEW Python/PydanticAI code (not template, not composition) across the port boundary — REQ-write-novel-agent
+- [ ] 04-08: Stage 5 — security-review agent; reads code+manifest+purpose, judges "written to satisfy purpose without breaching manifest" as a smoke detector, not the firewall — **resolves OQ: security-review ↔ conformance-auditor shared injection/evasion surface** — REQ-security-review
+
+*Wire it shut:*
+- [ ] 04-09: Stage 6 — deploy-on-green; gate deploy on a pass from BOTH judge AND security-review, plugged into the 04-03 review-mode rail; re-verify the manifest-not-readable-by-agent invariant now holds for a MACHINE-WRITTEN manifest — REQ-deploy-on-green
+- [ ] 04-10: E2E MVP thread + world-B-on-generated — the worked example ("reply to recruiter emails") runs the full pipeline human-out-of-the-loop after the conversation, AND the spec-008 world-B suite is re-run against a *generated* agent (machine-written manifest + machine-written code) — the headline acceptance criterion: enforcement holds regardless of code the OS wrote itself
+
+**Sequencing rationale**: the rail (04-01…03) is generation-independent and built on the existing
+discovery agent, delivering standing legibility/safety value (consent screen, auditor, review modes)
+before generation exists and de-risking the machinery that doesn't depend on generation quality. The
+generation pipeline (04-04…08) is the natural elicit→manifest→judge→agent→review thread, each stage
+consuming the prior's artifact. 04-09 plugs generation into the rail; 04-10 is the integration + the
+world-B-on-machine-written acceptance that is the whole point of v3. (Alternative ordering — pipeline
+first, rail at the end — is viable but defers the de-risking and the standalone rail value.)
 
 ## Progress
 
@@ -126,5 +147,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Walking Skeleton (v0) | 5/5 | Complete | 2026-06-28 |
 | 2. Isolation (v1) | 3/3 | Complete | 2026-06-28 |
-| 3. Manifest Enforcement (v2) | 7/8 | In progress — next: 03-06 world-B | - |
-| 4. Generation MVP (v3) | 0/6 | Not started | - |
+| 3. Manifest Enforcement (v2) | 8/8 | Complete — world-B proven | 2026-06-29 |
+| 4. Generation MVP (v3) | 0/10 | Not started — next: 04-01 capability render | - |

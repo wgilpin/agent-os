@@ -28,3 +28,15 @@
 - [2026-06-29T22:36:30.361243Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
 - [2026-06-29T22:36:33.656005Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
 - [2026-06-29T22:36:33.663108Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99
+- [2026-06-29T22:47:33.994938Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99
+- [2026-06-29T22:47:34.099577Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
+- [2026-06-29T22:47:37.136342Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
+- [2026-06-29T22:47:37.138471Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99
+- [2026-06-29T23:27:07.400591Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
+- [2026-06-29T23:27:07.402592Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99
+- [2026-06-29T23:27:07.609725Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99
+- [2026-06-29T23:27:08.021817Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
+- [2026-06-29T23:28:15.443784Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
+- [2026-06-29T23:28:15.656154Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99
+- [2026-06-29T23:28:15.894360Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
+- [2026-06-29T23:28:15.896302Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99
