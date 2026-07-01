@@ -90,17 +90,15 @@ def run_mock(session_data: Dict[str, Any]) -> ElicitorResponse:
 
 def run_live(session_data: Dict[str, Any]) -> ElicitorResponse:
     """
-    Runs the live elicitation using Gemini SDK with structured JSON output.
+    Runs the live elicitation using OpenRouter with structured JSON output.
     """
-    from google import genai
-    from google.genai import types
+    import urllib.request
+    import urllib.error
 
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = os.environ.get("MODEL_KEY")
     if not api_key:
-        print("Error: GEMINI_API_KEY environment variable is required", file=sys.stderr)
+        print("Error: MODEL_KEY environment variable is required", file=sys.stderr)
         sys.exit(1)
-
-    client = genai.Client(api_key=api_key)
 
     transcript = session_data.get("transcript", [])
     original_purpose = session_data.get("original_purpose", "")
@@ -127,21 +125,58 @@ def run_live(session_data: Dict[str, Any]) -> ElicitorResponse:
 
     prompt = f"Original Purpose declared: {original_purpose}\n\nConversation Transcript:\n" + "\n".join(formatted_transcript)
 
+    # Append JSON Schema details to ensure output format compliance
+    schema_desc = json.dumps(ElicitorResponse.model_json_schema(), indent=2)
+    system_instruction_with_schema = (
+        system_instruction
+        + f"\n\nYou MUST return a JSON object that strictly conforms to this JSON Schema:\n{schema_desc}"
+    )
+
+    messages = [
+        {"role": "system", "content": system_instruction_with_schema},
+        {"role": "user", "content": prompt}
+    ]
+
+    model = os.environ.get("OPENROUTER_MODEL", "google/gemini-2.5-flash")
+    url = "https://openrouter.ai/api/v1/chat/completions"
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "response_format": {
+            "type": "json_object"
+        }
+    }
+
     try:
-        response = client.models.generate_content(
-            model='gemini-3-flash-preview',
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                response_mime_type="application/json",
-                response_schema=ElicitorResponse,
-            )
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            method="POST"
         )
-        # Parse the JSON response
-        data = json.loads(response.text)
-        return ElicitorResponse.model_validate(data)
+
+        with urllib.request.urlopen(req, timeout=60) as response:
+            res_body = response.read().decode("utf-8")
+            res_json = json.loads(res_body)
+            choices = res_json.get("choices", [])
+            if not choices:
+                raise ValueError(f"Empty choices in OpenRouter response: {res_body}")
+            
+            content = choices[0]["message"]["content"]
+            parsed_content = json.loads(content)
+            return ElicitorResponse.model_validate(parsed_content)
+            
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8")
+        print(f"Error calling OpenRouter API (HTTP {e.code}): {err_body}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
-        print(f"Error calling Gemini: {e}", file=sys.stderr)
+        print(f"Error calling OpenRouter: {e}", file=sys.stderr)
         sys.exit(1)
 
 def main():
