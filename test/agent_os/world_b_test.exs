@@ -63,7 +63,7 @@ defmodule AgentOS.WorldBTest do
 
     # Prices registry for trustless metering tests
     prices = %{
-      "mock-model" => %{input: 10, output: 30}
+      "mock-model" => %{input: 10_000_000, output: 30_000_000}
     }
 
     # Fixed time for spend window

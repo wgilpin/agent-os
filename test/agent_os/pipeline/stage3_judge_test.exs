@@ -7,7 +7,7 @@ defmodule AgentOS.Pipeline.Stage3Test do
   alias AgentOS.Manifest.Spend
 
   @model "mock-model"
-  @prices %{"mock-model" => %{input: 10, output: 30}}
+  @prices %{"mock-model" => %{input: 10_000_000, output: 30_000_000}}
   @now ~U[2026-06-30 12:00:00Z]
 
   setup do

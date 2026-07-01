@@ -7,7 +7,7 @@ defmodule AgentOS.Pipeline.Stage4Test do
   alias AgentOS.Manifest.{Spend, Grant}
 
   @model "mock-codegen-model"
-  @prices %{"mock-codegen-model" => %{input: 10, output: 30}}
+  @prices %{"mock-codegen-model" => %{input: 10_000_000, output: 30_000_000}}
   @now ~U[2026-06-30 12:00:00Z]
 
   setup do

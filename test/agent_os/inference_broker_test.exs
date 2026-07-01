@@ -39,7 +39,7 @@ defmodule AgentOS.InferenceBrokerTest do
     :ok = InferenceBroker.register(run_token, agent_name, manifest)
 
     prices = %{
-      "mock-model" => %{input: 10, output: 30}
+      "mock-model" => %{input: 10_000_000, output: 30_000_000}
     }
 
     now = ~U[2026-06-29 12:00:00Z]
@@ -258,5 +258,57 @@ defmodule AgentOS.InferenceBrokerTest do
     ledger = StateStore.snapshot("spend_ledger")
     entry = Map.get(ledger, context.agent_name)
     assert entry == nil or entry.spent == 0
+  end
+
+  test "T021 (g) sub-micro-dollar pricing precision: no rounding to 0, rounds up to at least 1 micro-dollar",
+       context do
+    # Define a cheap model priced at 0.15 micro-dollars / token (150,000 pico-dollars / token)
+    cheap_prices = %{
+      "cheap-model" => %{input: 150_000, output: 600_000}
+    }
+
+    req = %{
+      run_token: context.run_token,
+      model: "cheap-model",
+      messages: [%{role: "user", content: "hello"}]
+    }
+
+    # Case 1: 1000 input tokens. Cost: 1000 * 150,000 = 150,000,000 pico-dollars = 150 micro-dollars
+    provider_fn = fn _model, _messages, _secret ->
+      %{input_tokens: 1000, output_tokens: 0, completion: "hello response"}
+    end
+
+    assert {:ok, _} =
+             InferenceBroker.complete(req,
+               now: context.now,
+               provider_fn: provider_fn,
+               prices: cheap_prices
+             )
+
+    ledger = StateStore.snapshot("spend_ledger")
+    entry = Map.get(ledger, context.agent_name)
+    assert entry.spent == 150
+
+    # Reset ledger spent to 0
+    StateStore.apply_action(
+      "spend_ledger",
+      {:put, context.agent_name, %{spent: 0, window_start: context.now}}
+    )
+
+    # Case 2: 1 input token. Cost: 1 * 150,000 = 150,000 pico-dollars. Rounds up to 1 micro-dollar.
+    provider_fn_small = fn _model, _messages, _secret ->
+      %{input_tokens: 1, output_tokens: 0, completion: "hello response"}
+    end
+
+    assert {:ok, _} =
+             InferenceBroker.complete(req,
+               now: context.now,
+               provider_fn: provider_fn_small,
+               prices: cheap_prices
+             )
+
+    ledger2 = StateStore.snapshot("spend_ledger")
+    entry2 = Map.get(ledger2, context.agent_name)
+    assert entry2.spent == 1
   end
 end

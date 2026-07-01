@@ -24,7 +24,7 @@ config :agent_os,
   # Prod placeholder for the real Gemini 3-series model in micro-dollars
   inference_prices: %{
     # "gemini-3-flash" => %{input: 75, output: 250}
-    "google/gemini-2.5-flash" => %{input: 75, output: 250}
+    "google/gemini-2.5-flash" => %{input: 75_000_000, output: 250_000_000}
   }
 
 # Hard-wired agent configuration (manifest path, command, timezone, schedule, and capabilities)
@@ -52,7 +52,7 @@ if config_env() == :test do
       model_key: "test_secret_model_key_value"
     },
     inference_prices: %{
-      "mock-model" => %{input: 10, output: 30},
-      "google/gemini-2.5-flash" => %{input: 10, output: 30}
+      "mock-model" => %{input: 10_000_000, output: 30_000_000},
+      "google/gemini-2.5-flash" => %{input: 10_000_000, output: 30_000_000}
     }
 end

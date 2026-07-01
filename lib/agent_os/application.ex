@@ -72,6 +72,7 @@ defmodule AgentOS.Application do
            initial: %{}},
           AgentOS.CredentialProxy,
           AgentOS.InferenceBroker,
+          {AgentOS.InferencePriceSync, []},
 
           # RunSupervisor handles starting and retrying worker execution tasks.
           AgentOS.RunSupervisor,
