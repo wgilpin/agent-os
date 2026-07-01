@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <title>Agent OS Elicitor</title>
+    <!-- Use Outfit or Inter Google Fonts for high-end aesthetics -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link phx-track-static rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <%= @inner_content %>
+    <!-- Load Phoenix and LiveView scripts served by our Endpoint -->
+    <script phx-track-static type="text/javascript" src="/phoenix/phoenix.js"></script>
+    <script phx-track-static type="text/javascript" src="/phoenix_live_view/phoenix_live_view.js"></script>
+    <script phx-track-static type="text/javascript" src="/app.js"></script>
+  </body>
+</html>

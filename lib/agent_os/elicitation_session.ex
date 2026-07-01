@@ -222,7 +222,14 @@ defmodule AgentOS.ElicitationSession do
       Path.expand(Application.get_env(:agent_os, :inference_uds_path, "data/inference.sock"))
     )
 
-    res = PortRunner.run(input_payload, python_bin, ["agents/elicitor/main.py"])
+    script =
+      if System.get_env("MOCK_ELICITOR") == "true" do
+        "agents/elicitor/mock_main.py"
+      else
+        "agents/elicitor/main.py"
+      end
+
+    res = PortRunner.run(input_payload, python_bin, [script])
 
     if original_run_token,
       do: System.put_env("RUN_TOKEN", original_run_token),

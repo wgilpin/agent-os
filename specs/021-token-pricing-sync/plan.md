@@ -1,98 +1,104 @@
-# Implementation Plan: Token Pricing Sync
+# Implementation Plan: [FEATURE]
 
-**Branch**: `021-token-pricing-sync` | **Date**: 2026-07-01 | **Spec**: [spec.md](file:///Users/will/projects/agent_os/specs/021-token-pricing-sync/spec.md)
-**Input**: Feature specification from `/specs/021-token-pricing-sync/spec.md`
+**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
+**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
+
+**Note**: This template is filled in by the `/speckit-plan` command. See `.specify/templates/plan-template.md` for the execution workflow.
 
 ## Summary
-The goal of this feature is to dynamically fetch, scale, cache, and refresh OpenRouter model pricing on the substrate side of AgentOS. Pricing will be fetched from the public endpoint `https://openrouter.ai/api/v1/models` at startup and every 24 hours. The cost calculations will be updated to use micro-dollars per million tokens (pico-dollars per token) to prevent cheap models from rounding to 0. Fallback prices will be used when the API is down.
+
+[Extract from feature spec: primary requirement + technical approach from research]
 
 ## Technical Context
-**Language/Version**: Elixir 1.15+ (OTP 26)
-**Primary Dependencies**: `Req` (already in lockfile)
-**Storage**: Memory cache via application environment (`Application.put_env/3` / `Application.get_env/3`), configuration for offline fallback.
-**Testing**: ExUnit (run via `mix test`)
-**Target Platform**: BEAM / Host Substrate
-**Project Type**: Elixir OTP Substrate Service
-**Performance Goals**: Dynamic lookup under 1ms (direct ETS read via `Application.get_env/3` is <10 microseconds).
-**Constraints**: exact-integer math in the money path, fail-closed spend caps, zero live dependencies in tests.
-**Scale/Scope**: ~150-250 models loaded at boot.
+
+<!--
+  ACTION REQUIRED: Replace the content in this section with the technical details
+  for the project. The structure here is presented in advisory capacity to guide
+  the iteration process.
+-->
+
+**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]  
+**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]  
+**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]  
+**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]  
+**Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
+**Project Type**: [e.g., library/cli/web-service/mobile-app/compiler/desktop-app or NEEDS CLARIFICATION]  
+**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]  
+**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]  
+**Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
 
 ## Constitution Check
+
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-- **I. Simplicity First (Pass)**: Uses the standard application controller/environment for cache storage instead of a custom database or complex state management.
-- **IV. No Live Dependencies in Tests (Pass)**: All API calls to OpenRouter in tests will be mocked using the test options context `provider_fn` or `Req` stubs, asserting deterministic math.
-- **V. Strong Typing (Pass)**: All fields are typed. Elixir price lookup and calculation functions will use typespecs.
-- **IX. The Substrate Owns State & Lifecycle (Pass)**: The prices synced from OpenRouter are stored in the substrate's state and never reach sandboxed agent workloads.
+[Gates determined based on constitution file]
 
 ## Project Structure
+
 ### Documentation (this feature)
+
 ```text
-specs/021-token-pricing-sync/
-├── plan.md              # This file
-├── research.md          # Research findings on units and caching
-├── data-model.md        # Data entities, validation rules, state transitions
-├── quickstart.md        # Verifying configurations, logs, and cache state
-└── contracts/
-    └── openrouter-models-api.md  # API contract for pricing endpoint
+specs/[###-feature]/
+├── plan.md              # This file (/speckit-plan command output)
+├── research.md          # Phase 0 output (/speckit-plan command)
+├── data-model.md        # Phase 1 output (/speckit-plan command)
+├── quickstart.md        # Phase 1 output (/speckit-plan command)
+├── contracts/           # Phase 1 output (/speckit-plan command)
+└── tasks.md             # Phase 2 output (/speckit-tasks command - NOT created by /speckit-plan)
 ```
 
 ### Source Code (repository root)
+<!--
+  ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
+  for this feature. Delete unused options and expand the chosen structure with
+  real paths (e.g., apps/admin, packages/something). The delivered plan must
+  not include Option labels.
+-->
+
 ```text
-config/
-├── config.exs           # Modify fallback pricing values
+# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
+src/
+├── models/
+├── services/
+├── cli/
+└── lib/
 
-lib/agent_os/
-├── application.ex       # Start InferencePriceSync in supervisor
-├── inference_broker.ex  # Update complete/2 math to use new precision scale
-├── inference_price.ex   # Update price_entry/lookup/micro_dollars types/math
-└── inference_price_sync.ex  # [NEW] GenServer for boot sync and periodic fetch
+tests/
+├── contract/
+├── integration/
+└── unit/
 
-test/agent_os/
-├── inference_price_sync_test.exs  # [NEW] Test boot fetch, periodic refresh, mock API responses, fallback logic
-└── inference_broker_test.exs      # Update mock pricing values to new scale
+# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
+backend/
+├── src/
+│   ├── models/
+│   ├── services/
+│   └── api/
+└── tests/
+
+frontend/
+├── src/
+│   ├── components/
+│   ├── pages/
+│   └── services/
+└── tests/
+
+# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
+api/
+└── [same as backend above]
+
+ios/ or android/
+└── [platform-specific structure: feature modules, UI flows, platform tests]
 ```
 
-**Structure Decision**: Standard single Elixir project structure. Modifying `InferenceBroker` and `InferencePrice` in place, adding `InferencePriceSync` GenServer and its unit tests.
+**Structure Decision**: [Document the selected structure and reference the real
+directories captured above]
 
-## Proposed Changes
+## Complexity Tracking
 
-### Configuration & Application
+> **Fill ONLY if Constitution Check has violations that must be justified**
 
-#### [MODIFY] [config.exs](file:///Users/will/projects/agent_os/config/config.exs)
-- Update standard default pricing for `"google/gemini-2.5-flash"` to `%{input: 75_000_000, output: 250_000_000}` (micro-dollars per million tokens).
-- Update test environment `inference_prices` in the `if config_env() == :test do` block to use the scaled rates: e.g. `mock-model` -> `%{input: 10_000_000, output: 30_000_000}`.
-
-#### [MODIFY] [application.ex](file:///Users/will/projects/agent_os/lib/agent_os/application.ex)
-- Add `{AgentOS.InferencePriceSync, []}` to the supervision tree `children` list when `:autostart` is true.
-
-### Core Inference Logic
-
-#### [MODIFY] [inference_price.ex](file:///Users/will/projects/agent_os/lib/agent_os/inference_price.ex)
-- Update `@type price_entry` typespec to match scaled integer schema.
-- Update `micro_dollars/2` function to do scaled integer math (inputs in pico-dollars/token, output rounded up to micro-dollars).
-
-#### [MODIFY] [inference_broker.ex](file:///Users/will/projects/agent_os/lib/agent_os/inference_broker.ex)
-- Ensure pricing check works properly with updated types/structure.
-
-### Pricing Synchronization Service
-
-#### [NEW] [inference_price_sync.ex](file:///Users/will/projects/agent_os/lib/agent_os/inference_price_sync.ex)
-- Implement `AgentOS.InferencePriceSync` GenServer.
-- On startup (`init/1` via `handle_continue/2` or startup message), attempt to fetch OpenRouter's model pricing list.
-- Parse standard model structures, scale price prompt/completion to integers, merge with existing config env fallback prices, and update the environment variable `:inference_prices`.
-- Schedule a refresh message using `Process.send_after/3` to trigger a re-sync every 24 hours.
-
-## Verification Plan
-
-### Automated Tests
-- Run `mix test test/agent_os/inference_broker_test.exs` to ensure existing checks pass under the updated scale.
-- Run `mix test test/agent_os/inference_price_sync_test.exs` to verify:
-  1. Parsing logic: decimal strings like `"0.00000015"` convert correctly to `150_000`.
-  2. Happy path sync: merges API responses into `inference_prices` cache.
-  3. Failure fallback: when the API endpoint returns errors, fallbacks remain unchanged and warning logs are emitted.
-  4. Periodic sync triggers are scheduled.
-
-### Manual Verification
-- Run the system with network enabled: confirm successful boot sync log messages.
-- Run the system with network disabled (or pointing to an invalid port/host): confirm fallback warning logs and check that the static fallback prices are still loaded and queryable.
+| Violation | Why Needed | Simpler Alternative Rejected Because |
+|-----------|------------|-------------------------------------|
+| [e.g., 4th project] | [current need] | [why 3 projects insufficient] |
+| [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient] |

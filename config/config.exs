@@ -40,6 +40,20 @@ config :agent_os, :agent,
   ],
   spend: %{cap: 500_000, window: :daily, on_breach: :kill}
 
+# Phoenix/LiveView web interface configuration
+config :agent_os, AgentOSWeb.Endpoint,
+  http: [ip: {127, 0, 0, 1}, port: 4000],
+  server: true,
+  secret_key_base: "super_secret_key_base_that_is_at_least_64_characters_long_1234567890abcdef",
+  pubsub_server: AgentOS.PubSub,
+  live_view: [signing_salt: "g4x1p45OaYx6d/g3m7c8d9e/A1B2C3D4E5F6G7H8I9J0="],
+  render_errors: [
+    formats: [html: AgentOSWeb.ErrorHTML],
+    layout: false
+  ]
+
+config :phoenix, :json_library, Jason
+
 # In tests, the supervision tree does not auto-start the singleton state process — each
 # test starts its own StateStore against an isolated temp term-file (never live state).
 if config_env() == :test do
@@ -55,4 +69,9 @@ if config_env() == :test do
       "mock-model" => %{input: 10_000_000, output: 30_000_000},
       "google/gemini-2.5-flash" => %{input: 10_000_000, output: 30_000_000}
     }
+
+  config :agent_os, AgentOSWeb.Endpoint,
+    server: false,
+    http: [ip: {127, 0, 0, 1}, port: 4002]
 end
+

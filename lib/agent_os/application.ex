@@ -73,6 +73,8 @@ defmodule AgentOS.Application do
           AgentOS.CredentialProxy,
           AgentOS.InferenceBroker,
           {AgentOS.InferencePriceSync, []},
+          {Phoenix.PubSub, name: AgentOS.PubSub},
+          AgentOSWeb.Endpoint,
 
           # RunSupervisor handles starting and retrying worker execution tasks.
           AgentOS.RunSupervisor,

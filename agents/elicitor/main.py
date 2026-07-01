@@ -9,86 +9,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 
 from agents.elicitor.models import ElicitorResponse, ElicitedSpecModel, BoundaryModel, SpendLimitsModel
 
-def run_mock(session_data: Dict[str, Any]) -> ElicitorResponse:
-    """
-    Simulates the elicitation loop deterministically for testing without contacting Gemini.
-    """
-    transcript = session_data.get("transcript", [])
-    last_user_message = ""
-    for msg in reversed(transcript):
-        if msg.get("role") == "user":
-            last_user_message = msg.get("content", "")
-            break
-
-    # Mock conversation tree based on user inputs
-    if "delete recruiter emails" in last_user_message:
-        return ElicitorResponse(
-            spec_draft=ElicitedSpecModel(
-                purpose="reply to recruiter emails and save drafts",
-                capabilities=["gmail_read", "gmail_draft"],
-                boundaries=BoundaryModel(egress_domains=["gmail.googleapis.com"], target_locations=[]),
-                spend_limits=SpendLimitsModel(dollar_cap=0.05, token_limit=100000),
-                confirmed=False
-            ),
-            next_question="Do you confirm this minimised specification?",
-            scope_creep_detected=True,
-            pushback_message="Warning: Deleting emails was requested, but is not needed to reply. We have excluded delete capability to keep permissions minimal."
-        )
-    elif "yes" in last_user_message.lower():
-        # User confirmed the spec
-        return ElicitorResponse(
-            spec_draft=ElicitedSpecModel(
-                purpose="reply to recruiter emails and save drafts",
-                capabilities=["gmail_read", "gmail_draft"],
-                boundaries=BoundaryModel(egress_domains=["gmail.googleapis.com"], target_locations=[]),
-                spend_limits=SpendLimitsModel(dollar_cap=0.05, token_limit=100000),
-                confirmed=True
-            ),
-            next_question="",
-            scope_creep_detected=False,
-            pushback_message=""
-        )
-    elif "save drafts" in last_user_message.lower():
-        return ElicitorResponse(
-            spec_draft=ElicitedSpecModel(
-                purpose="reply to recruiter emails and save drafts",
-                capabilities=["gmail_read", "gmail_draft"],
-                boundaries=BoundaryModel(egress_domains=["gmail.googleapis.com"], target_locations=[]),
-                spend_limits=SpendLimitsModel(dollar_cap=0.05, token_limit=100000),
-                confirmed=False
-            ),
-            next_question="Do you confirm this minimised specification?",
-            scope_creep_detected=False,
-            pushback_message=""
-        )
-    elif "gmail" in last_user_message.lower():
-        return ElicitorResponse(
-            spec_draft=ElicitedSpecModel(
-                purpose="reply to recruiter emails",
-                capabilities=["gmail_read"],
-                boundaries=BoundaryModel(egress_domains=["gmail.googleapis.com"], target_locations=[]),
-                spend_limits=SpendLimitsModel(dollar_cap=0.01, token_limit=20000),
-                confirmed=False
-            ),
-            next_question="Should the agent send emails directly or just save drafts?",
-            scope_creep_detected=False,
-            pushback_message=""
-        )
-    else:
-        # Default starting response for "reply to recruiter emails" or anything else
-        return ElicitorResponse(
-            spec_draft=ElicitedSpecModel(
-                purpose="reply to recruiter emails",
-                capabilities=[],
-                boundaries=BoundaryModel(egress_domains=[], target_locations=[]),
-                spend_limits=SpendLimitsModel(dollar_cap=0.0, token_limit=0),
-                confirmed=False
-            ),
-            next_question="Which email service do you use? (e.g. Gmail)",
-            scope_creep_detected=False,
-            pushback_message=""
-        )
-
 def load_env_file():
     """Manually parse .env in project root to support dotenv formats with/without export."""
     root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -135,6 +55,7 @@ def run_live(session_data: Dict[str, Any]) -> ElicitorResponse:
     4. Fill in the ElicitedSpecModel structure representing the spec draft.
     5. Formulate a single, concise next clarifying question to ask the user. When the spec is KISS-clear and all boundaries/spends are decided, ask the user to confirm the spec.
     6. When the user confirms the spec (e.g., says "yes", "confirm", "looks good"), set confirmed to true.
+    7. NEVER ask the user about raw token limits or token counts. Instead, estimate a reasonable default token limit (e.g. 50,000 to 200,000 tokens based on the complexity and scope of the purpose) and fill it in automatically in the background.
     """
 
     # Format transcript messages for the prompt
@@ -247,11 +168,7 @@ def main():
         print(f"Error parsing input JSON: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Determine execution mode
-    if os.environ.get("MOCK_ELICITOR") == "true":
-        response = run_mock(session_data)
-    else:
-        response = run_live(session_data)
+    response = run_live(session_data)
 
     # Output structured response on stdout
     print(response.model_dump_json())

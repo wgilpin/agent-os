@@ -22,7 +22,12 @@ defmodule AgentOS.MixProject do
     [
       {:jason, "~> 1.4"},
       {:yaml_elixir, "~> 2.12"},
-      {:req, "~> 0.5"}
+      {:req, "~> 0.5"},
+      {:phoenix, "~> 1.7.10"},
+      {:phoenix_live_view, "~> 0.20.2"},
+      {:phoenix_html, "~> 4.0"},
+      {:plug_cowboy, "~> 2.6"},
+      {:floki, ">= 0.30.0", only: :test}
     ]
   end
 end
