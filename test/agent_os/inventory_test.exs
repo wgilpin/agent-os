@@ -298,4 +298,62 @@ defmodule AgentOS.InventoryTest do
       assert report =~ "JUDGE: fail (last run: 2026-06-30T22:15:00Z)"
     end
   end
+
+  describe "security review results visibility (Stage 5)" do
+    test "renders SECURITY REVIEW: unrun when no security review is recorded" do
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ "SECURITY REVIEW: unrun"
+    end
+
+    test "renders SECURITY REVIEW: pass with timestamp, reasoning, and disclaimer" do
+      tmp_review =
+        Path.join(
+          System.tmp_dir!(),
+          "review_inventory_#{System.unique_integer([:positive])}.term"
+        )
+
+      on_exit(fn -> File.rm(tmp_review) end)
+
+      start_supervised!(
+        {StateStore, name: "security_review_results", path: tmp_review, initial: %{}}
+      )
+
+      :ok =
+        StateStore.apply_action(
+          "security_review_results",
+          {:put, "discovery",
+           %{status: :pass, timestamp: ~U[2026-06-30 22:15:00Z], reasoning: "code looks safe"}}
+        )
+
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ "SECURITY REVIEW: pass (reviewed at: 2026-06-30T22:15:00Z)"
+      assert report =~ "Reasoning: code looks safe"
+      assert report =~ "Disclaimer: Security review is a probabilistic LLM smoke detector."
+    end
+
+    test "renders SECURITY REVIEW: fail when the review failed" do
+      tmp_review =
+        Path.join(
+          System.tmp_dir!(),
+          "review_inventory_#{System.unique_integer([:positive])}.term"
+        )
+
+      on_exit(fn -> File.rm(tmp_review) end)
+
+      start_supervised!(
+        {StateStore, name: "security_review_results", path: tmp_review, initial: %{}}
+      )
+
+      :ok =
+        StateStore.apply_action(
+          "security_review_results",
+          {:put, "discovery",
+           %{status: :fail, timestamp: ~U[2026-06-30 22:15:00Z], reasoning: "dangerous connector"}}
+        )
+
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ "SECURITY REVIEW: fail (reviewed at: 2026-06-30T22:15:00Z)"
+      assert report =~ "Reasoning: dangerous connector"
+    end
+  end
 end

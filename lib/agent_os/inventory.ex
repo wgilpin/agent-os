@@ -8,6 +8,7 @@ defmodule AgentOS.Inventory do
   alias AgentOS.ConformanceAuditor.Verdict
 
   @judge_disclaimer "Scope: CODE-MATCHES-MANIFEST. This does not verify human intent correctness."
+  @security_review_disclaimer "Scope: PROBABILISTIC CODE REVIEW. Disclaimer: Security review is a probabilistic LLM smoke detector."
 
   @doc """
   Renders a human-readable standing inventory report.
@@ -167,6 +168,7 @@ defmodule AgentOS.Inventory do
           end
 
         judge_str = render_judge(agent_name)
+        security_review_str = render_security_review(agent_name)
 
         # Build and return the final report string using multiline heredoc (`"""`).
         # `#{expression}` is used for string interpolation.
@@ -187,6 +189,7 @@ defmodule AgentOS.Inventory do
         #{last_run_details}
         #{conformance_str}
         #{judge_str}
+        #{security_review_str}
         """
         |> String.trim_trailing()
         |> Kernel.<>(pending_approvals_str)
@@ -292,6 +295,43 @@ defmodule AgentOS.Inventory do
   defp try_get_judge(agent_name) do
     try do
       AgentOS.StateStore.snapshot("judge_results")[agent_name]
+    rescue
+      _ -> nil
+    catch
+      :exit, _ -> nil
+    end
+  end
+
+  defp render_security_review(agent_name) do
+    case try_get_security_review(agent_name) do
+      nil ->
+        "SECURITY REVIEW: unrun"
+
+      entry ->
+        status_str =
+          case Map.get(entry, :status) do
+            :pass -> "pass"
+            :fail -> "fail"
+            :error -> "error"
+            other -> to_string(other)
+          end
+
+        run_detail =
+          case Map.get(entry, :timestamp) do
+            %DateTime{} = dt -> " (reviewed at: #{DateTime.to_iso8601(dt)})"
+            _ -> ""
+          end
+
+        reasoning = Map.get(entry, :reasoning) || ""
+        reasoning_str = if reasoning != "", do: "\nReasoning: #{reasoning}", else: ""
+
+        "SECURITY REVIEW: #{status_str}#{run_detail}#{reasoning_str}\n#{@security_review_disclaimer}"
+    end
+  end
+
+  defp try_get_security_review(agent_name) do
+    try do
+      AgentOS.StateStore.snapshot("security_review_results")[agent_name]
     rescue
       _ -> nil
     catch

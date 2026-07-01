@@ -41,6 +41,13 @@ wheels/
 /data/judge_results.term
 /data/judge_results.term.tmp
 
+# Security Review Results terms
+/data/security_review_results.term
+/data/security_review_results.term.tmp
+
+# Elicitation directories
+/data/elicitation/
+
 # Universal
 Thumbs.db
 *.tmp
