@@ -166,4 +166,22 @@ defmodule AgentOS.IsolationTest do
     assert log_content =~ "exit_code=137"
     assert log_content =~ "failure_cause=oom"
   end
+
+  @tag :docker
+  test "pids-limit prevents fork bomb", %{cidfile: cidfile} do
+    log_path = Path.join(System.tmp_dir!(), "forkbomb_test.md")
+    on_exit(fn -> File.rm(log_path) end)
+
+    assert {:error, {:exit_status, 42}} =
+             RunWorker.run_once(
+               agent_cmd: "docker",
+               cidfile: cidfile,
+               entrypoint: "/app/.venv/bin/python",
+               cmd_args: [
+                 "-c",
+                 "import os, sys\ntry:\n    for _ in range(100): os.fork()\nexcept OSError:\n    sys.exit(42)"
+               ],
+               run_log_path: log_path
+             )
+  end
 end
