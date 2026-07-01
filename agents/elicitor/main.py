@@ -88,12 +88,33 @@ def run_mock(session_data: Dict[str, Any]) -> ElicitorResponse:
             pushback_message=""
         )
 
+def load_env_file():
+    """Manually parse .env in project root to support dotenv formats with/without export."""
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+    env_path = os.path.join(root_dir, ".env")
+    if os.path.exists(env_path):
+        with open(env_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("export "):
+                    line = line[len("export "):].strip()
+                if "=" in line:
+                    key, val = line.split("=", 1)
+                    key = key.strip()
+                    val = val.strip().strip("'\"")
+                    if key:
+                        os.environ[key] = val
+
 def run_live(session_data: Dict[str, Any]) -> ElicitorResponse:
     """
     Runs the live elicitation using OpenRouter with structured JSON output.
     """
     import urllib.request
     import urllib.error
+
+    load_env_file()
 
     api_key = os.environ.get("MODEL_KEY")
     if not api_key:
