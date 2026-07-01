@@ -44,8 +44,8 @@ defmodule AgentOS.CredentialProxy do
 
   @impl true
   def init(:ok) do
-    # Load credentials map from Application environment
-    credentials = Application.get_env(:agent_os, :credentials, %{})
+    # Load credentials map dynamically from environment/config at runtime
+    credentials = AgentOS.CredentialSource.resolve_credentials()
     {:ok, credentials}
   end
 

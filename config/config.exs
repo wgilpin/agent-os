@@ -20,16 +20,12 @@ config :agent_os,
   spend_defaults: %{window: :daily, on_breach: :kill},
   elicitor_spend_cap: 10_000_000,
   autostart: true,
-  credentials: %{
-    outbound_token: System.get_env("OUTBOUND_TOKEN"),
-    model_key: System.get_env("MODEL_KEY")
-  },
+  credentials: %{},
   # Prod placeholder for the real Gemini 3-series model in micro-dollars
-  inference_prices:
-    %{
-      # "gemini-3-flash" => %{input: 75, output: 250}
-      "google/gemini-2.5-flash" => %{input: 75, output: 250}
-    }
+  inference_prices: %{
+    # "gemini-3-flash" => %{input: 75, output: 250}
+    "google/gemini-2.5-flash" => %{input: 75, output: 250}
+  }
 
 # Hard-wired agent configuration (manifest path, command, timezone, schedule, and capabilities)
 config :agent_os, :agent,

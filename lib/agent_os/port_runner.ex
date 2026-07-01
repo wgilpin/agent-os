@@ -38,7 +38,9 @@ defmodule AgentOS.PortRunner do
           :binary,
           :exit_status,
           {:args, [cmd | args]},
-          {:line, 1_000_000}
+          {:line, 1_000_000},
+          # Explicitly scrub host credentials from the child process's environment
+          env: [{~c"MODEL_KEY", false}, {~c"OUTBOUND_TOKEN", false}]
         ]
       )
 

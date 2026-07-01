@@ -2,13 +2,22 @@ defmodule AgentOS.Application do
   @moduledoc false
 
   use Application
+  require Logger
 
   # `@impl true` signals to the compiler that this function implements a callback
   # from the Application module behaviour.
   @impl true
   def start(_type, _args) do
-    # Load .env file at startup
-    load_env_file()
+    # Resolve credentials at startup
+    credentials = AgentOS.CredentialSource.resolve_credentials()
+
+    # Log a critical diagnostic if model key is missing/blank
+    if is_nil(Map.get(credentials, :model_key)) do
+      Logger.error("CRITICAL: Required model credential :model_key is missing or blank.")
+    end
+
+    # Store resolved credentials in the application environment
+    Application.put_env(:agent_os, :credentials, credentials)
 
     # Perform a startup drift check between config and manifest.
     # We retrieve the :autostart config flag, defaulting to true if not set.
@@ -87,51 +96,5 @@ defmodule AgentOS.Application do
 
     # Start the supervisor with the child specifications.
     Supervisor.start_link(children, opts)
-  end
-
-  defp load_env_file do
-    if File.exists?(".env") do
-      env_map =
-        File.stream!(".env")
-        |> Enum.reduce(%{}, fn line, acc ->
-          line = String.trim(line)
-
-          if line != "" and not String.starts_with?(line, "#") do
-            line =
-              if String.starts_with?(line, "export "),
-                do: String.slice(line, 7..-1//-1),
-                else: line
-
-            case String.split(line, "=", parts: 2) do
-              [key, val] ->
-                key = String.trim(key)
-                val = val |> String.trim() |> String.trim("\"") |> String.trim("'")
-                System.put_env(key, val)
-                Map.put(acc, key, val)
-
-              _ ->
-                acc
-            end
-          else
-            acc
-          end
-        end)
-
-      # Merge credentials into application config
-      credentials = Application.get_env(:agent_os, :credentials, %{})
-
-      updated_credentials =
-        credentials
-        |> Map.put(
-          :model_key,
-          Map.get(env_map, "MODEL_KEY") || Map.get(credentials, :model_key)
-        )
-        |> Map.put(
-          :outbound_token,
-          Map.get(env_map, "OUTBOUND_TOKEN") || Map.get(credentials, :outbound_token)
-        )
-
-      Application.put_env(:agent_os, :credentials, updated_credentials)
-    end
   end
 end

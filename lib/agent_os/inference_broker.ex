@@ -112,7 +112,9 @@ defmodule AgentOS.InferenceBroker do
 
         {:breach, :spend}
       else
-        provider_fn = Keyword.get(opts, :provider_fn) || Application.get_env(:agent_os, :provider_fn) || (&real_provider_fn/3)
+        provider_fn =
+          Keyword.get(opts, :provider_fn) || Application.get_env(:agent_os, :provider_fn) ||
+            (&real_provider_fn/3)
 
         # Call provider via CredentialProxy
         provider_result =
@@ -167,39 +169,44 @@ defmodule AgentOS.InferenceBroker do
 
   # Default/Real provider function using OpenRouter transport.
   defp real_provider_fn(model, messages, secret) do
-    url = "https://openrouter.ai/api/v1/chat/completions"
+    if is_nil(secret) or String.trim(secret) == "" do
+      Logger.error("Inference failed: model API key is missing or blank")
+      {:error, :missing_credential}
+    else
+      url = "https://openrouter.ai/api/v1/chat/completions"
 
-    headers = [
-      {"authorization", "Bearer #{secret}"},
-      {"content-type", "application/json"}
-    ]
+      headers = [
+        {"authorization", "Bearer #{secret}"},
+        {"content-type", "application/json"}
+      ]
 
-    body = %{
-      "model" => model,
-      "messages" => messages
-    }
+      body = %{
+        "model" => model,
+        "messages" => messages
+      }
 
-    case Req.post(url, json: body, headers: headers) do
-      {:ok, %Req.Response{status: 200, body: response_body}} ->
-        case parse_openrouter_response(response_body) do
-          {:ok, usage_data} ->
-            usage_data
+      case Req.post(url, json: body, headers: headers) do
+        {:ok, %Req.Response{status: 200, body: response_body}} ->
+          case parse_openrouter_response(response_body) do
+            {:ok, usage_data} ->
+              usage_data
 
-          {:error, reason} ->
-            {:error, reason}
-        end
+            {:error, reason} ->
+              {:error, reason}
+          end
 
-      {:ok, %Req.Response{status: status}} ->
-        Logger.error("OpenRouter API returned error status: #{status}")
-        {:error, {:http_status, status}}
+        {:ok, %Req.Response{status: status}} ->
+          Logger.error("OpenRouter API returned error status: #{status}")
+          {:error, {:http_status, status}}
 
-      {:error, %{reason: :timeout}} ->
-        Logger.error("OpenRouter API request timeout")
-        {:error, :timeout}
+        {:error, %{reason: :timeout}} ->
+          Logger.error("OpenRouter API request timeout")
+          {:error, :timeout}
 
-      {:error, reason} ->
-        Logger.error("OpenRouter API request failed: #{inspect(reason)}")
-        {:error, :network_error}
+        {:error, reason} ->
+          Logger.error("OpenRouter API request failed: #{inspect(reason)}")
+          {:error, :network_error}
+      end
     end
   end
 

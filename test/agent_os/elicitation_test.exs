@@ -86,12 +86,18 @@ defmodule AgentOS.ElicitationTest do
     original_inf_path = Application.get_env(:agent_os, :inference_uds_path)
     original_autostart = Application.get_env(:agent_os, :autostart)
 
-    tmp_socket = Path.join(System.tmp_dir!(), "elicitation_test_#{System.unique_integer([:positive])}.sock")
+    tmp_socket =
+      Path.join(System.tmp_dir!(), "elicitation_test_#{System.unique_integer([:positive])}.sock")
+
     Application.put_env(:agent_os, :inference_uds_path, tmp_socket)
     Application.put_env(:agent_os, :autostart, true)
 
-    tmp_spend = Path.join(System.tmp_dir!(), "spend_ledger_elicit_test_#{System.unique_integer([:positive])}.term")
-    
+    tmp_spend =
+      Path.join(
+        System.tmp_dir!(),
+        "spend_ledger_elicit_test_#{System.unique_integer([:positive])}.term"
+      )
+
     # Set up registry and state store
     start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})
     start_supervised!({AgentOS.StateStore, name: "spend_ledger", path: tmp_spend, initial: %{}})
@@ -101,8 +107,13 @@ defmodule AgentOS.ElicitationTest do
     on_exit(fn ->
       File.rm(tmp_spend)
       File.rm(tmp_socket)
-      if original_inf_path, do: Application.put_env(:agent_os, :inference_uds_path, original_inf_path)
-      if original_autostart != nil, do: Application.put_env(:agent_os, :autostart, original_autostart), else: Application.delete_env(:agent_os, :autostart)
+
+      if original_inf_path,
+        do: Application.put_env(:agent_os, :inference_uds_path, original_inf_path)
+
+      if original_autostart != nil,
+        do: Application.put_env(:agent_os, :autostart, original_autostart),
+        else: Application.delete_env(:agent_os, :autostart)
     end)
 
     # Configure mock provider function to return a structured JSON response
@@ -114,7 +125,7 @@ defmodule AgentOS.ElicitationTest do
         "purpose" => "reply to recruiter emails",
         "capabilities" => ["gmail_read"],
         "boundaries" => %{"egress_domains" => ["gmail.googleapis.com"], "target_locations" => []},
-        "spend_limits" => %{"dollar_cap" => 0.05, "token_limit" => 100000},
+        "spend_limits" => %{"dollar_cap" => 0.05, "token_limit" => 100_000},
         "confirmed" => false
       },
       "next_question" => "Should the agent send emails directly or just save drafts?",

@@ -98,6 +98,7 @@ defmodule AgentOS.ElicitationSession do
         if GenServer.whereis(AgentOS.InferenceBroker) do
           AgentOS.InferenceBroker.unregister(run_token)
         end
+
         {:stop, reason}
     end
   end
@@ -107,6 +108,7 @@ defmodule AgentOS.ElicitationSession do
     if GenServer.whereis(AgentOS.InferenceBroker) do
       AgentOS.InferenceBroker.unregister(run_token)
     end
+
     :ok
   end
 
@@ -217,9 +219,7 @@ defmodule AgentOS.ElicitationSession do
 
     System.put_env(
       "INFERENCE_SOCKET",
-      Path.expand(
-        Application.get_env(:agent_os, :inference_uds_path, "data/inference.sock")
-      )
+      Path.expand(Application.get_env(:agent_os, :inference_uds_path, "data/inference.sock"))
     )
 
     res = PortRunner.run(input_payload, python_bin, ["agents/elicitor/main.py"])
