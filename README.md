@@ -75,6 +75,25 @@ Built incrementally as numbered specs under `specs/`:
 4. **004 — Credential proxy**: the substrate holds keys and brokers them per-use.
 5. **005 — Spend metering & real kill-on-breach**: per-agent budgets with a hard kill.
 6. **006 — Dollar spend metering**: real dollars, metered at the inference chokepoint.
+7. **007 — Event message triggers**: event-driven execution loops.
+8. **008 — World-B verification**: verification pipeline for shadow workloads.
+9. **009 — Capability render**: dynamic capability visualization.
+10. **010 — Conformance auditor**: automated conformance auditing loop.
+11. **011 — Review modes envelope**: human-in-the-loop deployment envelopes.
+12. **012 — Elicit spec**: interactive specification eliciter.
+13. **013 — Write manifest**: automated manifest generation.
+14. **014 — Write judge**: automated judge synthesis.
+15. **015 — Write novel agent**: automated code synthesis for custom agents.
+16. **016 — Security review**: automated security validation static-analysis gates.
+17. **017 — Deploy on green**: CI/CD automated promotion logic.
+18. **018 — HTTP client OpenRouter**: native OpenRouter API integration.
+19. **019 — Elicitor inference broker**: integration of elicitation workloads into inference broker.
+20. **020 — Secure secret provisioning**: runtime environment credential isolation.
+21. **021 — Token pricing sync**: dynamic API cost adjustment checks.
+22. **022 — Elicitation UI**: LiveView elicitation console.
+23. **023 — Consent screen UI**: human-in-the-loop deployment approval panel.
+24. **024 — Standing inventory dashboard**: real-time control plane inventory dashboard.
+25. **025 — Container privilege restriction**: Phase 7 container hardening, process limits, and memory/CPU resource limits.
 
 Planning artifacts (spec, plan, tasks, contracts) for each live in
 `specs/<NNN>-<name>/`. The binding principles live in
