@@ -138,8 +138,8 @@ Plans:
   2. Model credentials are securely loaded at runtime without being exposed to sandboxed containers.
 **Plans**: 3
 - [x] 05-01: HTTP Client & OpenRouter Transport — Add client dependency and implement actual HTTP routing in InferenceBroker.
-- [ ] 05-02: Secure Secret Provisioning — Dynamically load model API keys via CredentialProxy from environment/vault.
-- [ ] 05-03: Token Pricing Sync — Define dynamic model price lookups matching OpenRouter specs for spend metering.
+- [x] 05-02: Secure Secret Provisioning — Dynamically load model API keys via CredentialProxy from environment/vault.
+- [x] 05-03: Token Pricing Sync — Define dynamic model price lookups matching OpenRouter specs for spend metering.
 
 ### Phase 6: Phoenix/LiveView Control Plane (v5)
 **Goal**: Build a user-facing dashboard and interactive interface for controlling the generation cycle.
