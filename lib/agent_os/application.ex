@@ -47,8 +47,7 @@ defmodule AgentOS.Application do
            initial: %{}},
           {AgentOS.StateStore,
            name: "judge_results",
-           path:
-             Application.get_env(:agent_os, :judge_results_path, "data/judge_results.term"),
+           path: Application.get_env(:agent_os, :judge_results_path, "data/judge_results.term"),
            initial: %{}},
           {AgentOS.StateStore,
            name: "security_review_results",

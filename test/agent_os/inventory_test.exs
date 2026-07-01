@@ -251,6 +251,58 @@ defmodule AgentOS.InventoryTest do
       report = Inventory.render(manifest_path: "manifests/discovery.md")
       assert report =~ "DEPLOY PROVENANCE: reviewed=human"
     end
+
+    test "renders DEPLOY PROVENANCE failed checks from provenance StateStore" do
+      # 1. judge failed
+      :ok =
+        StateStore.apply_action(
+          "provenance",
+          {:put, "discovery", %{status: :failed, hash: "123", failure_reason: :judge_failed}}
+        )
+
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ "DEPLOY PROVENANCE: failed (check: judge)"
+
+      # 2. security-review failed
+      :ok =
+        StateStore.apply_action(
+          "provenance",
+          {:put, "discovery",
+           %{status: :failed, hash: "123", failure_reason: :security_review_failed}}
+        )
+
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ "DEPLOY PROVENANCE: failed (check: security-review)"
+
+      # 3. both failed
+      :ok =
+        StateStore.apply_action(
+          "provenance",
+          {:put, "discovery", %{status: :failed, hash: "123", failure_reason: :both_failed}}
+        )
+
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ "DEPLOY PROVENANCE: failed (check: both)"
+
+      # 4. missing/stale verdict
+      :ok =
+        StateStore.apply_action(
+          "provenance",
+          {:put, "discovery", %{status: :failed, hash: "123", failure_reason: :missing_verdict}}
+        )
+
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ "DEPLOY PROVENANCE: failed (check: missing/stale verdict)"
+
+      :ok =
+        StateStore.apply_action(
+          "provenance",
+          {:put, "discovery", %{status: :failed, hash: "123", failure_reason: :stale_verdict}}
+        )
+
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ "DEPLOY PROVENANCE: failed (check: missing/stale verdict)"
+    end
   end
 
   describe "judge results visibility (Stage 3)" do

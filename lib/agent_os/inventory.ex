@@ -119,13 +119,36 @@ defmodule AgentOS.Inventory do
             nil ->
               "DEPLOY PROVENANCE: unknown"
 
-            %{status: status} ->
+            provenance ->
               provenance_val =
-                case status do
-                  :reviewed_human -> "reviewed=human"
-                  :skipped_in_envelope -> "skipped-in-envelope"
-                  :dangerously_skipped -> "dangerously-skipped"
-                  other -> to_string(other)
+                case provenance.status do
+                  :reviewed_human ->
+                    "reviewed=human"
+
+                  :skipped_in_envelope ->
+                    "skipped-in-envelope"
+
+                  :dangerously_skipped ->
+                    "dangerously-skipped"
+
+                  :failed ->
+                    reason_str =
+                      case Map.get(provenance, :failure_reason) do
+                        :judge_failed -> "judge"
+                        :security_review_failed -> "security-review"
+                        :both_failed -> "both"
+                        :missing_verdict -> "missing/stale verdict"
+                        :stale_verdict -> "missing/stale verdict"
+                        _ -> "unknown"
+                      end
+
+                    "failed (check: #{reason_str})"
+
+                  :blocked ->
+                    "blocked"
+
+                  other ->
+                    to_string(other)
                 end
 
               "DEPLOY PROVENANCE: #{provenance_val}"

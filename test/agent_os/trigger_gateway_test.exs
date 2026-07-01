@@ -418,7 +418,9 @@ defmodule AgentOS.TriggerGatewayTest do
 
       # Verify provenance recorded in provenance StateStore
       provenance = StateStore.snapshot("provenance")
-      assert Map.get(provenance, agent_name) == %{status: :reviewed_human, hash: hash}
+      entry = Map.get(provenance, agent_name)
+      assert entry.status == :reviewed_human
+      assert entry.hash == hash
 
       # Verify entry removed from pending approvals
       snapshot = StateStore.snapshot("pending_approvals")

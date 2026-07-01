@@ -413,6 +413,65 @@ defmodule AgentOS.WorldBTest do
       assert length(context.manifest.grants) > 0
       refute is_nil(context.manifest.spend)
     end
+
+    test "machine-written manifest (Stage 2) is loaded and enforces manifest invisibility",
+         _context do
+      # 1. Create a mock machine-written manifest YAML file (identical to Stage 2 output)
+      temp_manifest_path =
+        Path.join(
+          System.tmp_dir!(),
+          "machine_written_manifest_#{System.unique_integer([:positive])}.md"
+        )
+
+      File.write!(temp_manifest_path, """
+      ---
+      purpose: "Machine-Written Agent Purpose"
+      owner: "human"
+      supervision: "none"
+      grants:
+        - connector: "kv_append"
+          recipients: null
+          methods: ["append"]
+      spend:
+        cap: 10000
+        window: "daily"
+        on_breach: "kill"
+      mounts: []
+      triggers: []
+      ---
+      # Machine-Written Manifest body
+      """)
+
+      on_exit(fn -> File.rm(temp_manifest_path) end)
+
+      # 2. Load the machine-written manifest
+      assert {:ok, loaded_manifest} = AgentOS.Manifest.load(temp_manifest_path)
+
+      # 3. Build agent-bound payload and check keys
+      sample_snapshot = %{records: []}
+      sample_items = []
+      payload = AgentOS.RunWorker.build_payload(sample_snapshot, sample_items)
+      assert Map.keys(payload) == ["items", "state"]
+
+      # Probe payload for manifest fields
+      found_keys = Hostile.probe_payload_for_manifest(payload)
+      assert found_keys == []
+
+      # 4. Prove that runtime gate evaluates over this loaded manifest as an external predicate
+      registry = AgentOS.Connector.registry()
+      allowed_action = %AgentOS.ProposedAction{type: "kv_append", method: "append", payload: %{}}
+
+      disallowed_action = %AgentOS.ProposedAction{
+        type: "kv_append",
+        method: "delete",
+        payload: %{}
+      }
+
+      assert {:approve, _} = Gate.evaluate(allowed_action, loaded_manifest, registry, %{spent: 0})
+
+      assert {:reject, :method_out_of_scope} =
+               Gate.evaluate(disallowed_action, loaded_manifest, registry, %{spent: 0})
+    end
   end
 
   describe "BC-8 hold a credential (by-construction + positive control) · FR-008, SC-008" do

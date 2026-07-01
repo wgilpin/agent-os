@@ -408,11 +408,13 @@ defmodule AgentOS.Pipeline.Stage3 do
 
   defp persist_verdict(agent_name, %Verdict{} = verdict, opts) do
     now = Keyword.get(opts, :now, DateTime.utc_now())
+    code_hash = AgentOS.Provisioner.code_hash(agent_name, opts)
 
     entry = %{
       status: verdict.status,
       last_run: now,
-      reasoning: verdict.reasoning
+      reasoning: verdict.reasoning,
+      code_hash: code_hash
     }
 
     try do

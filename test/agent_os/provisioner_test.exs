@@ -18,6 +18,46 @@ defmodule AgentOS.ProvisionerTest do
     {:ok, Map.put(mounts, :original_config, original_config)}
   end
 
+  defp seed_pass_verdicts(agent_name, code_hash \\ "") do
+    :ok =
+      AgentOS.StateStore.apply_action(
+        "judge_results",
+        {:put, agent_name, %{status: :pass, code_hash: code_hash}}
+      )
+
+    :ok =
+      AgentOS.StateStore.apply_action(
+        "security_review_results",
+        {:put, agent_name,
+         %AgentOS.Pipeline.Stage5.Verdict{
+           status: :pass,
+           reasoning: "ok",
+           timestamp: DateTime.utc_now(),
+           code_hash: code_hash
+         }}
+      )
+  end
+
+  defp create_temp_agent(agent_name) do
+    temp_dir = Path.join(System.tmp_dir!(), "agents_#{System.unique_integer([:positive])}")
+    agent_dir = Path.join(temp_dir, agent_name)
+    File.mkdir_p!(agent_dir)
+    File.write!(Path.join(agent_dir, "main.py"), "main")
+    File.write!(Path.join(agent_dir, "models.py"), "models")
+
+    hash = :crypto.hash(:sha256, "main\nmodels") |> Base.encode16()
+
+    on_exit(fn ->
+      try do
+        File.rm_rf!(temp_dir)
+      rescue
+        _ -> :ok
+      end
+    end)
+
+    {[spec_dir: temp_dir], hash}
+  end
+
   test "agent_config/0 returns a map with all hard-wired keys" do
     config = Provisioner.agent_config()
     assert is_map(config)
@@ -97,7 +137,11 @@ defmodule AgentOS.ProvisionerTest do
 
     on_exit(fn -> File.rm(temp_manifest) end)
 
-    assert {:blocked, ref} = Provisioner.deploy(temp_manifest, :always_review)
+    agent_name = Path.basename(temp_manifest, ".md")
+    {opts, code_hash} = create_temp_agent(agent_name)
+    seed_pass_verdicts(agent_name, code_hash)
+
+    assert {:blocked, ref} = Provisioner.deploy(temp_manifest, :always_review, opts)
     assert String.starts_with?(ref, "ref_deploy_")
 
     pending = AgentOS.StateStore.snapshot("pending_approvals")
@@ -232,9 +276,19 @@ defmodule AgentOS.ProvisionerTest do
 
     on_exit(fn -> File.rm(unsafe_manifest) end)
 
-    assert {:ok, :skipped_in_envelope} = Provisioner.deploy(safe_manifest, :review_if_risky)
+    safe_agent = Path.basename(safe_manifest, ".md")
+    unsafe_agent = Path.basename(unsafe_manifest, ".md")
 
-    assert {:blocked, ref} = Provisioner.deploy(unsafe_manifest, :review_if_risky)
+    {safe_opts, safe_hash} = create_temp_agent(safe_agent)
+    {unsafe_opts, unsafe_hash} = create_temp_agent(unsafe_agent)
+
+    seed_pass_verdicts(safe_agent, safe_hash)
+    seed_pass_verdicts(unsafe_agent, unsafe_hash)
+
+    assert {:ok, :skipped_in_envelope} =
+             Provisioner.deploy(safe_manifest, :review_if_risky, safe_opts)
+
+    assert {:blocked, ref} = Provisioner.deploy(unsafe_manifest, :review_if_risky, unsafe_opts)
     assert String.starts_with?(ref, "ref_deploy_")
 
     safe_agent = Path.basename(safe_manifest, ".md")
@@ -268,7 +322,7 @@ defmodule AgentOS.ProvisionerTest do
     ---
     """)
 
-    assert {:blocked, _ref2} = Provisioner.deploy(safe_manifest, :review_if_risky)
+    assert {:blocked, _ref2} = Provisioner.deploy(safe_manifest, :review_if_risky, safe_opts)
   end
 
   test "deploy/3 dangerously_skip_review proceeds immediately" do
@@ -311,8 +365,12 @@ defmodule AgentOS.ProvisionerTest do
 
     on_exit(fn -> File.rm(unsafe_manifest) end)
 
+    agent_name = Path.basename(unsafe_manifest, ".md")
+    {opts, code_hash} = create_temp_agent(agent_name)
+    seed_pass_verdicts(agent_name, code_hash)
+
     assert {:ok, :dangerously_skipped} =
-             Provisioner.deploy(unsafe_manifest, :dangerously_skip_review)
+             Provisioner.deploy(unsafe_manifest, :dangerously_skip_review, opts)
   end
 
   test "deploy/3 hash check bypasses block on second deployment" do
@@ -334,12 +392,188 @@ defmodule AgentOS.ProvisionerTest do
 
     on_exit(fn -> File.rm(temp_manifest) end)
 
-    assert {:blocked, _ref} = Provisioner.deploy(temp_manifest, :always_review)
+    agent_name = Path.basename(temp_manifest, ".md")
+    {opts, code_hash} = create_temp_agent(agent_name)
+    seed_pass_verdicts(agent_name, code_hash)
+
+    assert {:blocked, _ref} = Provisioner.deploy(temp_manifest, :always_review, opts)
 
     agent_name = Path.basename(temp_manifest, ".md")
     hash = Provisioner.manifest_hash(temp_manifest)
     :ok = Provisioner.record_provenance(agent_name, :reviewed_human, hash)
 
-    assert {:ok, :reviewed_human} = Provisioner.deploy(temp_manifest, :always_review)
+    assert {:ok, :reviewed_human} = Provisioner.deploy(temp_manifest, :always_review, opts)
+  end
+
+  describe "deploy-on-green new gating rules" do
+    test "US1: green path under all three review modes" do
+      temp_manifest =
+        Path.join(System.tmp_dir!(), "green_us1_#{System.unique_integer([:positive])}.md")
+
+      File.write!(temp_manifest, """
+      ---
+      purpose: "test green"
+      grants: []
+      spend:
+        cap: 50000
+        window: "daily"
+        on_breach: "kill"
+      owner: "human"
+      supervision: "none"
+      ---
+      """)
+
+      on_exit(fn -> File.rm(temp_manifest) end)
+      agent_name = Path.basename(temp_manifest, ".md")
+      {opts, hash} = create_temp_agent(agent_name)
+      seed_pass_verdicts(agent_name, hash)
+
+      # 1. always-review blocks
+      assert {:blocked, ref} = Provisioner.deploy(temp_manifest, :always_review, opts)
+      assert String.starts_with?(ref, "ref_deploy_")
+      provenance = AgentOS.StateStore.snapshot("provenance")[agent_name]
+      assert provenance.status == :blocked
+      assert provenance.judge_verdict == :pass
+      assert provenance.security_verdict == :pass
+      assert provenance.failure_reason == nil
+
+      # Reset provenance to test next modes
+      AgentOS.StateStore.apply_action("provenance", {:delete_in, [agent_name]})
+
+      # 2. review-if-risky (safe manifest -> skipped_in_envelope)
+      assert {:ok, :skipped_in_envelope} =
+               Provisioner.deploy(temp_manifest, :review_if_risky, opts)
+
+      provenance = AgentOS.StateStore.snapshot("provenance")[agent_name]
+      assert provenance.status == :skipped_in_envelope
+
+      # Reset provenance
+      AgentOS.StateStore.apply_action("provenance", {:delete_in, [agent_name]})
+
+      # 3. dangerously-skip-review proceeds automatically
+      assert {:ok, :dangerously_skipped} =
+               Provisioner.deploy(temp_manifest, :dangerously_skip_review, opts)
+
+      provenance = AgentOS.StateStore.snapshot("provenance")[agent_name]
+      assert provenance.status == :dangerously_skipped
+    end
+
+    test "US2: red path failure cases" do
+      temp_manifest =
+        Path.join(System.tmp_dir!(), "fail_us2_#{System.unique_integer([:positive])}.md")
+
+      File.write!(temp_manifest, """
+      ---
+      purpose: "test fail"
+      grants: []
+      spend:
+        cap: 50000
+        window: "daily"
+        on_breach: "kill"
+      owner: "human"
+      supervision: "none"
+      ---
+      """)
+
+      on_exit(fn -> File.rm(temp_manifest) end)
+      agent_name = Path.basename(temp_manifest, ".md")
+      {opts, hash} = create_temp_agent(agent_name)
+
+      # 1. Missing verdict entirely
+      assert {:error, {:gate_failed, :missing_verdict}} =
+               Provisioner.deploy(temp_manifest, :always_review, opts)
+
+      provenance = AgentOS.StateStore.snapshot("provenance")[agent_name]
+      assert provenance.status == :failed
+      assert provenance.failure_reason == :missing_verdict
+
+      # 2. Stale verdict (mismatched code hash)
+      seed_pass_verdicts(agent_name, "DIFFERENT_HASH")
+
+      assert {:error, {:gate_failed, :stale_verdict}} =
+               Provisioner.deploy(temp_manifest, :always_review, opts)
+
+      provenance = AgentOS.StateStore.snapshot("provenance")[agent_name]
+      assert provenance.status == :failed
+      assert provenance.failure_reason == :stale_verdict
+
+      # 3. Judge fail, security review pass
+      :ok =
+        AgentOS.StateStore.apply_action(
+          "judge_results",
+          {:put, agent_name, %{status: :fail, code_hash: hash}}
+        )
+
+      :ok =
+        AgentOS.StateStore.apply_action(
+          "security_review_results",
+          {:put, agent_name,
+           %AgentOS.Pipeline.Stage5.Verdict{
+             status: :pass,
+             reasoning: "ok",
+             timestamp: DateTime.utc_now(),
+             code_hash: hash
+           }}
+        )
+
+      assert {:error, {:gate_failed, :judge_failed}} =
+               Provisioner.deploy(temp_manifest, :always_review, opts)
+
+      provenance = AgentOS.StateStore.snapshot("provenance")[agent_name]
+      assert provenance.status == :failed
+      assert provenance.failure_reason == :judge_failed
+
+      # 4. Judge pass, security review fail
+      :ok =
+        AgentOS.StateStore.apply_action(
+          "judge_results",
+          {:put, agent_name, %{status: :pass, code_hash: hash}}
+        )
+
+      :ok =
+        AgentOS.StateStore.apply_action(
+          "security_review_results",
+          {:put, agent_name,
+           %AgentOS.Pipeline.Stage5.Verdict{
+             status: :fail,
+             reasoning: "bad",
+             timestamp: DateTime.utc_now(),
+             code_hash: hash
+           }}
+        )
+
+      assert {:error, {:gate_failed, :security_review_failed}} =
+               Provisioner.deploy(temp_manifest, :always_review, opts)
+
+      provenance = AgentOS.StateStore.snapshot("provenance")[agent_name]
+      assert provenance.status == :failed
+      assert provenance.failure_reason == :security_review_failed
+
+      # 5. Judge fail, security review fail
+      :ok =
+        AgentOS.StateStore.apply_action(
+          "judge_results",
+          {:put, agent_name, %{status: :fail, code_hash: hash}}
+        )
+
+      :ok =
+        AgentOS.StateStore.apply_action(
+          "security_review_results",
+          {:put, agent_name,
+           %AgentOS.Pipeline.Stage5.Verdict{
+             status: :fail,
+             reasoning: "bad",
+             timestamp: DateTime.utc_now(),
+             code_hash: hash
+           }}
+        )
+
+      assert {:error, {:gate_failed, :both_failed}} =
+               Provisioner.deploy(temp_manifest, :always_review, opts)
+
+      provenance = AgentOS.StateStore.snapshot("provenance")[agent_name]
+      assert provenance.status == :failed
+      assert provenance.failure_reason == :both_failed
+    end
   end
 end

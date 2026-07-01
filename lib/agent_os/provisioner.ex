@@ -145,6 +145,7 @@ defmodule AgentOS.Provisioner do
   @spec deploy(binary(), atom() | String.t(), keyword()) ::
           {:ok, atom()}
           | {:blocked, binary()}
+          | {:error, {:gate_failed, atom()}}
           | {:error, any()}
   def deploy(manifest_path, review_mode, opts \\ []) do
     agent_name = Path.basename(manifest_path, ".md")
@@ -160,64 +161,113 @@ defmodule AgentOS.Provisioner do
 
         # Check if already deployed with matching manifest hash
         case get_recorded_provenance(agent_name) do
-          %{status: status, hash: ^hash} ->
+          %{status: status, hash: ^hash}
+          when status in [:reviewed_human, :skipped_in_envelope, :dangerously_skipped] ->
             {:ok, status}
 
           _ ->
-            in_envelope? = envelope_predicate?(manifest, opts)
-            conformance_flagged? = gate_breach_flagged?(agent_name, opts)
-            is_risky? = not in_envelope? or conformance_flagged?
+            case check_deploy_on_green(agent_name, opts) do
+              :ok ->
+                in_envelope? = envelope_predicate?(manifest, opts)
+                conformance_flagged? = gate_breach_flagged?(agent_name, opts)
+                is_risky? = not in_envelope? or conformance_flagged?
 
-            should_block? =
-              case normalized_mode do
-                :always_review -> true
-                :review_if_risky -> is_risky?
-                :dangerously_skip_review -> false
-              end
+                should_block? =
+                  case normalized_mode do
+                    :always_review -> true
+                    :review_if_risky -> is_risky?
+                    :dangerously_skip_review -> false
+                  end
 
-            if should_block? do
-              ref = "ref_deploy_#{agent_name}_#{System.unique_integer([:positive])}"
+                if should_block? do
+                  ref = "ref_deploy_#{agent_name}_#{System.unique_integer([:positive])}"
 
-              action = %AgentOS.ProposedAction{
-                type: "deploy",
-                recipient: agent_name,
-                method: manifest_path,
-                payload: %{"review_mode" => to_string(normalized_mode), "hash" => hash}
-              }
+                  action = %AgentOS.ProposedAction{
+                    type: "deploy",
+                    recipient: agent_name,
+                    method: manifest_path,
+                    payload: %{"review_mode" => to_string(normalized_mode), "hash" => hash}
+                  }
 
-              grant = %AgentOS.Manifest.Grant{
-                connector: "deploy",
-                recipients: nil,
-                methods: nil
-              }
+                  grant = %AgentOS.Manifest.Grant{
+                    connector: "deploy",
+                    recipients: nil,
+                    methods: nil
+                  }
 
-              pending_store = AgentOS.StateStore.snapshot("pending_approvals")
-              approvals = Map.get(pending_store, :approvals, %{})
+                  pending_store = AgentOS.StateStore.snapshot("pending_approvals")
+                  approvals = Map.get(pending_store, :approvals, %{})
 
-              updated_approvals =
-                Map.put(approvals, ref, %{ref: ref, action: action, grant: grant})
+                  updated_approvals =
+                    Map.put(approvals, ref, %{ref: ref, action: action, grant: grant})
 
-              :ok =
-                AgentOS.StateStore.apply_action(
-                  "pending_approvals",
-                  {:put, :approvals, updated_approvals}
-                )
+                  :ok =
+                    AgentOS.StateStore.apply_action(
+                      "pending_approvals",
+                      {:put, :approvals, updated_approvals}
+                    )
 
-              {:blocked, ref}
-            else
-              provenance =
-                case normalized_mode do
-                  :review_if_risky -> :skipped_in_envelope
-                  :dangerously_skip_review -> :dangerously_skipped
+                  # Record blocked attempt in provenance
+                  :ok = record_provenance(agent_name, :blocked, hash)
+
+                  {:blocked, ref}
+                else
+                  provenance =
+                    case normalized_mode do
+                      :review_if_risky -> :skipped_in_envelope
+                      :dangerously_skip_review -> :dangerously_skipped
+                    end
+
+                  :ok = record_provenance(agent_name, provenance, hash)
+                  {:ok, provenance}
                 end
 
-              :ok = record_provenance(agent_name, provenance, hash)
-              {:ok, provenance}
+              {:error, reason} ->
+                # Record failed attempt in provenance
+                :ok = record_provenance(agent_name, :failed, hash, reason)
+                {:error, {:gate_failed, reason}}
             end
         end
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp check_deploy_on_green(agent_name, opts) do
+    judge_result = AgentOS.StateStore.snapshot("judge_results")[agent_name]
+    security_result = AgentOS.StateStore.snapshot("security_review_results")[agent_name]
+    current_hash = code_hash(agent_name, opts)
+
+    # 1. Check for missing verdicts
+    if is_nil(judge_result) or is_nil(security_result) do
+      {:error, :missing_verdict}
+    else
+      # 2. Check code hash version matching
+      judge_hash = Map.get(judge_result, :code_hash)
+      security_hash = Map.get(security_result, :code_hash)
+
+      if judge_hash != current_hash or security_hash != current_hash or current_hash == "" do
+        {:error, :stale_verdict}
+      else
+        # 3. Check pass/fail status
+        judge_pass? = judge_result.status == :pass
+        security_pass? = security_result.status == :pass
+
+        case {judge_pass?, security_pass?} do
+          {true, true} ->
+            :ok
+
+          {false, false} ->
+            {:error, :both_failed}
+
+          {false, true} ->
+            {:error, :judge_failed}
+
+          {true, false} ->
+            {:error, :security_review_failed}
+        end
+      end
     end
   end
 
@@ -252,12 +302,79 @@ defmodule AgentOS.Provisioner do
   end
 
   @doc """
+  Computes SHA-256 hash of the generated code artifact files (main.py and models.py).
+  """
+  @spec code_hash(map()) :: binary()
+  def code_hash(code_files) when is_map(code_files) do
+    main = Map.get(code_files, "main.py") || Map.get(code_files, :main) || ""
+    models = Map.get(code_files, "models.py") || Map.get(code_files, :models) || ""
+    combined = main <> "\n" <> models
+    :crypto.hash(:sha256, combined) |> Base.encode16()
+  end
+
+  @spec code_hash(binary(), keyword()) :: binary()
+  def code_hash(agent_name, opts) when is_binary(agent_name) do
+    spec_dir = Keyword.get(opts, :spec_dir, "agents")
+    agent_dir = Path.join(spec_dir, agent_name)
+    main_path = Path.join(agent_dir, "main.py")
+    models_path = Path.join(agent_dir, "models.py")
+
+    case {File.read(main_path), File.read(models_path)} do
+      {{:ok, main}, {:ok, models}} ->
+        combined = main <> "\n" <> models
+        :crypto.hash(:sha256, combined) |> Base.encode16()
+
+      _ ->
+        ""
+    end
+  end
+
+  @doc """
   Writes provenance metadata for the agent to the provenance StateStore.
   """
-  @spec record_provenance(binary(), atom(), binary()) :: :ok
-  def record_provenance(agent_name, status, hash) do
-    provenance_record = %{status: status, hash: hash}
+  @spec record_provenance(binary(), atom(), binary(), atom() | nil) :: :ok
+  def record_provenance(agent_name, status, hash, failure_reason \\ nil) do
+    judge_verdict =
+      case try_get_judge_status(agent_name) do
+        status when is_atom(status) -> status
+        _ -> :unrun
+      end
+
+    security_verdict =
+      case try_get_security_review_status(agent_name) do
+        status when is_atom(status) -> status
+        _ -> :unrun
+      end
+
+    provenance_record = %{
+      status: status,
+      hash: hash,
+      judge_verdict: judge_verdict,
+      security_verdict: security_verdict,
+      failure_reason: failure_reason
+    }
+
     AgentOS.StateStore.apply_action("provenance", {:put, agent_name, provenance_record})
+  end
+
+  defp try_get_judge_status(agent_name) do
+    try do
+      AgentOS.StateStore.snapshot("judge_results")[agent_name][:status]
+    rescue
+      _ -> nil
+    catch
+      :exit, _ -> nil
+    end
+  end
+
+  defp try_get_security_review_status(agent_name) do
+    try do
+      AgentOS.StateStore.snapshot("security_review_results")[agent_name].status
+    rescue
+      _ -> nil
+    catch
+      :exit, _ -> nil
+    end
   end
 
   defp get_recorded_provenance(agent_name) do

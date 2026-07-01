@@ -11,6 +11,11 @@ workloads. **The language boundary is the trust boundary** — do not infer the 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-[plan.md](file:///Users/will/projects/agent_os/specs/016-security-review/plan.md)
+[plan.md](file:///Users/will/projects/agent_os/specs/017-deploy-on-green/plan.md)
 <!-- SPECKIT END -->
+
+# Speckit Hook Preferences
+
+- On speckit skills, if you are not executing an optional hook, then do not mention it.
+
 

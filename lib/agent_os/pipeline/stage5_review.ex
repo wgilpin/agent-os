@@ -2,16 +2,17 @@ defmodule AgentOS.Pipeline.Stage5.Verdict do
   @moduledoc """
   Represents the verdict output returned after running the security review.
   """
-  @derive {Jason.Encoder, only: [:status, :reasoning, :timestamp]}
+  @derive {Jason.Encoder, only: [:status, :reasoning, :timestamp, :code_hash]}
   @enforce_keys [:status, :reasoning, :timestamp]
-  defstruct [:status, :reasoning, :timestamp]
+  defstruct [:status, :reasoning, :timestamp, :code_hash]
 
   @type status :: :pass | :fail | :error
 
   @type t :: %__MODULE__{
           status: status(),
           reasoning: String.t(),
-          timestamp: DateTime.t()
+          timestamp: DateTime.t(),
+          code_hash: String.t() | nil
         }
 end
 
@@ -74,6 +75,8 @@ defmodule AgentOS.Pipeline.Stage5 do
       {:ok, %{completion: completion_str}} ->
         case decode_verdict(completion_str, now) do
           {:ok, verdict} ->
+            code_hash = AgentOS.Provisioner.code_hash(code_files)
+            verdict = %{verdict | code_hash: code_hash}
             :ok = StateStore.apply_action("security_review_results", {:put, agent_name, verdict})
             {:ok, verdict}
 
