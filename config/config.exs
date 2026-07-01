@@ -18,6 +18,7 @@ config :agent_os,
   conformance_quiet_streak: 3,
   conformance_denied_threshold: 3,
   spend_defaults: %{window: :daily, on_breach: :kill},
+  elicitor_spend_cap: 10_000_000,
   autostart: true,
   credentials: %{
     outbound_token: System.get_env("OUTBOUND_TOKEN"),
@@ -27,6 +28,7 @@ config :agent_os,
   inference_prices:
     %{
       # "gemini-3-flash" => %{input: 75, output: 250}
+      "google/gemini-2.5-flash" => %{input: 75, output: 250}
     }
 
 # Hard-wired agent configuration (manifest path, command, timezone, schedule, and capabilities)
@@ -54,6 +56,7 @@ if config_env() == :test do
       model_key: "test_secret_model_key_value"
     },
     inference_prices: %{
-      "mock-model" => %{input: 10, output: 30}
+      "mock-model" => %{input: 10, output: 30},
+      "google/gemini-2.5-flash" => %{input: 10, output: 30}
     }
 end

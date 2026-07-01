@@ -60,7 +60,7 @@ defmodule AgentOS.Gate do
 
                 if spent + cost > manifest.spend.cap do
                   Logger.warning(
-                    "breached spend cap: type '#{action.type}' with cost #{cost} exceeds cap #{manifest.spend.cap} (spent: #{spent})"
+                    "breached spend cap: type '#{action.type}' with cost #{to_dollars(cost)} exceeds cap #{to_dollars(manifest.spend.cap)} (spent: #{to_dollars(spent)})"
                   )
 
                   {:breach, :spend}
@@ -124,5 +124,9 @@ defmodule AgentOS.Gate do
       nil -> 0
       conn -> Map.get(conn, :cost, 0)
     end
+  end
+
+  defp to_dollars(microdollars) do
+    "$" <> :erlang.float_to_binary(microdollars / 1_000_000, [{:decimals, 6}, :compact])
   end
 end

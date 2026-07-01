@@ -107,12 +107,12 @@ defmodule AgentOS.InferenceBroker do
       # Pre-check
       if agent_entry.spent >= manifest.spend.cap do
         Logger.warning(
-          "Inference blocked: agent '#{agent_name}' spent (#{agent_entry.spent}) >= cap (#{manifest.spend.cap})"
+          "Inference blocked: agent '#{agent_name}' spent (#{to_dollars(agent_entry.spent)}) >= cap (#{to_dollars(manifest.spend.cap)})"
         )
 
         {:breach, :spend}
       else
-        provider_fn = Keyword.get(opts, :provider_fn) || (&real_provider_fn/3)
+        provider_fn = Keyword.get(opts, :provider_fn) || Application.get_env(:agent_os, :provider_fn) || (&real_provider_fn/3)
 
         # Call provider via CredentialProxy
         provider_result =
@@ -133,7 +133,7 @@ defmodule AgentOS.InferenceBroker do
             # Post-meter check
             if new_spent >= manifest.spend.cap do
               Logger.warning(
-                "Inference breach: agent '#{agent_name}' spent (#{new_spent}) crossed cap (#{manifest.spend.cap})"
+                "Inference breach: agent '#{agent_name}' spent (#{to_dollars(new_spent)}) crossed cap (#{to_dollars(manifest.spend.cap)})"
               )
 
               {:breach, :spend}
@@ -286,7 +286,7 @@ defmodule AgentOS.InferenceBroker do
                 send_json_response(socket, 401, %{error: :unknown_run_token})
 
               {:error, other} ->
-                send_json_response(socket, 400, %{error: other})
+                send_json_response(socket, 400, %{error: inspect(other)})
             end
 
           _ ->
@@ -398,5 +398,9 @@ defmodule AgentOS.InferenceBroker do
       {:ok, val} -> {:reply, {:ok, val}, state}
       :error -> {:reply, {:error, :unknown_run_token}, state}
     end
+  end
+
+  defp to_dollars(microdollars) do
+    "$" <> :erlang.float_to_binary(microdollars / 1_000_000, [{:decimals, 6}, :compact])
   end
 end

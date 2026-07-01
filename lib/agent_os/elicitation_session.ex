@@ -45,6 +45,26 @@ defmodule AgentOS.ElicitationSession do
   @impl true
   def init(original_purpose) do
     session_id = "session_" <> to_string(:os.system_time(:millisecond))
+    run_token = Base.encode16(:crypto.strong_rand_bytes(16))
+
+    # Construct system manifest for elicitation identity
+    manifest = %AgentOS.Manifest{
+      purpose: "Elicit specification",
+      owner: "system",
+      supervision: "none",
+      grants: [],
+      spend: %AgentOS.Manifest.Spend{
+        cap: Application.get_env(:agent_os, :elicitor_spend_cap, 10_000_000),
+        window: :daily,
+        on_breach: :kill
+      },
+      mounts: [],
+      triggers: []
+    }
+
+    if GenServer.whereis(AgentOS.InferenceBroker) do
+      AgentOS.InferenceBroker.register(run_token, "elicitor", manifest)
+    end
 
     initial_session = %ConversationSession{
       session_id: session_id,
@@ -57,7 +77,7 @@ defmodule AgentOS.ElicitationSession do
     }
 
     # Run initial elicitor step to get first question
-    case run_elicitor(initial_session) do
+    case run_elicitor(initial_session, run_token) do
       {:ok, result} ->
         # Create assistant response message
         assistant_message = %{
@@ -72,20 +92,31 @@ defmodule AgentOS.ElicitationSession do
             spec_draft: ElicitedSpec.from_map(result["spec_draft"])
         }
 
-        {:ok, {updated_session, result["next_question"]}}
+        {:ok, {updated_session, result["next_question"], run_token}}
 
       {:error, reason} ->
+        if GenServer.whereis(AgentOS.InferenceBroker) do
+          AgentOS.InferenceBroker.unregister(run_token)
+        end
         {:stop, reason}
     end
   end
 
   @impl true
-  def handle_call(:get_state, _from, {session, next_question}) do
-    {:reply, session, {session, next_question}}
+  def terminate(_reason, {_session, _next_question, run_token}) do
+    if GenServer.whereis(AgentOS.InferenceBroker) do
+      AgentOS.InferenceBroker.unregister(run_token)
+    end
+    :ok
   end
 
   @impl true
-  def handle_call({:submit_message, message_content}, _from, {session, prev_question}) do
+  def handle_call(:get_state, _from, {session, next_question, run_token}) do
+    {:reply, session, {session, next_question, run_token}}
+  end
+
+  @impl true
+  def handle_call({:submit_message, message_content}, _from, {session, prev_question, run_token}) do
     # 1. Add user message to transcript
     user_message = %{
       role: :user,
@@ -96,7 +127,7 @@ defmodule AgentOS.ElicitationSession do
     session_with_user = %{session | transcript: session.transcript ++ [user_message]}
 
     # 2. Run elicitor
-    case run_elicitor(session_with_user) do
+    case run_elicitor(session_with_user, run_token) do
       {:ok, result} ->
         spec_draft = ElicitedSpec.from_map(result["spec_draft"])
         next_q = result["next_question"]
@@ -125,17 +156,17 @@ defmodule AgentOS.ElicitationSession do
           end
 
         {:reply, {:ok, updated_session, next_q, creep_detected, pushback},
-         {updated_session, next_q}}
+         {updated_session, next_q, run_token}}
 
       {:error, reason} ->
-        {:reply, {:error, reason}, {session, prev_question}}
+        {:reply, {:error, reason}, {session, prev_question, run_token}}
     end
   end
 
   @impl true
-  def handle_call({:write_spec, target_dir}, _from, {session, next_question}) do
+  def handle_call({:write_spec, target_dir}, _from, {session, next_question, run_token}) do
     if session.status != :confirmed do
-      {:reply, {:error, :not_confirmed}, {session, next_question}}
+      {:reply, {:error, :not_confirmed}, {session, next_question, run_token}}
     else
       # Persist elicited_spec.json
       spec_path = Path.join(target_dir, "elicited_spec.json")
@@ -166,20 +197,42 @@ defmodule AgentOS.ElicitationSession do
 
       case File.write(spec_path, spec_json) do
         :ok ->
-          {:reply, :ok, {session, next_question}}
+          {:reply, :ok, {session, next_question, run_token}}
 
         {:error, reason} ->
-          {:reply, {:error, reason}, {session, next_question}}
+          {:reply, {:error, reason}, {session, next_question, run_token}}
       end
     end
   end
 
   # Helper: Run the python elicitor port
-  defp run_elicitor(%ConversationSession{} = session) do
+  defp run_elicitor(%ConversationSession{} = session, run_token) do
     input_payload = ConversationSession.to_map(session) |> Jason.encode!()
     python_bin = System.get_env("PYTHON_BIN") || ".venv/bin/python"
 
-    case PortRunner.run(input_payload, python_bin, ["agents/elicitor/main.py"]) do
+    original_run_token = System.get_env("RUN_TOKEN")
+    original_inf_socket = System.get_env("INFERENCE_SOCKET")
+
+    System.put_env("RUN_TOKEN", run_token)
+
+    System.put_env(
+      "INFERENCE_SOCKET",
+      Path.expand(
+        Application.get_env(:agent_os, :inference_uds_path, "data/inference.sock")
+      )
+    )
+
+    res = PortRunner.run(input_payload, python_bin, ["agents/elicitor/main.py"])
+
+    if original_run_token,
+      do: System.put_env("RUN_TOKEN", original_run_token),
+      else: System.delete_env("RUN_TOKEN")
+
+    if original_inf_socket,
+      do: System.put_env("INFERENCE_SOCKET", original_inf_socket),
+      else: System.delete_env("INFERENCE_SOCKET")
+
+    case res do
       {:ok, output} ->
         case Jason.decode(String.trim(output)) do
           {:ok, result} -> {:ok, result}

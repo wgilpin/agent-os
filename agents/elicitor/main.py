@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import socket
 from typing import List, Dict, Any
 
 # Ensure project root is in sys.path for robust module resolution
@@ -109,16 +110,15 @@ def load_env_file():
 
 def run_live(session_data: Dict[str, Any]) -> ElicitorResponse:
     """
-    Runs the live elicitation using OpenRouter with structured JSON output.
+    Runs the live elicitation using InferenceBroker over the mounted UDS socket.
     """
-    import urllib.request
-    import urllib.error
-
     load_env_file()
 
-    api_key = os.environ.get("MODEL_KEY")
-    if not api_key:
-        print("Error: MODEL_KEY environment variable is required", file=sys.stderr)
+    run_token = os.environ.get("RUN_TOKEN")
+    socket_path = os.environ.get("INFERENCE_SOCKET")
+
+    if not run_token or not socket_path:
+        print("Error: RUN_TOKEN and INFERENCE_SOCKET environment variables are required", file=sys.stderr)
         sys.exit(1)
 
     transcript = session_data.get("transcript", [])
@@ -159,45 +159,80 @@ def run_live(session_data: Dict[str, Any]) -> ElicitorResponse:
     ]
 
     model = os.environ.get("OPENROUTER_MODEL", "google/gemini-2.5-flash")
-    url = "https://openrouter.ai/api/v1/chat/completions"
 
+    # Construct request body for InferenceBroker
     payload = {
+        "run_token": run_token,
         "model": model,
-        "messages": messages,
-        "response_format": {
-            "type": "json_object"
-        }
+        "messages": messages
     }
+    body = json.dumps(payload)
 
     try:
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            },
-            method="POST"
+        # Connect to UDS socket
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(socket_path)
+
+        # Format HTTP POST request
+        request = (
+            f"POST /v1/inference HTTP/1.1\r\n"
+            f"Host: localhost\r\n"
+            f"Content-Type: application/json\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            f"Connection: close\r\n\r\n"
+            f"{body}"
         )
 
-        with urllib.request.urlopen(req, timeout=60) as response:
-            res_body = response.read().decode("utf-8")
-            res_json = json.loads(res_body)
-            choices = res_json.get("choices", [])
-            if not choices:
-                raise ValueError(f"Empty choices in OpenRouter response: {res_body}")
+        s.sendall(request.encode("utf-8"))
+
+        # Receive response
+        response_data = b""
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            response_data += chunk
+        s.close()
+
+        # Parse response
+        response_str = response_data.decode("utf-8")
+        parts = response_str.split("\r\n\r\n", 1)
+        if len(parts) < 2:
+            raise RuntimeError(f"Invalid response from inference broker (no headers split). Raw response: {response_str!r}")
+        
+        headers_str, response_body = parts
+        
+        # Check status code in headers
+        first_line = headers_str.split("\r\n")[0]
+        status_code = int(first_line.split(" ")[1])
+        
+        try:
+            response_json = json.loads(response_body)
+        except Exception as e:
+            raise RuntimeError(f"JSON decode of response_body failed: {e}. response_body={response_body!r}")
             
-            content = choices[0]["message"]["content"]
-            parsed_content = json.loads(content)
-            return ElicitorResponse.model_validate(parsed_content)
+        if status_code != 200:
+            error_msg = response_json.get("error", "unknown_error")
+            raise RuntimeError(f"Inference broker error: {error_msg} (status {status_code})")
             
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode("utf-8")
-        print(f"Error calling OpenRouter API (HTTP {e.code}): {err_body}", file=sys.stderr)
-        sys.exit(1)
+        content = response_json["completion"]
+        content_str = content.strip()
+        if content_str.startswith("```"):
+            first_newline = content_str.find("\n")
+            if first_newline != -1:
+                content_str = content_str[first_newline:].strip()
+            if content_str.endswith("```"):
+                content_str = content_str[:-3].strip()
+
+        try:
+            parsed_content = json.loads(content_str)
+        except Exception as e:
+            raise RuntimeError(f"JSON decode of completion content failed: {e}. content={content!r}, content_str={content_str!r}")
+            
+        return ElicitorResponse.model_validate(parsed_content)
+        
     except Exception as e:
-        print(f"Error calling OpenRouter: {e}", file=sys.stderr)
+        print(f"Error calling InferenceBroker: {e}", file=sys.stderr)
         sys.exit(1)
 
 def main():

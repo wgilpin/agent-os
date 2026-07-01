@@ -127,8 +127,8 @@ Plans:
 - [ ] 04-08: Stage 5 — security-review agent; reads code+manifest+purpose, judges "written to satisfy purpose without breaching manifest" as a smoke detector, not the firewall — **resolves OQ: security-review ↔ conformance-auditor shared injection/evasion surface** — REQ-security-review
 
 *Wire it shut:*
-- [ ] 04-09: Stage 6 — deploy-on-green; gate deploy on a pass from BOTH judge AND security-review, plugged into the 04-03 review-mode rail; re-verify the manifest-not-readable-by-agent invariant now holds for a MACHINE-WRITTEN manifest — REQ-deploy-on-green
-- [ ] 04-10: E2E MVP thread + world-B-on-generated — the worked example ("reply to recruiter emails") runs the full pipeline human-out-of-the-loop after the conversation, AND the spec-008 world-B suite is re-run against a *generated* agent (machine-written manifest + machine-written code) — the headline acceptance criterion: enforcement holds regardless of code the OS wrote itself
+- [x] 04-09: Stage 6 — deploy-on-green; gate deploy on a pass from BOTH judge AND security-review, plugged into the 04-03 review-mode rail; re-verify the manifest-not-readable-by-agent invariant now holds for a MACHINE-WRITTEN manifest — REQ-deploy-on-green
+- [x] 04-10: E2E MVP thread + world-B-on-generated — the worked example ("reply to recruiter emails") runs the full pipeline human-out-of-the-loop after the conversation, AND the spec-008 world-B suite is re-run against a *generated* agent (machine-written manifest + machine-written code) — the headline acceptance criterion: enforcement holds regardless of code the OS wrote itself
 
 ### Phase 5: Live Connectivity & Client (v4)
 **Goal**: Transition from static stubs to live model calls over the internet.
@@ -137,7 +137,7 @@ Plans:
   1. The inference broker dynamically communicates with upstream endpoints (like OpenRouter) for all agent and generation calls.
   2. Model credentials are securely loaded at runtime without being exposed to sandboxed containers.
 **Plans**: 3
-- [ ] 05-01: HTTP Client & OpenRouter Transport — Add client dependency and implement actual HTTP routing in InferenceBroker.
+- [x] 05-01: HTTP Client & OpenRouter Transport — Add client dependency and implement actual HTTP routing in InferenceBroker.
 - [ ] 05-02: Secure Secret Provisioning — Dynamically load model API keys via CredentialProxy from environment/vault.
 - [ ] 05-03: Token Pricing Sync — Define dynamic model price lookups matching OpenRouter specs for spend metering.
 

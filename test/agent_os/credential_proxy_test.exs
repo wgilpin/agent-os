@@ -6,7 +6,20 @@ defmodule AgentOS.CredentialProxyTest do
   alias AgentOS.CredentialProxy
 
   setup do
+    original_creds = Application.get_env(:agent_os, :credentials)
+    Application.put_env(:agent_os, :credentials, %{
+      outbound_token: "test_secret_outbound_token_value",
+      model_key: "test_secret_model_key_value"
+    })
+
     start_supervised!(CredentialProxy)
+
+    on_exit(fn ->
+      if original_creds,
+        do: Application.put_env(:agent_os, :credentials, original_creds),
+        else: Application.delete_env(:agent_os, :credentials)
+    end)
+
     :ok
   end
 

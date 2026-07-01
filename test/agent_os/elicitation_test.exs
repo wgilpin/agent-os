@@ -79,4 +79,80 @@ defmodule AgentOS.ElicitationTest do
     assert next_q == "Do you confirm this minimised specification?"
     refute "gmail_delete" in session.spec_draft.capabilities
   end
+
+  test "live UDS transport elicitation with spend metering and cap enforcement" do
+    # Setup temporary environment
+    System.delete_env("MOCK_ELICITOR")
+    original_inf_path = Application.get_env(:agent_os, :inference_uds_path)
+    original_autostart = Application.get_env(:agent_os, :autostart)
+
+    tmp_socket = Path.join(System.tmp_dir!(), "elicitation_test_#{System.unique_integer([:positive])}.sock")
+    Application.put_env(:agent_os, :inference_uds_path, tmp_socket)
+    Application.put_env(:agent_os, :autostart, true)
+
+    tmp_spend = Path.join(System.tmp_dir!(), "spend_ledger_elicit_test_#{System.unique_integer([:positive])}.term")
+    
+    # Set up registry and state store
+    start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})
+    start_supervised!({AgentOS.StateStore, name: "spend_ledger", path: tmp_spend, initial: %{}})
+    start_supervised!(AgentOS.CredentialProxy)
+    start_supervised!(AgentOS.InferenceBroker)
+
+    on_exit(fn ->
+      File.rm(tmp_spend)
+      File.rm(tmp_socket)
+      if original_inf_path, do: Application.put_env(:agent_os, :inference_uds_path, original_inf_path)
+      if original_autostart != nil, do: Application.put_env(:agent_os, :autostart, original_autostart), else: Application.delete_env(:agent_os, :autostart)
+    end)
+
+    # Configure mock provider function to return a structured JSON response
+    # matching the expected schema of ElicitorResponse.
+    # We return input_tokens: 10, output_tokens: 20 -> price math is input: 10, output: 30 (from test config)
+    # Total cost: 10 * 10 + 20 * 30 = 700 micro-dollars
+    mock_response = %{
+      "spec_draft" => %{
+        "purpose" => "reply to recruiter emails",
+        "capabilities" => ["gmail_read"],
+        "boundaries" => %{"egress_domains" => ["gmail.googleapis.com"], "target_locations" => []},
+        "spend_limits" => %{"dollar_cap" => 0.05, "token_limit" => 100000},
+        "confirmed" => false
+      },
+      "next_question" => "Should the agent send emails directly or just save drafts?",
+      "scope_creep_detected" => false,
+      "pushback_message" => ""
+    }
+
+    provider_fn = fn _model, _messages, _secret ->
+      %{
+        input_tokens: 10,
+        output_tokens: 20,
+        completion: Jason.encode!(mock_response)
+      }
+    end
+
+    Application.put_env(:agent_os, :provider_fn, provider_fn)
+
+    # Set low elicitor spend cap in configuration (e.g. 1000 micro-dollars)
+    Application.put_env(:agent_os, :elicitor_spend_cap, 1000)
+
+    # Start the session
+    assert {:ok, pid} = ElicitationSession.start_link("reply to recruiter emails")
+
+    # Verification 1: Spend ledger updated under "elicitor"
+    ledger = AgentOS.StateStore.snapshot("spend_ledger")
+    assert entry = Map.get(ledger, "elicitor")
+    assert entry.spent == 700
+
+    # Verification 2: Exceeding cap blocks next call
+    # Submit a message which will trigger another LLM call
+    # Since spent is 700, and next call costs 700, 700+700 = 1400 >= 1000 cap -> breach!
+    assert {:error, {:exit_status, 1}} = ElicitationSession.submit_message(pid, "Gmail")
+
+    # Verify the ledger updated to 1400 (one-call overshoot) and subsequent calls are blocked
+    ledger2 = AgentOS.StateStore.snapshot("spend_ledger")
+    assert ledger2["elicitor"].spent == 1400
+
+    # Clean up provider_fn override
+    Application.delete_env(:agent_os, :provider_fn)
+  end
 end
