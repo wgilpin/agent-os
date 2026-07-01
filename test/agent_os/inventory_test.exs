@@ -408,4 +408,28 @@ defmodule AgentOS.InventoryTest do
       assert report =~ "Reasoning: dangerous connector"
     end
   end
+
+  describe "data/1 structured accessor" do
+    test "returns raw data map that matches render/1 formatted output" do
+      :ok =
+        StateStore.apply_action(
+          "roster_trust",
+          {:append, :records, %{"digest" => "structured digest test"}}
+        )
+
+      {:ok, data} = Inventory.data(manifest_path: "manifests/discovery.md")
+
+      assert is_map(data)
+      assert data.agent_name == "discovery"
+      assert data.purpose =~ "Surface high-signal"
+      assert data.records_count == 1
+      assert data.last_digest == "structured digest test"
+      assert is_list(data.capabilities)
+      assert is_list(data.pending_approvals)
+
+      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      assert report =~ data.purpose
+      assert report =~ data.last_digest
+    end
+  end
 end

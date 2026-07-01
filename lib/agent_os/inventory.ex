@@ -11,6 +11,98 @@ defmodule AgentOS.Inventory do
   @security_review_disclaimer "Scope: PROBABILISTIC CODE REVIEW. Disclaimer: Security review is a probabilistic LLM smoke detector."
 
   @doc """
+  Returns structured inventory data.
+
+  ## Parameters
+    - `opts`: Keyword list that can override the `:manifest_path` or `:now` clock.
+
+  ## Returns
+    - `{:ok, map()}` on success or `{:error, reason}` on failure.
+  """
+  @spec data(keyword()) :: {:ok, map()} | {:error, any()}
+  def data(opts \\ []) do
+    agent_config =
+      try do
+        AgentOS.Provisioner.agent_config()
+      rescue
+        _ -> %{manifest_path: "manifests/discovery.md"}
+      end
+
+    manifest_path = Keyword.get(opts, :manifest_path, agent_config.manifest_path)
+
+    case AgentOS.Manifest.load(manifest_path) do
+      {:ok, manifest} ->
+        agent_name = Path.basename(manifest_path, ".md")
+
+        snapshot = AgentOS.StateStore.snapshot("roster_trust")
+        records_count = length(snapshot.records)
+
+        last_digest =
+          snapshot.records
+          |> Enum.reverse()
+          |> Enum.find_value("none", fn
+            %{"digest" => text} -> text
+            _ -> nil
+          end)
+
+        last_run = parse_last_run(Keyword.get(opts, :run_log_path, "data/run_log.md"))
+
+        now = Keyword.get(opts, :now, DateTime.utc_now())
+        spend_ledger = AgentOS.StateStore.snapshot("spend_ledger")
+        raw_entry = Map.get(spend_ledger, agent_name, %{spent: 0, window_start: now})
+        entry = AgentOS.SpendLedger.current_entry(raw_entry, now, manifest.spend.window)
+
+        pending_store = AgentOS.StateStore.snapshot("pending_approvals")
+        approvals = Map.get(pending_store, :approvals, %{})
+
+        grant_connectors = Enum.map(manifest.grants, & &1.connector)
+
+        filtered_approvals =
+          approvals
+          |> Enum.sort_by(fn {ref, _} -> ref end)
+          |> Enum.filter(fn {_ref, %{action: action}} ->
+            action.recipient == agent_name or
+              (action.type == "deploy" and Path.basename(action.method, ".md") == agent_name) or
+              Enum.member?(grant_connectors, action.type) or
+              action.recipient == nil
+          end)
+          |> Enum.map(fn {_ref, val} -> val end)
+
+        capabilities = AgentOS.CapabilityRender.entries(manifest)
+
+        provenance = try_get_provenance(agent_name)
+        conformance = try_get_conformance_verdict(agent_name)
+        judge = try_get_judge(agent_name)
+        security_review = try_get_security_review(agent_name)
+
+        {:ok,
+         %{
+           agent_name: agent_name,
+           purpose: manifest.purpose,
+           triggers: manifest.triggers,
+           mounts: manifest.mounts,
+           owner: manifest.owner,
+           supervision: manifest.supervision,
+           spend_cap: manifest.spend.cap,
+           spend_window: manifest.spend.window,
+           spent: entry.spent,
+           records_count: records_count,
+           last_digest: last_digest,
+           last_run: last_run,
+           provenance: provenance,
+           conformance: conformance,
+           judge: judge,
+           security_review: security_review,
+           pending_approvals: filtered_approvals,
+           capabilities: capabilities
+         }}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
   Renders a human-readable standing inventory report.
 
   ## Parameters
@@ -21,84 +113,36 @@ defmodule AgentOS.Inventory do
   """
   @spec render(keyword()) :: binary()
   def render(opts \\ []) do
-    # Safely attempt to read the agent config.
-    # We use a try-rescue block to fall back to a default manifest path if the
-    # application config is not fully initialized (e.g. during certain test configurations).
-    agent_config =
-      try do
-        AgentOS.Provisioner.agent_config()
-      rescue
-        _ -> %{manifest_path: "manifests/discovery.md"}
-      end
-
-    # Retrieve the manifest path. Keyword.get/3 extracts the value of :manifest_path from opts,
-    # and if not present, defaults to the one defined in the config.
-    manifest_path = Keyword.get(opts, :manifest_path, agent_config.manifest_path)
-
-    # load the YAML frontmatter manifest from the file system.
-    # Elixir uses `case` for pattern matching on tagged tuples like `{:ok, val}` or `{:error, reason}`.
-    case AgentOS.Manifest.load(manifest_path) do
-      {:ok, manifest} ->
-        # Fetch the current state snapshot from the StateStore GenServer named :roster_trust.
-        snapshot = AgentOS.StateStore.snapshot("roster_trust")
-
-        # Calculate the total number of records recorded in state.
-        records_count = length(snapshot.records)
-
-        # Search for the last digest entry.
-        # |> is the pipe operator: it passes the result of the previous expression as
-        # the first argument of the next function.
-        last_digest =
-          snapshot.records
-          # Start searching from the most recent records first
-          |> Enum.reverse()
-          # If no value matches, return the string "none"
-          |> Enum.find_value("none", fn
-            # Pattern match on map to extract value of "digest" key.
-            %{"digest" => text} -> text
-            # Ignore other shapes of records.
-            _ -> nil
-          end)
-
-        # Parse last run details
-        last_run = parse_last_run(Keyword.get(opts, :run_log_path, "data/run_log.md"))
-
+    case data(opts) do
+      {:ok, info} ->
         last_run_details =
-          if last_run.status == "unknown" do
+          if info.last_run.status == "unknown" do
             "No runs recorded."
           else
             cause_detail =
-              if last_run.failure_cause, do: " (cause: #{last_run.failure_cause})", else: ""
+              if info.last_run.failure_cause,
+                do: " (cause: #{info.last_run.failure_cause})",
+                else: ""
 
             exit_detail =
-              if last_run.exit_code, do: " (exit code: #{last_run.exit_code})", else: ""
+              if info.last_run.exit_code, do: " (exit code: #{info.last_run.exit_code})", else: ""
 
             """
-            Last Run Status: #{last_run.status}#{cause_detail}#{exit_detail}
-            Last Run Trigger: #{last_run.trigger}
-            Last Run Actions: #{last_run.actions}
-            Last Run Items In / Dropped: #{last_run.items_in} / #{last_run.items_dropped}
+            Last Run Status: #{info.last_run.status}#{cause_detail}#{exit_detail}
+            Last Run Trigger: #{info.last_run.trigger}
+            Last Run Actions: #{info.last_run.actions}
+            Last Run Items In / Dropped: #{info.last_run.items_in} / #{info.last_run.items_dropped}
             """
             |> String.trim_trailing()
           end
 
-        now = Keyword.get(opts, :now, DateTime.utc_now())
-        spend_ledger = AgentOS.StateStore.snapshot("spend_ledger")
-        agent_name = Path.basename(manifest_path, ".md")
-        raw_entry = Map.get(spend_ledger, agent_name, %{spent: 0, window_start: now})
-        entry = AgentOS.SpendLedger.current_entry(raw_entry, now, manifest.spend.window)
-
-        pending_store = AgentOS.StateStore.snapshot("pending_approvals")
-        approvals = Map.get(pending_store, :approvals, %{})
-
         pending_approvals_str =
-          if map_size(approvals) == 0 do
+          if Enum.empty?(info.pending_approvals) do
             ""
           else
             lines =
-              approvals
-              |> Enum.sort_by(fn {ref, _} -> ref end)
-              |> Enum.map(fn {ref, %{action: action}} ->
+              info.pending_approvals
+              |> Enum.map(fn %{ref: ref, action: action} ->
                 recipient_part = if action.recipient, do: " → #{action.recipient}", else: ""
                 "  #{ref}  #{action.type}#{recipient_part}"
               end)
@@ -108,14 +152,14 @@ defmodule AgentOS.Inventory do
           end
 
         capabilities_str =
-          manifest
-          |> AgentOS.CapabilityRender.render()
+          info.capabilities
+          |> AgentOS.CapabilityRender.format()
           |> String.split("\n", trim: true)
           |> Enum.map(&"        #{&1}")
           |> Enum.join("\n")
 
         provenance_str =
-          case try_get_provenance(agent_name) do
+          case info.provenance do
             nil ->
               "DEPLOY PROVENANCE: unknown"
 
@@ -155,12 +199,12 @@ defmodule AgentOS.Inventory do
           end
 
         conformance_str =
-          case try_get_conformance_verdict(agent_name) do
+          case info.conformance do
             nil ->
-              "CONFORMANCE: insufficient data (#{records_count} runs recorded)"
+              "CONFORMANCE: insufficient data (#{info.records_count} runs recorded)"
 
             %Verdict{status: :insufficient_data} ->
-              "CONFORMANCE: insufficient data (#{records_count} runs recorded)"
+              "CONFORMANCE: insufficient data (#{info.records_count} runs recorded)"
 
             %Verdict{status: :clean} ->
               "CONFORMANCE: clean"
@@ -190,25 +234,23 @@ defmodule AgentOS.Inventory do
               "CONFORMANCE: flagged\n" <> flag_lines
           end
 
-        judge_str = render_judge(agent_name)
-        security_review_str = render_security_review(agent_name)
+        judge_str = format_judge(info.judge)
+        security_review_str = format_security_review(info.security_review)
 
-        # Build and return the final report string using multiline heredoc (`"""`).
-        # `#{expression}` is used for string interpolation.
         """
         Agent OS Standing Inventory
         ===========================
-        PURPOSE: #{manifest.purpose}
-        TRIGGERS: #{inspect(manifest.triggers)}
+        PURPOSE: #{info.purpose}
+        TRIGGERS: #{inspect(info.triggers)}
         #{capabilities_str}
         #{provenance_str}
-        MOUNTS: #{inspect(manifest.mounts)}
-        SPEND: #{format_dollars(entry.spent)} / #{format_dollars(manifest.spend.cap)} per #{manifest.spend.window}
-        OWNER/SUPERVISION: #{manifest.owner} / #{manifest.supervision}
+        MOUNTS: #{inspect(info.mounts)}
+        SPEND: #{format_dollars(info.spent)} / #{format_dollars(info.spend_cap)} per #{info.spend_window}
+        OWNER/SUPERVISION: #{info.owner} / #{info.supervision}
 
         LAST RUN STATE:
-        Total Records: #{records_count}
-        Last Digest: #{last_digest}
+        Total Records: #{info.records_count}
+        Last Digest: #{info.last_digest}
         #{last_run_details}
         #{conformance_str}
         #{judge_str}
@@ -219,7 +261,14 @@ defmodule AgentOS.Inventory do
         |> Kernel.<>("\n")
 
       {:error, reason} ->
-        # Return a formatted error message string if manifest loading failed.
+        agent_config =
+          try do
+            AgentOS.Provisioner.agent_config()
+          rescue
+            _ -> %{manifest_path: "manifests/discovery.md"}
+          end
+
+        manifest_path = Keyword.get(opts, :manifest_path, agent_config.manifest_path)
         "ERROR: Could not load manifest at #{manifest_path}: #{inspect(reason)}"
     end
   end
@@ -290,29 +339,27 @@ defmodule AgentOS.Inventory do
     end
   end
 
-  defp render_judge(agent_name) do
-    case try_get_judge(agent_name) do
-      nil ->
-        "JUDGE: unrun"
+  defp format_judge(nil) do
+    "JUDGE: unrun"
+  end
 
-      entry ->
-        status_str =
-          case Map.get(entry, :status) do
-            :pass -> "pass"
-            :fail -> "fail"
-            :error -> "error"
-            :unrun -> "unrun"
-            other -> to_string(other)
-          end
+  defp format_judge(entry) do
+    status_str =
+      case Map.get(entry, :status) do
+        :pass -> "pass"
+        :fail -> "fail"
+        :error -> "error"
+        :unrun -> "unrun"
+        other -> to_string(other)
+      end
 
-        run_detail =
-          case Map.get(entry, :last_run) do
-            %DateTime{} = dt -> " (last run: #{DateTime.to_iso8601(dt)})"
-            _ -> ""
-          end
+    run_detail =
+      case Map.get(entry, :last_run) do
+        %DateTime{} = dt -> " (last run: #{DateTime.to_iso8601(dt)})"
+        _ -> ""
+      end
 
-        "JUDGE: #{status_str}#{run_detail}\n#{@judge_disclaimer}"
-    end
+    "JUDGE: #{status_str}#{run_detail}\n#{@judge_disclaimer}"
   end
 
   defp try_get_judge(agent_name) do
@@ -325,31 +372,29 @@ defmodule AgentOS.Inventory do
     end
   end
 
-  defp render_security_review(agent_name) do
-    case try_get_security_review(agent_name) do
-      nil ->
-        "SECURITY REVIEW: unrun"
+  defp format_security_review(nil) do
+    "SECURITY REVIEW: unrun"
+  end
 
-      entry ->
-        status_str =
-          case Map.get(entry, :status) do
-            :pass -> "pass"
-            :fail -> "fail"
-            :error -> "error"
-            other -> to_string(other)
-          end
+  defp format_security_review(entry) do
+    status_str =
+      case Map.get(entry, :status) do
+        :pass -> "pass"
+        :fail -> "fail"
+        :error -> "error"
+        other -> to_string(other)
+      end
 
-        run_detail =
-          case Map.get(entry, :timestamp) do
-            %DateTime{} = dt -> " (reviewed at: #{DateTime.to_iso8601(dt)})"
-            _ -> ""
-          end
+    run_detail =
+      case Map.get(entry, :timestamp) do
+        %DateTime{} = dt -> " (reviewed at: #{DateTime.to_iso8601(dt)})"
+        _ -> ""
+      end
 
-        reasoning = Map.get(entry, :reasoning) || ""
-        reasoning_str = if reasoning != "", do: "\nReasoning: #{reasoning}", else: ""
+    reasoning = Map.get(entry, :reasoning) || ""
+    reasoning_str = if reasoning != "", do: "\nReasoning: #{reasoning}", else: ""
 
-        "SECURITY REVIEW: #{status_str}#{run_detail}#{reasoning_str}\n#{@security_review_disclaimer}"
-    end
+    "SECURITY REVIEW: #{status_str}#{run_detail}#{reasoning_str}\n#{@security_review_disclaimer}"
   end
 
   defp try_get_security_review(agent_name) do
