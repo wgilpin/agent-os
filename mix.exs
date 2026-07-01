@@ -21,7 +21,8 @@ defmodule AgentOS.MixProject do
   defp deps do
     [
       {:jason, "~> 1.4"},
-      {:yaml_elixir, "~> 2.12"}
+      {:yaml_elixir, "~> 2.12"},
+      {:req, "~> 0.5"}
     ]
   end
 end

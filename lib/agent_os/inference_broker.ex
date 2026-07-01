@@ -29,7 +29,13 @@ defmodule AgentOS.InferenceBroker do
   @type result ::
           {:ok, %{completion: term()}}
           | {:breach, :spend}
-          | {:error, :unpriced_model | :unknown_run_token | :missing_usage}
+          | {:error,
+             :unpriced_model
+             | :unknown_run_token
+             | :missing_usage
+             | :timeout
+             | :network_error
+             | {:http_status, integer()}}
 
   # --- Client API ---
 
@@ -135,6 +141,10 @@ defmodule AgentOS.InferenceBroker do
               {:ok, %{completion: comp}}
             end
 
+          {:error, reason} ->
+            Logger.error("Inference failed: #{inspect(reason)}")
+            {:error, reason}
+
           _ ->
             Logger.error("Inference failed: provider response missing usage information")
             {:error, :missing_usage}
@@ -155,10 +165,71 @@ defmodule AgentOS.InferenceBroker do
     end
   end
 
-  # Default/Real provider function placeholder (Gemini API integration deferred)
-  defp real_provider_fn(_model, _messages, _secret) do
-    # Placeholder return, will be replaced with real Gemini call when implemented
-    %{input_tokens: 0, output_tokens: 0, completion: "real model completion placeholder"}
+  # Default/Real provider function using OpenRouter transport.
+  defp real_provider_fn(model, messages, secret) do
+    url = "https://openrouter.ai/api/v1/chat/completions"
+
+    headers = [
+      {"authorization", "Bearer #{secret}"},
+      {"content-type", "application/json"}
+    ]
+
+    body = %{
+      "model" => model,
+      "messages" => messages
+    }
+
+    case Req.post(url, json: body, headers: headers) do
+      {:ok, %Req.Response{status: 200, body: response_body}} ->
+        case parse_openrouter_response(response_body) do
+          {:ok, usage_data} ->
+            usage_data
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      {:ok, %Req.Response{status: status}} ->
+        Logger.error("OpenRouter API returned error status: #{status}")
+        {:error, {:http_status, status}}
+
+      {:error, %{reason: :timeout}} ->
+        Logger.error("OpenRouter API request timeout")
+        {:error, :timeout}
+
+      {:error, reason} ->
+        Logger.error("OpenRouter API request failed: #{inspect(reason)}")
+        {:error, :network_error}
+    end
+  end
+
+  defp parse_openrouter_response(body) when is_map(body) do
+    with [_ | _] = choices <- Map.get(body, "choices"),
+         %{"message" => %{"content" => completion}} <- List.first(choices),
+         %{"prompt_tokens" => input_tokens, "completion_tokens" => output_tokens} <-
+           Map.get(body, "usage") do
+      {:ok,
+       %{
+         input_tokens: input_tokens,
+         output_tokens: output_tokens,
+         completion: completion
+       }}
+    else
+      _ ->
+        Logger.error("Failed to parse OpenRouter response: #{inspect(body)}")
+        {:error, :missing_usage}
+    end
+  end
+
+  defp parse_openrouter_response(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, decoded} -> parse_openrouter_response(decoded)
+      {:error, _} -> {:error, :missing_usage}
+    end
+  end
+
+  defp parse_openrouter_response(_body) do
+    {:error, :missing_usage}
   end
 
   # --- UDS Listener ---

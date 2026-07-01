@@ -197,4 +197,66 @@ defmodule AgentOS.InferenceBrokerTest do
 
     refute_received :provider_called
   end
+
+  test "T010 (f) HTTP Client error handling: timeout, network error, status error mappings",
+       context do
+    req = %{
+      run_token: context.run_token,
+      model: "mock-model",
+      messages: [%{role: "user", content: "hello"}]
+    }
+
+    # 1. Timeout
+    provider_fn_timeout = fn _model, _messages, _secret ->
+      {:error, :timeout}
+    end
+
+    assert {:error, :timeout} =
+             InferenceBroker.complete(req,
+               now: context.now,
+               provider_fn: provider_fn_timeout,
+               prices: context.prices
+             )
+
+    # 2. Network error
+    provider_fn_network = fn _model, _messages, _secret ->
+      {:error, :network_error}
+    end
+
+    assert {:error, :network_error} =
+             InferenceBroker.complete(req,
+               now: context.now,
+               provider_fn: provider_fn_network,
+               prices: context.prices
+             )
+
+    # 3. HTTP status error
+    provider_fn_status = fn _model, _messages, _secret ->
+      {:error, {:http_status, 401}}
+    end
+
+    assert {:error, {:http_status, 401}} =
+             InferenceBroker.complete(req,
+               now: context.now,
+               provider_fn: provider_fn_status,
+               prices: context.prices
+             )
+
+    # 4. Missing/Malformed usage
+    provider_fn_missing = fn _model, _messages, _secret ->
+      {:error, :missing_usage}
+    end
+
+    assert {:error, :missing_usage} =
+             InferenceBroker.complete(req,
+               now: context.now,
+               provider_fn: provider_fn_missing,
+               prices: context.prices
+             )
+
+    # Ledger spent should remain 0 (no updates occurred for failed queries)
+    ledger = StateStore.snapshot("spend_ledger")
+    entry = Map.get(ledger, context.agent_name)
+    assert entry == nil or entry.spent == 0
+  end
 end

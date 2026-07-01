@@ -28,6 +28,7 @@ wheels/
 
 # Claude Code local (personal) settings — not shared
 .claude/settings.local.json
+.env
 
 # Pending approvals terms
 /data/pending_approvals.term
