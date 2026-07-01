@@ -215,3 +215,24 @@
 - [2026-07-01T18:32:42.415716Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99
 - [2026-07-01T18:32:43.474818Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
 - [2026-07-01T18:32:43.476963Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99
+- [2026-07-01T19:29:05.935767Z] status=ok actions=0 trigger=approval-resume denied ref=ref_deploy_reject_agent_1
+- [2026-07-01T19:29:05.972079Z] status=ok actions=1 trigger=approval-resume approved ref=ref_deploy_test_agent_1
+- [2026-07-01T19:29:05.979768Z] status=alert actions=0 :enoent
+- [2026-07-01T19:29:13.461177Z] status=ok actions=1 trigger=approval-resume approved ref=ref_deploy_test_agent_1
+- [2026-07-01T19:29:13.476614Z] status=ok actions=0 trigger=approval-resume denied ref=ref_deploy_reject_agent_1
+- [2026-07-01T19:29:24.544903Z] status=ok actions=1 trigger=approval-resume approved ref=ref_deploy_test_agent_1
+- [2026-07-01T19:29:24.553600Z] status=ok actions=0 trigger=approval-resume denied ref=ref_deploy_reject_agent_1
+- [2026-07-01T19:29:27.237517Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99
+- [2026-07-01T19:29:27.563208Z] status=ok actions=1 trigger=approval-resume approved ref=ref_deploy_test
+- [2026-07-01T19:29:27.564823Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
+- [2026-07-01T19:29:31.678422Z] status=ok actions=0 trigger=approval-resume denied ref=ref_deploy_reject_agent_1
+- [2026-07-01T19:29:31.688766Z] status=ok actions=1 trigger=approval-resume approved ref=ref_deploy_test_agent_1
+- [2026-07-01T19:29:32.599971Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
+- [2026-07-01T19:29:32.601979Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99
+- [2026-07-01T19:29:39.042557Z] status=ok actions=0 trigger=approval-resume denied ref=ref_deploy_reject_agent_1
+- [2026-07-01T19:29:39.047526Z] status=ok actions=1 trigger=approval-resume approved ref=ref_deploy_test_agent_1
+- [2026-07-01T19:29:39.878389Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99
+- [2026-07-01T19:29:40.084550Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
+- [2026-07-01T19:29:40.404562Z] status=ok actions=1 trigger=approval-resume approved ref=ref_deploy_test
+- [2026-07-01T19:29:40.924185Z] status=ok actions=1 trigger=approval-resume approved ref=ref_42
+- [2026-07-01T19:29:40.927328Z] status=ok actions=0 trigger=approval-resume denied ref=ref_99

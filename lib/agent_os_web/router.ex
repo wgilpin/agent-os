@@ -14,5 +14,6 @@ defmodule AgentOSWeb.Router do
     pipe_through :browser
 
     live "/", ElicitationLive, :index
+    live "/consent", ConsentLive, :index
   end
 end
