@@ -64,7 +64,8 @@ if config_env() == :test do
     bookmarks_path: "test/fixtures/hostile_bookmarks.json",
     credentials: %{
       outbound_token: "test_secret_outbound_token_value",
-      model_key: "test_secret_model_key_value"
+      model_key: "test_secret_model_key_value",
+      search_api_key: "test_search_api_key_value"
     },
     inference_prices: %{
       "mock-model" => %{input: 10_000_000, output: 30_000_000},

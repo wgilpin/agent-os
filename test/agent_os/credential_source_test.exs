@@ -7,11 +7,13 @@ defmodule AgentOS.CredentialSourceTest do
     # Capture original environment and config settings
     original_model_key = System.get_env("MODEL_KEY")
     original_outbound_token = System.get_env("OUTBOUND_TOKEN")
+    original_search_key = System.get_env("SEARCH_API_KEY")
     original_config = Application.get_env(:agent_os, :credentials)
 
     # Clean the environment for test executions
     System.delete_env("MODEL_KEY")
     System.delete_env("OUTBOUND_TOKEN")
+    System.delete_env("SEARCH_API_KEY")
     Application.delete_env(:agent_os, :credentials)
 
     # Backup existing .env file if present in workspace root
@@ -31,6 +33,10 @@ defmodule AgentOS.CredentialSourceTest do
       if original_outbound_token,
         do: System.put_env("OUTBOUND_TOKEN", original_outbound_token),
         else: System.delete_env("OUTBOUND_TOKEN")
+
+      if original_search_key,
+        do: System.put_env("SEARCH_API_KEY", original_search_key),
+        else: System.delete_env("SEARCH_API_KEY")
 
       if original_config,
         do: Application.put_env(:agent_os, :credentials, original_config),

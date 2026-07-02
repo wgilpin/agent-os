@@ -1,5 +1,6 @@
 # Exclude container/docker tests by default to keep the local suite hermetic.
 # Run them explicitly via: mix test --include docker
+System.put_env("SEARCH_API_KEY", "test_search_api_key_value")
 ExUnit.start(exclude: [:docker])
 
 defmodule AgentOS.TestHelper do

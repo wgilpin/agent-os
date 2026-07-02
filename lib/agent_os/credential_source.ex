@@ -26,12 +26,12 @@ defmodule AgentOS.CredentialSource do
         AgentOS.Connector.registry()
         |> Map.values()
         |> Enum.map(&Map.get(&1, :credential))
-        |> Enum.filter(&not is_nil(&1))
+        |> Enum.filter(&(not is_nil(&1)))
       rescue
         _ -> []
       end
 
-    all_credential_ids = Enum.uniq([:model_key | connector_credential_ids])
+    all_credential_ids = Enum.uniq([:model_key | Map.keys(config) ++ connector_credential_ids])
 
     # Resolve each dynamically
     Enum.reduce(all_credential_ids, %{}, fn credential_id, acc ->

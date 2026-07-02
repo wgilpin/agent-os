@@ -97,9 +97,7 @@ defmodule AgentOS.Effector do
             {:error, {:raised, e}}
         catch
           kind, reason ->
-            Logger.error(
-              "Connector #{mod.metadata().name} caught: #{inspect({kind, reason})}"
-            )
+            Logger.error("Connector #{mod.metadata().name} caught: #{inspect({kind, reason})}")
 
             {:error, {:caught, kind, reason}}
         end

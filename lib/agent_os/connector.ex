@@ -9,7 +9,8 @@ defmodule AgentOS.Connector do
           requires_approval?: boolean(),
           credential: atom() | nil,
           # cost in integer micro-dollars (1e-6 USD); 0 means free
-          cost: integer()
+          cost: integer(),
+          tool_declaration: map() | nil
         }
 
   # Callbacks for dynamic connector capabilities
@@ -18,6 +19,10 @@ defmodule AgentOS.Connector do
   @callback execute(action :: AgentOS.ProposedAction.t(), secret :: String.t() | nil) ::
               :ok | {:error, term()}
   @callback render(grant :: AgentOS.Manifest.Grant.t()) :: String.t()
+  @callback execute_tool(arguments :: map(), secret :: String.t() | nil) ::
+              {:ok, term()} | {:error, term()}
+
+  @optional_callbacks [execute_tool: 2]
 
   @doc """
   Returns the complete connector registry map.
@@ -61,6 +66,7 @@ defmodule AgentOS.Connector do
         case Code.ensure_loaded(mod) do
           {:module, loaded_mod} ->
             attrs = loaded_mod.module_info(:attributes)
+
             behaviours =
               Keyword.get(attrs, :behaviour, []) ++ Keyword.get(attrs, :behavior, [])
 
@@ -91,12 +97,14 @@ defmodule AgentOS.Connector do
       case Code.ensure_loaded(mod) do
         {:module, loaded_mod} ->
           attrs = loaded_mod.module_info(:attributes)
+
           behaviours =
             Keyword.get(attrs, :behaviour, []) ++ Keyword.get(attrs, :behavior, [])
 
           if AgentOS.Connector in behaviours do
             meta = loaded_mod.metadata()
-            Map.put(acc, meta.name, meta)
+            meta_with_defaults = Map.put_new(meta, :tool_declaration, nil)
+            Map.put(acc, meta_with_defaults.name, meta_with_defaults)
           else
             acc
           end

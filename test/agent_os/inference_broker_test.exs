@@ -455,4 +455,251 @@ defmodule AgentOS.InferenceBrokerTest do
                start: {InferenceBroker, :start_link, [[name: InferenceBrokerTestInstanceUS5]]}
              })
   end
+
+  test "T014 (a) gated synchronous tool use: complete recurses and handles web_search tool",
+       context do
+    # Configure manifest with web_search grant
+    web_search_grant = %Manifest.Grant{
+      connector: "web_search",
+      recipients: nil,
+      methods: ["search"]
+    }
+
+    manifest = %{
+      context.manifest
+      | grants: [web_search_grant],
+        spend: %Spend{cap: 5000, window: :daily, on_breach: :kill}
+    }
+
+    # Reregister with the grant
+    :ok = InferenceBroker.register(context.run_token, context.agent_name, manifest)
+
+    req = %{
+      run_token: context.run_token,
+      model: "mock-model",
+      messages: [%{role: "user", content: "who won the cup?"}]
+    }
+
+    # Set up mock handler for web_search
+    Application.put_env(:agent_os, :web_search_mock_fn, fn query ->
+      assert query == "elixir cup"
+      {:ok, "Team Elixir won!"}
+    end)
+
+    on_exit(fn ->
+      Application.delete_env(:agent_os, :web_search_mock_fn)
+    end)
+
+    # Provider fn returns a tool call on first call, then final text response on second call
+    provider_fn = fn
+      "mock-model", [%{role: "user"}], _tools, _secret ->
+        %{
+          input_tokens: 10,
+          output_tokens: 10,
+          completion: nil,
+          message: %{
+            "role" => "assistant",
+            "content" => nil,
+            "tool_calls" => [
+              %{
+                "id" => "call_abc",
+                "type" => "function",
+                "function" => %{
+                  "name" => "web_search",
+                  "arguments" => "{\"query\": \"elixir cup\"}"
+                }
+              }
+            ]
+          }
+        }
+
+      "mock-model", messages, _tools, _secret ->
+        # The history should contain the user prompt, assistant tool call, and tool result
+        assert length(messages) == 3
+        [_, assistant_msg, tool_msg] = messages
+        assert assistant_msg["role"] == "assistant"
+        assert tool_msg["role"] == "tool"
+        assert tool_msg["content"] == "Team Elixir won!"
+
+        %{
+          input_tokens: 10,
+          output_tokens: 10,
+          completion: "Final response: Team Elixir won!"
+        }
+    end
+
+    assert {:ok, %{completion: "Final response: Team Elixir won!"}} =
+             InferenceBroker.complete(req,
+               now: context.now,
+               provider_fn: provider_fn,
+               prices: context.prices
+             )
+  end
+
+  test "T014 (b) ungranted tool: returns error on ungranted tool call attempt", context do
+    # No grants in manifest
+    manifest = %{context.manifest | grants: []}
+    :ok = InferenceBroker.register(context.run_token, context.agent_name, manifest)
+
+    req = %{
+      run_token: context.run_token,
+      model: "mock-model",
+      messages: [%{role: "user", content: "search web"}]
+    }
+
+    provider_fn = fn "mock-model", _messages, _tools, _secret ->
+      %{
+        input_tokens: 10,
+        output_tokens: 10,
+        completion: nil,
+        message: %{
+          "role" => "assistant",
+          "content" => nil,
+          "tool_calls" => [
+            %{
+              "id" => "call_xyz",
+              "type" => "function",
+              "function" => %{
+                "name" => "web_search",
+                "arguments" => "{\"query\": \"secret\"}"
+              }
+            }
+          ]
+        }
+      }
+    end
+
+    assert {:error, {:unauthorized_tool, "web_search"}} =
+             InferenceBroker.complete(req,
+               now: context.now,
+               provider_fn: provider_fn,
+               prices: context.prices
+             )
+  end
+
+  test "T014 (c) spend metering: tool cost is metered and spend cap limits apply", context do
+    # Cost of web_search is 1000 micro-dollars (defined in metadata)
+    web_search_grant = %Manifest.Grant{
+      connector: "web_search",
+      recipients: nil,
+      methods: ["search"]
+    }
+
+    # Set cap to 1050. First LLM run costs 10*10 + 10*30 = 400.
+    # Running web_search costs 1000. Total 1400 which exceeds cap.
+    manifest = %{
+      context.manifest
+      | grants: [web_search_grant],
+        spend: %Spend{cap: 1050, window: :daily, on_breach: :kill}
+    }
+
+    :ok = InferenceBroker.register(context.run_token, context.agent_name, manifest)
+
+    req = %{
+      run_token: context.run_token,
+      model: "mock-model",
+      messages: [%{role: "user", content: "search web"}]
+    }
+
+    provider_fn = fn "mock-model", _messages, _tools, _secret ->
+      %{
+        input_tokens: 10,
+        output_tokens: 10,
+        completion: nil,
+        message: %{
+          "role" => "assistant",
+          "content" => nil,
+          "tool_calls" => [
+            %{
+              "id" => "call_xyz",
+              "type" => "function",
+              "function" => %{
+                "name" => "web_search",
+                "arguments" => "{\"query\": \"secret\"}"
+              }
+            }
+          ]
+        }
+      }
+    end
+
+    assert {:breach, :spend} =
+             InferenceBroker.complete(req,
+               now: context.now,
+               provider_fn: provider_fn,
+               prices: context.prices
+             )
+  end
+
+  test "T014 (d) fault containment: caught exception or timeout in tool maps to error content string",
+       context do
+    web_search_grant = %Manifest.Grant{
+      connector: "web_search",
+      recipients: nil,
+      methods: ["search"]
+    }
+
+    manifest = %{
+      context.manifest
+      | grants: [web_search_grant],
+        spend: %Spend{cap: 5000, window: :daily, on_breach: :kill}
+    }
+
+    :ok = InferenceBroker.register(context.run_token, context.agent_name, manifest)
+
+    req = %{
+      run_token: context.run_token,
+      model: "mock-model",
+      messages: [%{role: "user", content: "crash search"}]
+    }
+
+    Application.put_env(:agent_os, :web_search_mock_fn, fn _query ->
+      raise "WebSearch exploded!"
+    end)
+
+    on_exit(fn ->
+      Application.delete_env(:agent_os, :web_search_mock_fn)
+    end)
+
+    provider_fn = fn
+      "mock-model", [%{role: "user"}], _tools, _secret ->
+        %{
+          input_tokens: 10,
+          output_tokens: 10,
+          completion: nil,
+          message: %{
+            "role" => "assistant",
+            "content" => nil,
+            "tool_calls" => [
+              %{
+                "id" => "call_xyz",
+                "type" => "function",
+                "function" => %{
+                  "name" => "web_search",
+                  "arguments" => "{\"query\": \"secret\"}"
+                }
+              }
+            ]
+          }
+        }
+
+      "mock-model", messages, _tools, _secret ->
+        [_, _, tool_msg] = messages
+        assert tool_msg["role"] == "tool"
+        assert tool_msg["content"] =~ "exception" or tool_msg["content"] =~ "WebSearch exploded!"
+
+        %{
+          input_tokens: 10,
+          output_tokens: 10,
+          completion: "Handled error"
+        }
+    end
+
+    assert {:ok, %{completion: "Handled error"}} =
+             InferenceBroker.complete(req,
+               now: context.now,
+               provider_fn: provider_fn,
+               prices: context.prices
+             )
+  end
 end

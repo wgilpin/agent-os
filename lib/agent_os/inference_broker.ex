@@ -104,54 +104,31 @@ defmodule AgentOS.InferenceBroker do
         StateStore.apply_action("spend_ledger", {:put, agent_name, agent_entry})
       end
 
-      # Pre-check
-      if agent_entry.spent >= manifest.spend.cap do
-        Logger.warning(
-          "Inference blocked: agent '#{agent_name}' spent (#{to_dollars(agent_entry.spent)}) >= cap (#{to_dollars(manifest.spend.cap)})"
-        )
+      # Filter active tools based on manifest grants
+      tools = build_tools_list(manifest)
 
-        {:breach, :spend}
-      else
-        provider_fn =
-          Keyword.get(opts, :provider_fn) || Application.get_env(:agent_os, :provider_fn) ||
-            (&real_provider_fn/3)
-
-        # Call provider via CredentialProxy
-        provider_result =
-          AgentOS.CredentialProxy.with_credential(:model_key, fn secret ->
-            provider_fn.(model, messages, secret)
-          end)
-
-        case provider_result do
-          %{input_tokens: _, output_tokens: _, completion: comp} = usage ->
-            # Compute dollars in micro-dollars
-            dollars = InferencePrice.micro_dollars(usage, price_entry)
-
-            # Persist spent + dollars
-            new_spent = agent_entry.spent + dollars
-            updated_entry = Map.put(agent_entry, :spent, new_spent)
-            StateStore.apply_action("spend_ledger", {:put, agent_name, updated_entry})
-
-            # Post-meter check
-            if new_spent >= manifest.spend.cap do
-              Logger.warning(
-                "Inference breach: agent '#{agent_name}' spent (#{to_dollars(new_spent)}) crossed cap (#{to_dollars(manifest.spend.cap)})"
-              )
-
-              {:breach, :spend}
-            else
-              {:ok, %{completion: comp}}
-            end
-
-          {:error, reason} ->
-            Logger.error("Inference failed: #{inspect(reason)}")
-            {:error, reason}
-
-          _ ->
-            Logger.error("Inference failed: provider response missing usage information")
-            {:error, :missing_usage}
+      default_provider =
+        if length(tools) > 0 do
+          &real_provider_fn/4
+        else
+          &real_provider_fn/3
         end
-      end
+
+      provider_fn =
+        Keyword.get(opts, :provider_fn) || Application.get_env(:agent_os, :provider_fn) ||
+          default_provider
+
+      do_complete_loop(
+        messages,
+        agent_entry.spent,
+        agent_name,
+        manifest,
+        model,
+        prices,
+        price_entry,
+        provider_fn,
+        opts
+      )
     else
       {:error, :unknown_run_token} ->
         Logger.error("Inference failed: unknown run token '#{inspect(token)}'")
@@ -167,8 +144,282 @@ defmodule AgentOS.InferenceBroker do
     end
   end
 
+  # Helper to recursively call completions and execute tool requests
+  defp do_complete_loop(
+         messages,
+         spent,
+         agent_name,
+         manifest,
+         model,
+         prices,
+         price_entry,
+         provider_fn,
+         opts
+       ) do
+    if spent >= manifest.spend.cap do
+      Logger.warning(
+        "Inference blocked: agent '#{agent_name}' spent (#{to_dollars(spent)}) >= cap (#{to_dollars(manifest.spend.cap)})"
+      )
+
+      {:breach, :spend}
+    else
+      tools = build_tools_list(manifest)
+
+      provider_result =
+        AgentOS.CredentialProxy.with_credential(:model_key, fn secret ->
+          cond do
+            is_function(provider_fn, 4) ->
+              provider_fn.(model, messages, tools, secret)
+
+            is_function(provider_fn, 3) ->
+              provider_fn.(model, messages, secret)
+
+            true ->
+              raise ArgumentError, "provider_fn must have arity 3 or 4"
+          end
+        end)
+
+      case provider_result do
+        %{input_tokens: _, output_tokens: _, completion: _} = usage ->
+          dollars = InferencePrice.micro_dollars(usage, price_entry)
+          new_spent = spent + dollars
+
+          # Persist LLM run cost
+          updated_entry = %{
+            spent: new_spent,
+            window_start: Keyword.get(opts, :now) || DateTime.utc_now()
+          }
+
+          StateStore.apply_action("spend_ledger", {:put, agent_name, updated_entry})
+
+          if new_spent >= manifest.spend.cap do
+            Logger.warning(
+              "Inference breach: agent '#{agent_name}' spent (#{to_dollars(new_spent)}) crossed cap (#{to_dollars(manifest.spend.cap)})"
+            )
+
+            {:breach, :spend}
+          else
+            message =
+              Map.get(usage, :message) || %{"role" => "assistant", "content" => usage.completion}
+
+            tool_calls = Map.get(message, "tool_calls") || Map.get(message, :tool_calls)
+
+            if is_list(tool_calls) and length(tool_calls) > 0 do
+              # Append assistant tool invocation message to conversation history
+              assistant_msg = %{
+                "role" => "assistant",
+                "content" => Map.get(message, "content"),
+                "tool_calls" => tool_calls
+              }
+
+              updated_messages = messages ++ [assistant_msg]
+
+              # Execute all requested tool calls in order
+              case execute_tool_calls(tool_calls, agent_name, manifest, opts) do
+                {:ok, tool_messages, tool_cost} ->
+                  final_spent = new_spent + tool_cost
+
+                  if final_spent >= manifest.spend.cap do
+                    Logger.warning(
+                      "Inference breach after tool execution: agent '#{agent_name}' spent (#{to_dollars(final_spent)}) crossed cap (#{to_dollars(manifest.spend.cap)})"
+                    )
+
+                    {:breach, :spend}
+                  else
+                    # Persist accumulated tool cost
+                    tool_updated_entry = %{
+                      spent: final_spent,
+                      window_start: Keyword.get(opts, :now) || DateTime.utc_now()
+                    }
+
+                    StateStore.apply_action(
+                      "spend_ledger",
+                      {:put, agent_name, tool_updated_entry}
+                    )
+
+                    # Recurse completions with updated message history
+                    do_complete_loop(
+                      updated_messages ++ tool_messages,
+                      final_spent,
+                      agent_name,
+                      manifest,
+                      model,
+                      prices,
+                      price_entry,
+                      provider_fn,
+                      opts
+                    )
+                  end
+
+                {:error, reason} ->
+                  {:error, reason}
+
+                {:breach, :spend} ->
+                  {:breach, :spend}
+              end
+            else
+              {:ok, %{completion: usage.completion}}
+            end
+          end
+
+        {:error, reason} ->
+          Logger.error("Inference failed: #{inspect(reason)}")
+          {:error, reason}
+
+        _ ->
+          Logger.error("Inference failed: provider response missing usage information")
+          {:error, :missing_usage}
+      end
+    end
+  end
+
+  # Filters connectors granted in manifest and extracts their tool declarations
+  defp build_tools_list(manifest) do
+    registry = AgentOS.Connector.registry()
+
+    Enum.reduce(manifest.grants, [], fn grant, acc ->
+      case Map.fetch(registry, grant.connector) do
+        {:ok, %{tool_declaration: declaration}} when not is_nil(declaration) ->
+          acc ++ [declaration]
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  # Iterates through tool calls and returns {:ok, tool_messages, accumulated_cost}
+  defp execute_tool_calls(tool_calls, agent_name, manifest, _opts) do
+    registry = AgentOS.Connector.registry()
+
+    Enum.reduce_while(tool_calls, {:ok, [], 0}, fn tool_call, {:ok, msg_acc, cost_acc} ->
+      tool_name = get_in(tool_call, ["function", "name"]) || get_in(tool_call, [:function, :name])
+      tool_call_id = Map.get(tool_call, "id") || Map.get(tool_call, :id)
+
+      args_str =
+        get_in(tool_call, ["function", "arguments"]) || get_in(tool_call, [:function, :arguments])
+
+      # Sandbox check: is the tool explicitly granted?
+      is_granted? = Enum.any?(manifest.grants, fn g -> g.connector == tool_name end)
+
+      if not is_granted? do
+        Logger.error("Sandbox blocked ungranted tool: '#{tool_name}'")
+        {:halt, {:error, {:unauthorized_tool, tool_name}}}
+      else
+        case Map.fetch(registry, tool_name) do
+          {:ok, cap} ->
+            tool_cost = Map.get(cap, :cost, 0)
+
+            # Spend ledger lookup prior to tool call
+            ledger = StateStore.snapshot("spend_ledger")
+            raw_entry = Map.get(ledger, agent_name, %{spent: 0})
+            current_spent = raw_entry.spent + cost_acc
+
+            if current_spent + tool_cost >= manifest.spend.cap do
+              Logger.warning("Spend cap exceeded before executing tool '#{tool_name}'")
+              {:halt, {:breach, :spend}}
+            else
+              args =
+                case Jason.decode(args_str) do
+                  {:ok, decoded} -> decoded
+                  {:error, _} -> %{}
+                end
+
+              {:ok, mod} = AgentOS.Connector.get_module(tool_name)
+              credential_id = Map.get(cap, :credential)
+
+              # Execute dynamic tool isolated and timeboxed
+              tool_exec_result =
+                if credential_id do
+                  AgentOS.CredentialProxy.with_credential(credential_id, fn secret ->
+                    execute_tool_isolated(mod, args, secret)
+                  end)
+                else
+                  execute_tool_isolated(mod, args, nil)
+                end
+
+              case tool_exec_result do
+                {:ok, res} ->
+                  res_str = if is_binary(res), do: res, else: Jason.encode!(res)
+
+                  msg = %{
+                    "role" => "tool",
+                    "tool_call_id" => tool_call_id,
+                    "name" => tool_name,
+                    "content" => res_str
+                  }
+
+                  {:cont, {:ok, msg_acc ++ [msg], cost_acc + tool_cost}}
+
+                {:error, reason} ->
+                  reason_str = "Error: " <> inspect(reason)
+
+                  msg = %{
+                    "role" => "tool",
+                    "tool_call_id" => tool_call_id,
+                    "name" => tool_name,
+                    "content" => reason_str
+                  }
+
+                  {:cont, {:ok, msg_acc ++ [msg], cost_acc + tool_cost}}
+              end
+            end
+
+          :error ->
+            {:halt, {:error, {:unknown_connector, tool_name}}}
+        end
+      end
+    end)
+  end
+
+  # Executes a tool connector inside a timeboxed, crash-isolated dynamic Task
+  defp execute_tool_isolated(mod, arguments, secret) do
+    # Fallback to local task supervisor if the global registry one is missing
+    supervisor =
+      case Process.whereis(AgentOS.ConnectorSupervisor) do
+        nil ->
+          {:ok, pid} = Task.Supervisor.start_link()
+          pid
+
+        pid ->
+          pid
+      end
+
+    if function_exported?(mod, :execute_tool, 2) do
+      task =
+        Task.Supervisor.async_nolink(supervisor, fn ->
+          try do
+            mod.execute_tool(arguments, secret)
+          catch
+            kind, reason ->
+              {:error, {:exception, kind, reason}}
+          end
+        end)
+
+      case Task.yield(task, 5000) || Task.shutdown(task) do
+        {:ok, {:ok, res}} ->
+          {:ok, res}
+
+        {:ok, {:error, reason}} ->
+          {:error, reason}
+
+        {:ok, other} ->
+          {:error, other}
+
+        nil ->
+          {:error, :timeout}
+      end
+    else
+      {:error, :not_implemented}
+    end
+  end
+
   # Default/Real provider function using OpenRouter transport.
   defp real_provider_fn(model, messages, secret) do
+    real_provider_fn(model, messages, [], secret)
+  end
+
+  defp real_provider_fn(model, messages, tools, secret) do
     if is_nil(secret) or String.trim(secret) == "" do
       Logger.error("Inference failed: model API key is missing or blank")
       {:error, :missing_credential}
@@ -180,10 +431,19 @@ defmodule AgentOS.InferenceBroker do
         {"content-type", "application/json"}
       ]
 
-      body = %{
-        "model" => model,
-        "messages" => messages
-      }
+      body =
+        if is_list(tools) and length(tools) > 0 do
+          %{
+            "model" => model,
+            "messages" => messages,
+            "tools" => tools
+          }
+        else
+          %{
+            "model" => model,
+            "messages" => messages
+          }
+        end
 
       case Req.post(url, json: body, headers: headers) do
         {:ok, %Req.Response{status: 200, body: response_body}} ->
@@ -212,14 +472,15 @@ defmodule AgentOS.InferenceBroker do
 
   defp parse_openrouter_response(body) when is_map(body) do
     with [_ | _] = choices <- Map.get(body, "choices"),
-         %{"message" => %{"content" => completion}} <- List.first(choices),
+         %{"message" => message} <- List.first(choices),
          %{"prompt_tokens" => input_tokens, "completion_tokens" => output_tokens} <-
            Map.get(body, "usage") do
       {:ok,
        %{
          input_tokens: input_tokens,
          output_tokens: output_tokens,
-         completion: completion
+         completion: Map.get(message, "content"),
+         message: message
        }}
     else
       _ ->
