@@ -32,18 +32,20 @@ defmodule AgentOS.Effector do
     :ok
   end
 
-  def act(%{action: %ProposedAction{type: type} = action}) do
+  def act(%{action: %ProposedAction{type: type} = action} = map) do
+    grant = Map.get(map, :grant)
+
     case AgentOS.Connector.get_module(type) do
       {:ok, mod} ->
         meta = mod.metadata()
 
         case meta.credential do
           nil ->
-            execute_isolated(mod, action, nil)
+            execute_isolated(mod, action, nil, grant)
 
           credential_id ->
             case AgentOS.CredentialProxy.with_credential(credential_id, fn secret ->
-                   execute_isolated(mod, action, secret)
+                   execute_isolated(mod, action, secret, grant)
                  end) do
               {:error, {:unknown_credential, id}} ->
                 Logger.error(
@@ -62,10 +64,8 @@ defmodule AgentOS.Effector do
     end
   end
 
-  @doc """
-  Maps the execution of multiple approved actions in order.
-  Returns `:ok`.
-  """
+  # Maps the execution of multiple approved actions in order.
+  # Returns `:ok`.
   @spec act_all([%{action: ProposedAction.t(), grant: AgentOS.Manifest.Grant.t()}]) :: :ok
   def act_all(approved_actions) when is_list(approved_actions) do
     Enum.each(approved_actions, &act/1)
@@ -74,7 +74,7 @@ defmodule AgentOS.Effector do
 
   # Helpers
 
-  defp execute_isolated(mod, action, secret) do
+  defp execute_isolated(mod, action, secret, grant) do
     # Resolve supervisor name or pid
     {sup, should_stop?} =
       case Process.whereis(AgentOS.ConnectorSupervisor) do
@@ -107,7 +107,25 @@ defmodule AgentOS.Effector do
     result =
       case Task.yield(task, 5000) || Task.shutdown(task) do
         {:ok, val} ->
-          val
+          case val do
+            :ok ->
+              :ok
+
+            {:ok, effect} ->
+              validate_and_apply_effect(effect, grant)
+
+            {:state_store, _, _} = effect ->
+              validate_and_apply_effect(effect, grant)
+
+            {:state_store, _, _, _} = effect ->
+              validate_and_apply_effect(effect, grant)
+
+            {:error, reason} ->
+              {:error, reason}
+
+            other ->
+              other
+          end
 
         nil ->
           Logger.error("Connector #{mod.metadata().name} execution timed out. Failing closed.")
@@ -127,5 +145,51 @@ defmodule AgentOS.Effector do
     end
 
     result
+  end
+
+  defp validate_and_apply_effect(effect, grant) do
+    case effect do
+      {:state_store, store_name, action} ->
+        if allowed_store?(store_name, grant) do
+          AgentOS.StateStore.apply_action(store_name, action)
+        else
+          Logger.error(
+            "Unauthorized state store effect for store '#{store_name}' under grant #{inspect(grant)}"
+          )
+
+          {:error, {:unauthorized_store_effect, store_name}}
+        end
+
+      {:state_store, _method, store_name, action} ->
+        if allowed_store?(store_name, grant) do
+          AgentOS.StateStore.apply_action(store_name, action)
+        else
+          Logger.error(
+            "Unauthorized state store effect for store '#{store_name}' under grant #{inspect(grant)}"
+          )
+
+          {:error, {:unauthorized_store_effect, store_name}}
+        end
+
+      other ->
+        Logger.error("Unsupported effect structure returned by connector: #{inspect(other)}")
+        {:error, {:unsupported_effect, other}}
+    end
+  end
+
+  defp allowed_store?(store_name, _grant) do
+    system_stores = [
+      "spend_ledger",
+      "pending_approvals",
+      "admitted_plugins",
+      "conformance",
+      "provenance",
+      "judge_results",
+      "security_review_results",
+      "pipeline_runs"
+    ]
+
+    store_name_str = to_string(store_name)
+    store_name_str not in system_stores
   end
 end

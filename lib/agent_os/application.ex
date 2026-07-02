@@ -50,6 +50,15 @@ defmodule AgentOS.Application do
              ),
            initial: %{approvals: %{}}},
           {AgentOS.StateStore,
+           name: "admitted_plugins",
+           path:
+             Application.get_env(
+               :agent_os,
+               :admitted_plugins_path,
+               "data/admitted_plugins.term"
+             ),
+           initial: %{}},
+          {AgentOS.StateStore,
            name: "conformance",
            path: Application.get_env(:agent_os, :conformance_path, "data/conformance.term"),
            initial: %{}},

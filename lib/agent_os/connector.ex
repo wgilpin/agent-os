@@ -17,7 +17,7 @@ defmodule AgentOS.Connector do
   @callback metadata() :: capability()
   @callback scope(boundaries :: map()) :: AgentOS.Manifest.Grant.t()
   @callback execute(action :: AgentOS.ProposedAction.t(), secret :: String.t() | nil) ::
-              :ok | {:error, term()}
+              :ok | {:ok, term()} | {:error, term()}
   @callback render(grant :: AgentOS.Manifest.Grant.t()) :: String.t()
   @callback execute_tool(arguments :: map(), secret :: String.t() | nil) ::
               {:ok, term()} | {:error, term()}
@@ -61,20 +61,26 @@ defmodule AgentOS.Connector do
   """
   @spec get_module(String.t()) :: {:ok, module()} | {:error, :unknown_connector}
   def get_module(name) when is_binary(name) do
+    load_plugins()
+
     result =
       Enum.find_value(all_modules(), fn mod ->
         case Code.ensure_loaded(mod) do
           {:module, loaded_mod} ->
-            attrs = loaded_mod.module_info(:attributes)
+            if admitted?(loaded_mod) do
+              attrs = loaded_mod.module_info(:attributes)
 
-            behaviours =
-              Keyword.get(attrs, :behaviour, []) ++ Keyword.get(attrs, :behavior, [])
+              behaviours =
+                Keyword.get(attrs, :behaviour, []) ++ Keyword.get(attrs, :behavior, [])
 
-            if AgentOS.Connector in behaviours do
-              meta = loaded_mod.metadata()
+              if AgentOS.Connector in behaviours do
+                meta = loaded_mod.metadata()
 
-              if meta.name == name do
-                {:ok, loaded_mod}
+                if meta.name == name do
+                  {:ok, loaded_mod}
+                else
+                  nil
+                end
               else
                 nil
               end
@@ -90,21 +96,130 @@ defmodule AgentOS.Connector do
     result || {:error, :unknown_connector}
   end
 
+  @first_party_modules [
+    AgentOS.Connector.KvAppend,
+    AgentOS.Connector.ExternalSend,
+    AgentOS.Connector.GmailRead,
+    AgentOS.Connector.GmailDraft,
+    AgentOS.Connector.WebSearch,
+    AgentOS.Connector.TestFixture,
+    AgentOS.Connector.TimeoutFixture,
+    AgentOS.Connector.CrashFixture
+  ]
+
+  @doc """
+  Admits a plugin module and registers its credential mappings.
+  """
+  @spec admit(module(), map()) :: :ok | {:error, term()}
+  def admit(module, credential_mappings \\ %{})
+      when is_atom(module) and is_map(credential_mappings) do
+    case Code.ensure_loaded(module) do
+      {:module, loaded_mod} ->
+        attrs = loaded_mod.module_info(:attributes)
+        behaviours = Keyword.get(attrs, :behaviour, []) ++ Keyword.get(attrs, :behavior, [])
+
+        if AgentOS.Connector in behaviours do
+          AgentOS.StateStore.apply_action(
+            "admitted_plugins",
+            {:put, module, %{credential_mappings: credential_mappings}}
+          )
+
+          :ok
+        else
+          {:error, :not_a_connector}
+        end
+
+      _ ->
+        {:error, :module_not_found}
+    end
+  end
+
+  @doc """
+  Checks if a plugin module is admitted (either first-party or explicitly admitted).
+  """
+  @spec admitted?(module()) :: boolean()
+  def admitted?(module) when is_atom(module) do
+    if module in @first_party_modules do
+      true
+    else
+      Map.has_key?(admitted_plugins_map(), module)
+    end
+  end
+
+  @doc """
+  Helper to return the map of all admitted third-party plugins.
+  """
+  @spec admitted_plugins_map() :: map()
+  def admitted_plugins_map do
+    try do
+      AgentOS.StateStore.snapshot("admitted_plugins")
+    rescue
+      _ -> %{}
+    catch
+      :exit, _ -> %{}
+    end
+  end
+
+  @doc """
+  Scans the plugins directory and dynamically loads precompiled `.beam` files.
+  """
+  @spec load_plugins() :: :ok
+  def load_plugins do
+    plugins_dir = Application.get_env(:agent_os, :plugins_path, "data/plugins")
+
+    if File.dir?(plugins_dir) do
+      plugins_dir
+      |> Path.join("*.beam")
+      |> Path.wildcard()
+      |> Enum.each(fn path ->
+        filename = Path.basename(path, ".beam")
+        module_atom = String.to_atom(filename)
+
+        case File.read(path) do
+          {:ok, binary} ->
+            case :code.load_binary(module_atom, to_charlist(path), binary) do
+              {:module, _mod} ->
+                :ok
+
+              {:error, reason} ->
+                require Logger
+
+                Logger.error(
+                  "Failed to dynamically load plugin BEAM file from #{path}: #{inspect(reason)}"
+                )
+            end
+
+          {:error, reason} ->
+            require Logger
+            Logger.error("Failed to read plugin file #{path}: #{inspect(reason)}")
+        end
+      end)
+    end
+
+    :ok
+  end
+
   # Helper to scan modules at boot and compile registry map from metadata
   defp discover_and_build_registry do
+    load_plugins()
+
     all_modules()
     |> Enum.reduce(%{}, fn mod, acc ->
       case Code.ensure_loaded(mod) do
         {:module, loaded_mod} ->
-          attrs = loaded_mod.module_info(:attributes)
+          if admitted?(loaded_mod) do
+            attrs = loaded_mod.module_info(:attributes)
 
-          behaviours =
-            Keyword.get(attrs, :behaviour, []) ++ Keyword.get(attrs, :behavior, [])
+            behaviours =
+              Keyword.get(attrs, :behaviour, []) ++ Keyword.get(attrs, :behavior, [])
 
-          if AgentOS.Connector in behaviours do
-            meta = loaded_mod.metadata()
-            meta_with_defaults = Map.put_new(meta, :tool_declaration, nil)
-            Map.put(acc, meta_with_defaults.name, meta_with_defaults)
+            if AgentOS.Connector in behaviours do
+              meta = loaded_mod.metadata()
+              meta_with_defaults = Map.put_new(meta, :tool_declaration, nil)
+              Map.put(acc, meta_with_defaults.name, meta_with_defaults)
+            else
+              acc
+            end
           else
             acc
           end

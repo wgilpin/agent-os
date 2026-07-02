@@ -26,7 +26,7 @@ defmodule AgentOS.Connector.KvAppend do
 
   @impl AgentOS.Connector
   def execute(%ProposedAction{method: "append", payload: payload}, _secret) do
-    AgentOS.StateStore.apply_action("roster_trust", {:append, :records, payload})
+    {:ok, {:state_store, :append, "roster_trust", {:append, :records, payload}}}
   end
 
   @impl AgentOS.Connector

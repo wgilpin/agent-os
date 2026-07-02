@@ -56,7 +56,28 @@ defmodule AgentOS.CredentialProxy do
         {:reply, {:ok, secret}, state}
 
       _ ->
-        {:reply, {:error, {:unknown_credential, credential_id}}, state}
+        # Check dynamic mapping for admitted plugins
+        mapping_value =
+          Enum.find_value(AgentOS.Connector.admitted_plugins_map(), nil, fn {_mod, config} ->
+            mappings = Map.get(config, :credential_mappings, %{})
+
+            case Map.fetch(mappings, credential_id) do
+              {:ok, source_env_atom} ->
+                env_var_name = source_env_atom |> Atom.to_string() |> String.upcase()
+
+                System.get_env(env_var_name) ||
+                  Map.get(Application.get_env(:agent_os, :credentials, %{}), source_env_atom)
+
+              _ ->
+                nil
+            end
+          end)
+
+        if mapping_value && String.trim(mapping_value) != "" do
+          {:reply, {:ok, String.trim(mapping_value)}, state}
+        else
+          {:reply, {:error, {:unknown_credential, credential_id}}, state}
+        end
     end
   end
 end

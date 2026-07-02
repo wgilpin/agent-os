@@ -11,6 +11,7 @@ defmodule AgentOS.TestHelper do
     roster_path = Path.join(tmp_dir, "roster_#{uniq}.term")
     spend_path = Path.join(tmp_dir, "spend_#{uniq}.term")
     approvals_path = Path.join(tmp_dir, "approvals_#{uniq}.term")
+    admitted_plugins_path = Path.join(tmp_dir, "admitted_plugins_#{uniq}.term")
     conformance_path = Path.join(tmp_dir, "conformance_#{uniq}.term")
     provenance_path = Path.join(tmp_dir, "provenance_#{uniq}.term")
     judge_path = Path.join(tmp_dir, "judge_#{uniq}.term")
@@ -20,6 +21,7 @@ defmodule AgentOS.TestHelper do
       File.rm(roster_path)
       File.rm(spend_path)
       File.rm(approvals_path)
+      File.rm(admitted_plugins_path)
       File.rm(conformance_path)
       File.rm(provenance_path)
 
@@ -53,6 +55,10 @@ defmodule AgentOS.TestHelper do
     ExUnit.Callbacks.start_supervised!(
       {AgentOS.StateStore,
        name: "pending_approvals", path: approvals_path, initial: initial_approvals}
+    )
+
+    ExUnit.Callbacks.start_supervised!(
+      {AgentOS.StateStore, name: "admitted_plugins", path: admitted_plugins_path, initial: %{}}
     )
 
     ExUnit.Callbacks.start_supervised!(
