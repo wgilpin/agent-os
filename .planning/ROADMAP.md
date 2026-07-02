@@ -12,6 +12,15 @@ mode (human authors). Only then does generation arrive: the OS synthesises novel
 agents from a stated purpose behind that same now-proven gate. The hard rule:
 enforcement precedes generation, always.
 
+## Strategy: workload-driven build-out
+
+Beyond Phase 8, substrate work is driven by concrete agents: pick a candidate agent, build
+only the features it forces, and repeat until a new agent needs **zero** new substrate (only
+composition of existing primitives) — the point of **feature saturation**. The candidate
+agents, the substrate primitives they each force, and the saturation tracker live in
+[agent-primitive-matrix.md](agent-primitive-matrix.md). Phase 9 is the first output of this
+loop (surfaced by the "buying agent" example).
+
 ## Phases
 
 **Phase Numbering:**
@@ -28,6 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 6: Phoenix/LiveView Control Plane (v5)** - User-facing dashboard for the generation cycle
 - [x] **Phase 7: Hardening & Sandbox (v6)** - Production-grade container + socket sandboxing
 - [ ] **Phase 8: Connector Ecosystem (v7)** - Pluggable connector registry + synchronous tools (web search)
+- [ ] **Phase 9: Persistent State & Permissions (v8)** - Queryable durable store, split build-time/runtime consent, agent-invisible namespaces
 
 ## Phase Details
 
@@ -176,9 +186,10 @@ Plans:
   4. A connector that raises or hangs during execution is contained — it fails closed as `{:error, …}`, is logged loudly, and never crashes the run worker or the substrate.
   5. web_search executes synchronously mid-reasoning, is gated by the manifest grant (no grant → no call), and its per-query cost meters against the spend cap.
 **Plans**: 3
+**Spec prompts**: drafted `/speckit-specify` prompts for the two outstanding plans (08-02, 08-03) in [phase-08-spec-prompts.md](phase-08-spec-prompts.md).
 
 Plans:
-- [ ] 08-01 (Spec A): Pluggable connector registry — `AgentOS.Connector` becomes a behaviour; the registry is **auto-discovered** (modules implementing the behaviour under `lib/agent_os/connector/`), so there is no central list to edit; `registry/0` assembles the metadata map so `Gate` is untouched; effector dispatch + credential resolution become generic (credential by declared id → env var). Each `execute/2` runs **fault-contained** (timeboxed + rescue-wrapped → fail-closed `{:error}`, never crashes the run). Proven by **migrating the existing four connectors** with world-B green — no new connector added. Deliberately does NOT add a tool-channel callback (08-02), and does NOT change connectors from writing state to returning effects — that contract isolation (T1) is deferred to 08-03 since all v7 connectors are first-party.
+- [x] 08-01 (Spec A): Pluggable connector registry — `AgentOS.Connector` becomes a behaviour; the registry is **auto-discovered** (modules implementing the behaviour under `lib/agent_os/connector/`), so there is no central list to edit; `registry/0` assembles the metadata map so `Gate` is untouched; effector dispatch + credential resolution become generic (credential by declared id → env var). Each `execute/2` runs **fault-contained** (timeboxed + rescue-wrapped → fail-closed `{:error}`, never crashes the run). Proven by **migrating the existing four connectors** with world-B green — no new connector added. Deliberately does NOT add a tool-channel callback (08-02), and does NOT change connectors from writing state to returning effects — that contract isolation (T1) is deferred to 08-03 since all v7 connectors are first-party.
 - [ ] 08-02 (Spec B): Synchronous tools + web_search — add a mid-inference tool-use channel over the inference broker (agent pauses reasoning → substrate runs the query → results injected into context in the same pass); land `web_search` as the first tool connector (metered per-query, credential-injected via `:search_api_key`), reusing the 08-01 registry for grant/scope. Depends on 08-01. NOTE: this same channel is the right home for an agent-initiated `kv_read` *tool* (selective/synchronous read driven by reasoning), as opposed to the ambient state push in the input payload — reads stay mounts, not grants, unless an agent genuinely needs to pull a key mid-reasoning. Deferred until a concrete agent requires it; do not build speculatively.
 - [ ] 08-03: Connector admission & compile-isolated plugins — the trust/loading boundary for connectors that are NOT first-party: contract isolation (T1 — connectors return effects, never touch substrate state directly), compile isolation (connectors as a separate Mix app / package so a bad connector can't break the core build), dynamic loading (install without rebuilding the core), and an admission gate (review + credential provisioning) since connector code runs inside the trusted substrate. The point where "no editing core code to add a connector" fully lands for third-party authors. Depends on 08-01.
 
@@ -189,10 +200,29 @@ generation pipeline (04-04…08) is the natural elicit→manifest→judge→agen
 consuming the prior's artifact. 04-09 plugs generation into the rail; 04-10 is the integration + the
 world-B-on-machine-written acceptance that is the whole point of v3. Phases 5–7 build post-MVP viability: connectivity first, followed by visual/control interfaces, ending with production-grade security sandboxing.
 
+### Phase 9: Persistent State & Permissions (v8)
+**Goal**: Replace the whole-file term-store with a queryable, crash-durable engine and refine the permission model. Today's `StateStore` persists one Erlang term-file rewritten in full on every write (O(total-size) per append, no query at all), and a single `requires_approval?` flag conflates two different human decisions — "may this agent be deployed holding this capability at all" (build-time) versus "must a human approve each individual call" (runtime). This phase: (1) splits consent into two orthogonal flags; (2) adds a queryable, append-cheap, durable store behind the existing single-writer `StateStore` contract, with policy-bound, agent-invisible namespaces; (3) retires the term-file backend by consolidating small state onto the new engine. The single-writer GenServer contract (invariant IX) and world-B stay unchanged throughout.
+**Depends on**: Phase 8 (the auto-discovered connector registry — `store_find`/`store_append` land on the pluggable path)
+**Surfaced by**: the "buying agent" example — a monitor that accumulates a long, queryable history of what it has seen/shown and remembers user feedback. An example workload that exposed these substrate gaps, not a committed product.
+**Success Criteria** (what must be TRUE):
+  1. Two independent flags exist — `requires_deploy_consent?` (build/deploy-time human approval that the capability may be granted at all; never parks a runtime action) and `requires_runtime_approval?` (per-call human sign-off at execution; reserved for dangerous actions). The gate parks an action IFF the runtime flag is set.
+  2. A queryable store answers predicate FINDs (equality + `<`/`>`/`>=`, ordering, limit) without loading the whole store, appends without rewriting existing records, and survives a crash/restart with committed writes intact.
+  3. Store namespaces are policy-bound and agent-invisible: no proposed action and nothing agent-observable contains a real namespace; the substrate resolves it from the matched grant. `Grant` gains a namespace binding; the connector `execute` path receives the grant-resolved namespace rather than reading a mount from the payload.
+  4. The term-file persistence is gone; all mounts run on the new engine behind the unchanged single-writer contract; world-B stays green.
+**Plans**: 3
+**Spec prompts**: drafted `/speckit-specify` prompts for all three plans (and full context) in [phase-09-spec-prompts.md](phase-09-spec-prompts.md).
+
+Plans:
+- [ ] 09-01: Split the connector approval flag into `requires_deploy_consent?` (build-time) + `requires_runtime_approval?` (per-call runtime); the gate parks only on the runtime flag; capability-render surfaces each distinctly. Clean cutover — no live state, so no migration: `requires_approval?` removed everywhere, and existing connectors mapped directly (only `external_send` → both true; `gmail_read` / `gmail_draft` / `kv_append` → both false).
+- [ ] 09-02: Queryable record store (**record/predicate mode only**) — embedded SQLite (`exqlite`) backend behind the `StateStore` single-writer contract; `store_find` (read, `:local`) + `store_append` (write, `:local`) connectors; append-cheap + predicate query + crash-durable; **policy-bound, agent-invisible namespaces** (namespace bound in the grant and resolved substrate-side; the agent never names or sees a store; where an agent uses multiple stores it addresses them by a manifest-assigned logical handle). Read/write asymmetry (agent queries history, only the substrate writes ledger/verdicts) falls out of granting `store_find` without `store_append`. De-hardcode `kv_append`'s `"roster_trust"`. Does NOT serve the map contract or touch existing mounts (that is 09-03). Depends on 09-01. **Engine choice open**: SQLite vs a zero-dependency append-log + ETS index — decide before implementing.
+- [ ] 09-03: Retire the term-file backend — first ADD a map/key-value mode (`:put`/`:delete_in`/`:append`/`snapshot`, per-key storage) to the 09-02 backend, then migrate the small-state mounts (`inference_broker`, `trigger_gateway`, `conformance_auditor`, `run_worker`, `inventory`, `provisioner`, `stage5_review`, `consent_live`) onto it, keep the single-writer GenServer contract, and delete term-file persistence entirely. No behaviour change visible to callers. Depends on 09-02.
+
+> **BACKLOG (surfaced by the buying-agent example; do NOT build speculatively — same discipline as 08-02):** connector-catalogue and standing-objective primitives a real monitoring/purchasing agent would need — an **eBay read connector** (the first live-egress `execute/2`; OAuth app-token held and refreshed by the credential source, injected per-call), a **notify connector** (approved once at deploy via `requires_deploy_consent?`, `requires_runtime_approval?: false`, metered so the spend cap IS the rate limit — likely a scoped variant of `external_send`), a **durable "watch" objective** (a standing user-owned goal carrying dedupe/seen-set state that drives scheduled re-invocation), and **feedback conditioning** (substrate-written user verdicts read back via `store_find`; runtime-conditioning by default, regeneration through the consent envelope only for a genuine purpose shift). Build each when a concrete agent needs it. **Feasibility flag:** Facebook Marketplace has no API and blocks automation against the user's personal account — treat as out of scope; eBay (real Browse API + OAuth) is the clean first target.
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -204,3 +234,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 6. LiveView Control Plane (v5) | 3/3 | Complete | 2026-07-01 |
 | 7. Hardening & Sandbox (v6) | 2/2 | Complete | 2026-07-01 |
 | 8. Connector Ecosystem (v7) | 0/3 | Not started | - |
+| 9. Persistent State & Permissions (v8) | 0/3 | Not started | - |
