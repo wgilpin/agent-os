@@ -44,7 +44,9 @@ defmodule AgentOS.CapabilityRender do
             danger: danger,
             recipients: grant.recipients,
             methods: grant.methods,
-            phrase_source: phrase_source
+            phrase_source: phrase_source,
+            requires_deploy_consent?: Map.get(cap, :requires_deploy_consent?, false),
+            requires_runtime_approval?: Map.get(cap, :requires_runtime_approval?, false)
           }
 
         :error ->
@@ -67,6 +69,8 @@ defmodule AgentOS.CapabilityRender do
           "  - #{entry.phrase}"
         else
           badge = if entry.danger == :external, do: "[EXTERNAL] ", else: ""
+          deploy_badge = if entry.requires_deploy_consent?, do: "[DEPLOY_CONSENT] ", else: ""
+          runtime_badge = if entry.requires_runtime_approval?, do: "[RUNTIME_APPROVAL] ", else: ""
 
           scope_str =
             cond do
@@ -83,7 +87,7 @@ defmodule AgentOS.CapabilityRender do
                 ""
             end
 
-          "  - #{badge}#{entry.phrase}#{scope_str}"
+          "  - #{badge}#{deploy_badge}#{runtime_badge}#{entry.phrase}#{scope_str}"
         end
       end)
 
@@ -103,7 +107,11 @@ defmodule AgentOS.CapabilityRender do
   defp danger_tier(cap) do
     cond do
       not cap.mutating? -> :read_only
-      is_nil(cap.credential) and not cap.requires_approval? and cap.cost == 0 -> :local
+
+      is_nil(cap.credential) and not Map.get(cap, :requires_deploy_consent?, false) and
+          not Map.get(cap, :requires_runtime_approval?, false) and cap.cost == 0 ->
+        :local
+
       true -> :external
     end
   end

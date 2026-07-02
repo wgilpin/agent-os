@@ -6,7 +6,8 @@ defmodule AgentOS.Connector do
   @type capability :: %{
           name: String.t(),
           mutating?: boolean(),
-          requires_approval?: boolean(),
+          requires_deploy_consent?: boolean(),
+          requires_runtime_approval?: boolean(),
           credential: atom() | nil,
           # cost in integer micro-dollars (1e-6 USD); 0 means free
           cost: integer(),

@@ -179,14 +179,16 @@ defmodule AgentOS.ProvisionerTest do
       "safe_read" => %{
         name: "safe_read",
         mutating?: false,
-        requires_approval?: false,
+        requires_deploy_consent?: false,
+        requires_runtime_approval?: false,
         credential: nil,
         cost: 0
       },
       "unsafe_write" => %{
         name: "unsafe_write",
         mutating?: true,
-        requires_approval?: true,
+        requires_deploy_consent?: true,
+        requires_runtime_approval?: true,
         credential: :token,
         cost: 2000
       }
@@ -218,14 +220,16 @@ defmodule AgentOS.ProvisionerTest do
       "safe_read" => %{
         name: "safe_read",
         mutating?: false,
-        requires_approval?: false,
+        requires_deploy_consent?: false,
+        requires_runtime_approval?: false,
         credential: nil,
         cost: 0
       },
       "unsafe_write" => %{
         name: "unsafe_write",
         mutating?: true,
-        requires_approval?: true,
+        requires_deploy_consent?: true,
+        requires_runtime_approval?: true,
         credential: :token,
         cost: 2000
       }
@@ -332,7 +336,8 @@ defmodule AgentOS.ProvisionerTest do
       "unsafe_write" => %{
         name: "unsafe_write",
         mutating?: true,
-        requires_approval?: true,
+        requires_deploy_consent?: true,
+        requires_runtime_approval?: true,
         credential: :token,
         cost: 2000
       }

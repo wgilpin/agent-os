@@ -9,7 +9,8 @@ defmodule AgentOS.Connector.GmailRead do
     %{
       name: "gmail_read",
       mutating?: false,
-      requires_approval?: false,
+      requires_deploy_consent?: false,
+      requires_runtime_approval?: false,
       credential: nil,
       cost: 0
     }

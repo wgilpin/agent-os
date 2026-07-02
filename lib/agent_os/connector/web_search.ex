@@ -9,7 +9,8 @@ defmodule AgentOS.Connector.WebSearch do
     %{
       name: "web_search",
       mutating?: false,
-      requires_approval?: false,
+      requires_deploy_consent?: false,
+      requires_runtime_approval?: false,
       credential: :search_api_key,
       cost: 1000,
       tool_declaration: %{

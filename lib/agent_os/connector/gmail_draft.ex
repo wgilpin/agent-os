@@ -9,7 +9,8 @@ defmodule AgentOS.Connector.GmailDraft do
     %{
       name: "gmail_draft",
       mutating?: true,
-      requires_approval?: false,
+      requires_deploy_consent?: false,
+      requires_runtime_approval?: false,
       credential: nil,
       cost: 0
     }

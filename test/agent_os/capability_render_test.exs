@@ -112,7 +112,8 @@ defmodule AgentOS.CapabilityRenderTest do
       "external_send" => %{
         name: "external_send",
         mutating?: true,
-        requires_approval?: false,
+        requires_deploy_consent?: false,
+        requires_runtime_approval?: false,
         credential: nil,
         cost: 0
       }
@@ -129,7 +130,8 @@ defmodule AgentOS.CapabilityRenderTest do
       "external_send" => %{
         name: "external_send",
         mutating?: false,
-        requires_approval?: false,
+        requires_deploy_consent?: false,
+        requires_runtime_approval?: false,
         credential: nil,
         cost: 0
       }
@@ -215,7 +217,8 @@ defmodule AgentOS.CapabilityRenderTest do
       "some_new_connector" => %{
         name: "some_new_connector",
         mutating?: true,
-        requires_approval?: false,
+        requires_deploy_consent?: false,
+        requires_runtime_approval?: false,
         credential: nil,
         cost: 0
       }

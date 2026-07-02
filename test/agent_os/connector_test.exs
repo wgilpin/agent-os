@@ -5,7 +5,8 @@ defmodule AgentOS.Connector.TestFixture do
     %{
       name: "test_fixture",
       mutating?: true,
-      requires_approval?: true,
+      requires_deploy_consent?: true,
+      requires_runtime_approval?: true,
       credential: :test_token,
       cost: 500
     }
@@ -33,7 +34,8 @@ defmodule AgentOS.Connector.TimeoutFixture do
     %{
       name: "timeout_fixture",
       mutating?: true,
-      requires_approval?: false,
+      requires_deploy_consent?: false,
+      requires_runtime_approval?: false,
       credential: nil,
       cost: 0
     }
@@ -60,7 +62,8 @@ defmodule AgentOS.Connector.CrashFixture do
     %{
       name: "crash_fixture",
       mutating?: true,
-      requires_approval?: false,
+      requires_deploy_consent?: false,
+      requires_runtime_approval?: false,
       credential: nil,
       cost: 0
     }

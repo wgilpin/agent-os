@@ -25,14 +25,16 @@ defmodule AgentOS.GateTest do
       "kv_append" => %{
         name: "kv_append",
         mutating?: true,
-        requires_approval?: false,
+        requires_deploy_consent?: false,
+        requires_runtime_approval?: false,
         credential: nil,
         cost: 0
       },
       "external_send" => %{
         name: "external_send",
         mutating?: true,
-        requires_approval?: true,
+        requires_deploy_consent?: true,
+        requires_runtime_approval?: true,
         credential: :outbound_token,
         cost: 2000
       }

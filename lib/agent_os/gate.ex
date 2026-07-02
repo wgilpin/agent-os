@@ -66,7 +66,7 @@ defmodule AgentOS.Gate do
                   {:breach, :spend}
                 else
                   # 5. Approval check
-                  if Map.get(connector, :requires_approval?, false) do
+                  if Map.get(connector, :requires_runtime_approval?, false) do
                     {:needs_approval, grant}
                   else
                     {:approve, grant}

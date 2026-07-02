@@ -287,7 +287,10 @@ defmodule AgentOS.Provisioner do
     threshold = Keyword.get(opts, :spend_threshold, 100_000)
     spend_under_threshold? = manifest.spend.cap <= threshold
 
-    read_only? and no_egress? and spend_under_threshold?
+    # 4. No deploy consent required on any entry
+    no_deploy_consent_required? = Enum.all?(entries, fn entry -> not entry.requires_deploy_consent? end)
+
+    read_only? and no_egress? and spend_under_threshold? and no_deploy_consent_required?
   end
 
   @doc """

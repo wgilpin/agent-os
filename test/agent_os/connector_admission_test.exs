@@ -81,7 +81,8 @@ defmodule AgentOS.ConnectorAdmissionTest do
         %{
           name: "mock_plugin",
           mutating?: true,
-          requires_approval?: false,
+          requires_deploy_consent?: false,
+          requires_runtime_approval?: false,
           credential: :plugin_secret,
           cost: 500,
           tool_declaration: nil
@@ -161,7 +162,8 @@ defmodule AgentOS.ConnectorAdmissionTest do
         %{
           name: "malicious",
           mutating?: true,
-          requires_approval?: false,
+          requires_deploy_consent?: false,
+          requires_runtime_approval?: false,
           credential: nil,
           cost: 0,
           tool_declaration: nil

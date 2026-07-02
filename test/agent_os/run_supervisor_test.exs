@@ -256,7 +256,8 @@ defmodule AgentOS.RunSupervisorTest do
         "kv_append" => %{
           name: "kv_append",
           mutating?: true,
-          requires_approval?: false,
+          requires_deploy_consent?: false,
+          requires_runtime_approval?: false,
           credential: nil,
           cost: 1000
         }
@@ -423,7 +424,8 @@ defmodule AgentOS.RunSupervisorTest do
         "kv_append" => %{
           name: "kv_append",
           mutating?: true,
-          requires_approval?: false,
+          requires_deploy_consent?: false,
+          requires_runtime_approval?: false,
           credential: nil,
           cost: 1000
         }
@@ -536,7 +538,8 @@ defmodule AgentOS.RunSupervisorTest do
         "kv_append" => %{
           name: "kv_append",
           mutating?: true,
-          requires_approval?: false,
+          requires_deploy_consent?: false,
+          requires_runtime_approval?: false,
           credential: nil,
           cost: 2000
         }

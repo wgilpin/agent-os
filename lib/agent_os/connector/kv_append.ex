@@ -9,7 +9,8 @@ defmodule AgentOS.Connector.KvAppend do
     %{
       name: "kv_append",
       mutating?: true,
-      requires_approval?: false,
+      requires_deploy_consent?: false,
+      requires_runtime_approval?: false,
       credential: nil,
       cost: 0
     }

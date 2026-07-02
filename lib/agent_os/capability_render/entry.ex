@@ -10,7 +10,9 @@ defmodule AgentOS.CapabilityRender.Entry do
     :danger,
     :recipients,
     :methods,
-    :phrase_source
+    :phrase_source,
+    :requires_deploy_consent?,
+    :requires_runtime_approval?
   ]
 
   @type danger_tier :: :read_only | :local | :external
@@ -21,6 +23,8 @@ defmodule AgentOS.CapabilityRender.Entry do
           danger: danger_tier(),
           recipients: [String.t()] | nil,
           methods: [String.t()] | nil,
-          phrase_source: :mapped | :fallback
+          phrase_source: :mapped | :fallback,
+          requires_deploy_consent?: boolean(),
+          requires_runtime_approval?: boolean()
         }
 end

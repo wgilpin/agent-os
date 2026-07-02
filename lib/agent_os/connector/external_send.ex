@@ -9,7 +9,8 @@ defmodule AgentOS.Connector.ExternalSend do
     %{
       name: "external_send",
       mutating?: true,
-      requires_approval?: true,
+      requires_deploy_consent?: true,
+      requires_runtime_approval?: true,
       credential: :outbound_token,
       cost: 2000
     }
