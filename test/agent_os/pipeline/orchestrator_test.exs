@@ -23,7 +23,7 @@ defmodule AgentOS.Pipeline.OrchestratorTest do
     start_supervised!(AgentOS.InferenceBroker)
 
     # 2. Start pipeline_runs store
-    pipeline_runs_path = Path.join(tmp, "pipeline_runs_#{uniq}.term")
+    pipeline_runs_path = Path.join(tmp, "pipeline_runs_#{uniq}.db")
     run_log_path = Path.join(tmp, "run_log_#{uniq}.md")
 
     start_supervised!({StateStore, name: "pipeline_runs", path: pipeline_runs_path, initial: %{}})

@@ -11,7 +11,7 @@ defmodule AgentOS.InferenceBrokerTest do
     tmp_spend =
       Path.join(
         System.tmp_dir!(),
-        "spend_ledger_broker_test_#{System.unique_integer([:positive])}.term"
+        "spend_ledger_broker_test_#{System.unique_integer([:positive])}.db"
       )
 
     on_exit(fn -> File.rm(tmp_spend) end)

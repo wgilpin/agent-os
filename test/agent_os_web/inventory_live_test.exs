@@ -16,13 +16,13 @@ defmodule AgentOSWeb.InventoryLiveTest do
 
     File.mkdir_p!(tmp_dir)
 
-    tmp_roster = Path.join(tmp_dir, "roster.term")
-    tmp_spend = Path.join(tmp_dir, "spend.term")
-    tmp_pending = Path.join(tmp_dir, "pending.term")
-    tmp_conformance = Path.join(tmp_dir, "conformance.term")
-    tmp_provenance = Path.join(tmp_dir, "provenance.term")
-    tmp_judge = Path.join(tmp_dir, "judge.term")
-    tmp_security = Path.join(tmp_dir, "security.term")
+    tmp_roster = Path.join(tmp_dir, "roster.db")
+    tmp_spend = Path.join(tmp_dir, "spend.db")
+    tmp_pending = Path.join(tmp_dir, "pending.db")
+    tmp_conformance = Path.join(tmp_dir, "conformance.db")
+    tmp_provenance = Path.join(tmp_dir, "provenance.db")
+    tmp_judge = Path.join(tmp_dir, "judge.db")
+    tmp_security = Path.join(tmp_dir, "security.db")
 
     # Start prerequisite systems manually in isolation
     start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})

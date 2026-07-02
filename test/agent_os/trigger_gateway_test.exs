@@ -8,7 +8,7 @@ defmodule AgentOS.TriggerGatewayTest do
     tmp_approvals =
       Path.join(
         System.tmp_dir!(),
-        "pending_approvals_#{System.unique_integer([:positive])}.term"
+        "pending_approvals_#{System.unique_integer([:positive])}.db"
       )
 
     on_exit(fn ->
@@ -369,7 +369,7 @@ defmodule AgentOS.TriggerGatewayTest do
 
     test "deploy approval resumption records provenance and triggers start_run" do
       tmp_provenance =
-        Path.join(System.tmp_dir!(), "provenance_#{System.unique_integer([:positive])}.term")
+        Path.join(System.tmp_dir!(), "provenance_#{System.unique_integer([:positive])}.db")
 
       on_exit(fn -> File.rm(tmp_provenance) end)
 

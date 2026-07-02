@@ -74,7 +74,7 @@ defmodule AgentOS.ConformanceAuditorTest do
       Path.join(System.tmp_dir!(), "mock_run_log_#{System.unique_integer([:positive])}.md")
 
     tmp_conformance_term =
-      Path.join(System.tmp_dir!(), "mock_conformance_#{System.unique_integer([:positive])}.term")
+      Path.join(System.tmp_dir!(), "mock_conformance_#{System.unique_integer([:positive])}.db")
 
     tmp_alerts =
       Path.join(System.tmp_dir!(), "mock_alerts_#{System.unique_integer([:positive])}.md")
@@ -346,7 +346,7 @@ defmodule AgentOS.ConformanceAuditorTest do
       tmp_conformance_term =
         Path.join(
           System.tmp_dir!(),
-          "mock_conformance_#{System.unique_integer([:positive])}.term"
+          "mock_conformance_#{System.unique_integer([:positive])}.db"
         )
 
       tmp_alerts =

@@ -98,7 +98,7 @@ defmodule AgentOS.ElicitationTest do
     tmp_spend =
       Path.join(
         System.tmp_dir!(),
-        "spend_ledger_elicit_test_#{System.unique_integer([:positive])}.term"
+        "spend_ledger_elicit_test_#{System.unique_integer([:positive])}.db"
       )
 
     # Set up registry and state store

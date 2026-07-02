@@ -8,31 +8,31 @@ defmodule AgentOS.InventoryTest do
     tmp_roster =
       Path.join(
         System.tmp_dir!(),
-        "roster_inventory_#{System.unique_integer([:positive])}.term"
+        "roster_inventory_#{System.unique_integer([:positive])}.db"
       )
 
     tmp_spend =
       Path.join(
         System.tmp_dir!(),
-        "spend_ledger_inventory_#{System.unique_integer([:positive])}.term"
+        "spend_ledger_inventory_#{System.unique_integer([:positive])}.db"
       )
 
     tmp_approvals =
       Path.join(
         System.tmp_dir!(),
-        "pending_approvals_inventory_#{System.unique_integer([:positive])}.term"
+        "pending_approvals_inventory_#{System.unique_integer([:positive])}.db"
       )
 
     tmp_conformance =
       Path.join(
         System.tmp_dir!(),
-        "conformance_inventory_#{System.unique_integer([:positive])}.term"
+        "conformance_inventory_#{System.unique_integer([:positive])}.db"
       )
 
     tmp_provenance =
       Path.join(
         System.tmp_dir!(),
-        "provenance_inventory_#{System.unique_integer([:positive])}.term"
+        "provenance_inventory_#{System.unique_integer([:positive])}.db"
       )
 
     on_exit(fn ->
@@ -313,7 +313,7 @@ defmodule AgentOS.InventoryTest do
 
     test "renders JUDGE: pass with last-run timestamp and disclaimer" do
       tmp_judge =
-        Path.join(System.tmp_dir!(), "judge_inventory_#{System.unique_integer([:positive])}.term")
+        Path.join(System.tmp_dir!(), "judge_inventory_#{System.unique_integer([:positive])}.db")
 
       on_exit(fn -> File.rm(tmp_judge) end)
       start_supervised!({StateStore, name: "judge_results", path: tmp_judge, initial: %{}})
@@ -334,7 +334,7 @@ defmodule AgentOS.InventoryTest do
 
     test "renders JUDGE: fail when the persisted verdict failed" do
       tmp_judge =
-        Path.join(System.tmp_dir!(), "judge_inventory_#{System.unique_integer([:positive])}.term")
+        Path.join(System.tmp_dir!(), "judge_inventory_#{System.unique_integer([:positive])}.db")
 
       on_exit(fn -> File.rm(tmp_judge) end)
       start_supervised!({StateStore, name: "judge_results", path: tmp_judge, initial: %{}})
@@ -361,7 +361,7 @@ defmodule AgentOS.InventoryTest do
       tmp_review =
         Path.join(
           System.tmp_dir!(),
-          "review_inventory_#{System.unique_integer([:positive])}.term"
+          "review_inventory_#{System.unique_integer([:positive])}.db"
         )
 
       on_exit(fn -> File.rm(tmp_review) end)
@@ -387,7 +387,7 @@ defmodule AgentOS.InventoryTest do
       tmp_review =
         Path.join(
           System.tmp_dir!(),
-          "review_inventory_#{System.unique_integer([:positive])}.term"
+          "review_inventory_#{System.unique_integer([:positive])}.db"
         )
 
       on_exit(fn -> File.rm(tmp_review) end)

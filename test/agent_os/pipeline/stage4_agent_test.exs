@@ -13,7 +13,7 @@ defmodule AgentOS.Pipeline.Stage4Test do
   setup do
     uniq = System.unique_integer([:positive])
     tmp = System.tmp_dir!()
-    spend_path = Path.join(tmp, "spend_stage4_#{uniq}.term")
+    spend_path = Path.join(tmp, "spend_stage4_#{uniq}.db")
     spec_dir = Path.join(tmp, "stage4_agents_#{uniq}")
 
     on_exit(fn ->

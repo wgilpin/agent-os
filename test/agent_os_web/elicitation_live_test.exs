@@ -12,7 +12,7 @@ defmodule AgentOSWeb.ElicitationLiveTest do
     tmp_spend =
       Path.join(
         System.tmp_dir!(),
-        "spend_ledger_lv_test_#{System.unique_integer([:positive])}.term"
+        "spend_ledger_lv_test_#{System.unique_integer([:positive])}.db"
       )
 
     # Start prerequisite systems for this test block

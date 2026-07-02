@@ -34,11 +34,11 @@ defmodule AgentOS.Application do
           {Registry, keys: :unique, name: AgentOS.StateStoreRegistry},
           {AgentOS.StateStore,
            name: "roster_trust",
-           path: Application.get_env(:agent_os, :roster_path, "data/roster.term"),
+           path: Application.get_env(:agent_os, :roster_path, "data/roster.db"),
            initial: %{records: []}},
           {AgentOS.StateStore,
            name: "spend_ledger",
-           path: Application.get_env(:agent_os, :spend_ledger_path, "data/spend_ledger.term"),
+           path: Application.get_env(:agent_os, :spend_ledger_path, "data/spend_ledger.db"),
            initial: %{}},
           {AgentOS.StateStore,
            name: "pending_approvals",
@@ -46,7 +46,7 @@ defmodule AgentOS.Application do
              Application.get_env(
                :agent_os,
                :pending_approvals_path,
-               "data/pending_approvals.term"
+               "data/pending_approvals.db"
              ),
            initial: %{approvals: %{}}},
           {AgentOS.StateStore,
@@ -55,24 +55,24 @@ defmodule AgentOS.Application do
              Application.get_env(
                :agent_os,
                :admitted_plugins_path,
-               "data/admitted_plugins.term"
+               "data/admitted_plugins.db"
              ),
            initial: %{}},
           {AgentOS.StateStore,
            name: "conformance",
-           path: Application.get_env(:agent_os, :conformance_path, "data/conformance.term"),
+           path: Application.get_env(:agent_os, :conformance_path, "data/conformance.db"),
            initial: %{}},
           {AgentOS.StateStore,
            name: "provenance",
-           path: Application.get_env(:agent_os, :provenance_path, "data/provenance.term"),
+           path: Application.get_env(:agent_os, :provenance_path, "data/provenance.db"),
            initial: %{}},
           {AgentOS.StateStore,
            name: "judge_results",
-           path: Application.get_env(:agent_os, :judge_results_path, "data/judge_results.term"),
+           path: Application.get_env(:agent_os, :judge_results_path, "data/judge_results.db"),
            initial: %{}},
           {AgentOS.StateStore,
            name: "pipeline_runs",
-           path: Application.get_env(:agent_os, :pipeline_runs_path, "data/pipeline_runs.term"),
+           path: Application.get_env(:agent_os, :pipeline_runs_path, "data/pipeline_runs.db"),
            initial: %{}},
           {AgentOS.StateStore,
            name: "security_review_results",
@@ -80,7 +80,7 @@ defmodule AgentOS.Application do
              Application.get_env(
                :agent_os,
                :security_review_results_path,
-               "data/security_review_results.term"
+               "data/security_review_results.db"
              ),
            initial: %{}},
           AgentOS.CredentialProxy,

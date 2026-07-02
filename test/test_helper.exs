@@ -8,14 +8,14 @@ defmodule AgentOS.TestHelper do
     uniq = System.unique_integer([:positive])
     tmp_dir = System.tmp_dir!()
 
-    roster_path = Path.join(tmp_dir, "roster_#{uniq}.term")
-    spend_path = Path.join(tmp_dir, "spend_#{uniq}.term")
-    approvals_path = Path.join(tmp_dir, "approvals_#{uniq}.term")
-    admitted_plugins_path = Path.join(tmp_dir, "admitted_plugins_#{uniq}.term")
-    conformance_path = Path.join(tmp_dir, "conformance_#{uniq}.term")
-    provenance_path = Path.join(tmp_dir, "provenance_#{uniq}.term")
-    judge_path = Path.join(tmp_dir, "judge_#{uniq}.term")
-    review_path = Path.join(tmp_dir, "review_#{uniq}.term")
+    roster_path = Path.join(tmp_dir, "roster_#{uniq}.db")
+    spend_path = Path.join(tmp_dir, "spend_#{uniq}.db")
+    approvals_path = Path.join(tmp_dir, "approvals_#{uniq}.db")
+    admitted_plugins_path = Path.join(tmp_dir, "admitted_plugins_#{uniq}.db")
+    conformance_path = Path.join(tmp_dir, "conformance_#{uniq}.db")
+    provenance_path = Path.join(tmp_dir, "provenance_#{uniq}.db")
+    judge_path = Path.join(tmp_dir, "judge_#{uniq}.db")
+    review_path = Path.join(tmp_dir, "review_#{uniq}.db")
 
     ExUnit.Callbacks.on_exit(fn ->
       File.rm(roster_path)

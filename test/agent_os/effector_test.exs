@@ -11,7 +11,7 @@ defmodule AgentOS.EffectorTest do
 
   setup do
     tmp =
-      Path.join(System.tmp_dir!(), "roster_effector_#{System.unique_integer([:positive])}.term")
+      Path.join(System.tmp_dir!(), "roster_effector_#{System.unique_integer([:positive])}.db")
 
     on_exit(fn -> File.rm(tmp) end)
 

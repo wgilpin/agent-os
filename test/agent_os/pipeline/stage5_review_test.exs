@@ -12,8 +12,8 @@ defmodule AgentOS.Pipeline.Stage5Test do
   setup do
     uniq = System.unique_integer([:positive])
     tmp = System.tmp_dir!()
-    spend_path = Path.join(tmp, "spend_stage5_#{uniq}.term")
-    review_path = Path.join(tmp, "review_stage5_#{uniq}.term")
+    spend_path = Path.join(tmp, "spend_stage5_#{uniq}.db")
+    review_path = Path.join(tmp, "review_stage5_#{uniq}.db")
 
     on_exit(fn ->
       File.rm(spend_path)

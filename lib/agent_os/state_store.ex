@@ -86,59 +86,86 @@ defmodule AgentOS.StateStore do
 
   @impl true
   def init(opts) do
-    # Extract file path and default initial state
+    # Extract file path and operational mode
     path = Keyword.fetch!(opts, :path)
-    initial = Keyword.get(opts, :initial, %{})
 
-    if path == ":memory:" or String.ends_with?(path, ".db") do
-      # Ensure parent directory exists for file-based DBs
-      if path != ":memory:" do
-        path |> Path.dirname() |> File.mkdir_p!()
+    mode =
+      cond do
+        Keyword.has_key?(opts, :mode) -> Keyword.get(opts, :mode)
+        is_map(Keyword.get(opts, :initial)) -> :map
+        true -> :record
       end
 
-      # Open SQLite connection
-      {:ok, conn} = Exqlite.Sqlite3.open(path)
+    default_initial = if mode == :map, do: %{}, else: []
+    initial = Keyword.get(opts, :initial, default_initial)
 
-      # Enable WAL mode for crash-durability and concurrency (if not in-memory)
-      if path != ":memory:" do
-        {:ok, statement} = Exqlite.Sqlite3.prepare(conn, "PRAGMA journal_mode=WAL;")
-        _ = Exqlite.Sqlite3.step(conn, statement)
-        :ok = Exqlite.Sqlite3.release(conn, statement)
-      end
+    # Ensure parent directory exists for file-based DBs
+    if path != ":memory:" do
+      path |> Path.dirname() |> File.mkdir_p!()
+    end
 
-      # Create table records
-      create_sql = """
-      CREATE TABLE IF NOT EXISTS records (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        data TEXT NOT NULL,
-        created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-      );
-      """
+    # Open SQLite connection
+    {:ok, conn} = Exqlite.Sqlite3.open(path)
 
-      {:ok, statement} = Exqlite.Sqlite3.prepare(conn, create_sql)
+    # Enable WAL mode for crash-durability and concurrency (if not in-memory)
+    if path != ":memory:" do
+      {:ok, statement} = Exqlite.Sqlite3.prepare(conn, "PRAGMA journal_mode=WAL;")
       _ = Exqlite.Sqlite3.step(conn, statement)
       :ok = Exqlite.Sqlite3.release(conn, statement)
-
-      {:ok, %{backend: :sqlite, conn: conn, path: path}}
-    else
-      # Attempt to load state from disk.
-      data =
-        if File.exists?(path) do
-          # Read raw binary and deserialize using Erlang term deserializer.
-          # :erlang.binary_to_term/1 converts a binary back to an Elixir map/term.
-          path |> File.read!() |> :erlang.binary_to_term()
-        else
-          # If the file does not exist, use the initial state.
-          initial
-        end
-
-      # Return {:ok, initial_state}
-      {:ok, %{backend: :term_file, path: path, data: data}}
     end
+
+    case mode do
+      :record ->
+        # Create table records
+        create_sql = """
+        CREATE TABLE IF NOT EXISTS records (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          data TEXT NOT NULL,
+          created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        );
+        """
+
+        {:ok, statement} = Exqlite.Sqlite3.prepare(conn, create_sql)
+        _ = Exqlite.Sqlite3.step(conn, statement)
+        :ok = Exqlite.Sqlite3.release(conn, statement)
+
+      :map ->
+        # Create table map_store
+        create_sql = """
+        CREATE TABLE IF NOT EXISTS map_store (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+        """
+
+        {:ok, statement} = Exqlite.Sqlite3.prepare(conn, create_sql)
+        _ = Exqlite.Sqlite3.step(conn, statement)
+        :ok = Exqlite.Sqlite3.release(conn, statement)
+
+        # Seed initial state if table is empty
+        {:ok, count_stmt} = Exqlite.Sqlite3.prepare(conn, "SELECT COUNT(*) FROM map_store;")
+        {:row, [count]} = Exqlite.Sqlite3.step(conn, count_stmt)
+        :ok = Exqlite.Sqlite3.release(conn, count_stmt)
+
+        if count == 0 and is_map(initial) do
+          Enum.each(initial, fn {k, v} ->
+            json_val = Jason.encode!(encode_term(v))
+
+            {:ok, insert_stmt} =
+              Exqlite.Sqlite3.prepare(conn, "INSERT INTO map_store (key, value) VALUES (?, ?);")
+
+            :ok = Exqlite.Sqlite3.bind(insert_stmt, [db_key(k), json_val])
+            _ = Exqlite.Sqlite3.step(conn, insert_stmt)
+            :ok = Exqlite.Sqlite3.release(conn, insert_stmt)
+          end)
+        end
+    end
+
+    {:ok, %{conn: conn, path: path, mode: mode}}
   end
 
   @impl true
-  def handle_call(:snapshot, _from, %{backend: :sqlite} = state) do
+  def handle_call(:snapshot, _from, %{mode: :record} = state) do
     case Exqlite.Sqlite3.prepare(
            state.conn,
            "SELECT data FROM records ORDER BY id ASC;"
@@ -155,13 +182,26 @@ defmodule AgentOS.StateStore do
   end
 
   @impl true
-  def handle_call(:snapshot, _from, state) do
-    # Return `{:reply, response, new_state}` where response is the state data copy.
-    {:reply, state.data, state}
+  def handle_call(:snapshot, _from, %{mode: :map} = state) do
+    case Exqlite.Sqlite3.prepare(state.conn, "SELECT key, value FROM map_store;") do
+      {:ok, stmt} ->
+        {:ok, rows} = fetch_all(state.conn, stmt)
+        :ok = Exqlite.Sqlite3.release(state.conn, stmt)
+
+        map =
+          Enum.reduce(rows, %{}, fn [key, value_str], acc ->
+            Map.put(acc, restore_key(key), decode_term(Jason.decode!(value_str)))
+          end)
+
+        {:reply, map, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   @impl true
-  def handle_call({:query, query_params}, _from, %{backend: :sqlite} = state) do
+  def handle_call({:query, query_params}, _from, %{mode: :record} = state) do
     case build_and_execute_query(state.conn, query_params) do
       {:ok, records} -> {:reply, {:ok, records}, state}
       {:error, reason} -> {:reply, {:error, reason}, state}
@@ -174,50 +214,139 @@ defmodule AgentOS.StateStore do
   end
 
   @impl true
-  def handle_call({:apply, {:append, _list_key, record}}, _from, %{backend: :sqlite} = state) do
+  def handle_call({:apply, {:append, _list_key, record}}, _from, %{mode: :record} = state) do
     do_sqlite_append(state, record)
   end
 
   @impl true
-  def handle_call({:apply, {:append, record}}, _from, %{backend: :sqlite} = state) do
+  def handle_call({:apply, {:append, record}}, _from, %{mode: :record} = state) do
     do_sqlite_append(state, record)
   end
 
   @impl true
-  def handle_call({:apply, {:append, list_key, item}}, _from, state) do
-    # Map.update/4 updates the key in the map. If the key is not present, it inserts [item].
-    # Otherwise, it appends the item to the existing list (`list ++ [item]`).
-    new_data = Map.update(state.data, list_key, [item], fn list -> list ++ [item] end)
+  def handle_call({:apply, {:append, list_key, item}}, _from, %{mode: :map} = state) do
+    list_key_str = db_key(list_key)
 
-    # Persist the updated state to the term-file.
-    :ok = persist(state.path, new_data)
+    case Exqlite.Sqlite3.prepare(state.conn, "SELECT value FROM map_store WHERE key = ?;") do
+      {:ok, stmt} ->
+        :ok = Exqlite.Sqlite3.bind(stmt, [list_key_str])
+        row_result = Exqlite.Sqlite3.step(state.conn, stmt)
+        :ok = Exqlite.Sqlite3.release(state.conn, stmt)
 
-    # Reply `:ok` to the caller, and update the GenServer's internal state.
-    {:reply, :ok, %{state | data: new_data}}
+        existing_list =
+          case row_result do
+            {:row, [value_str]} ->
+              case decode_term(Jason.decode!(value_str)) do
+                list when is_list(list) -> list
+                _ -> []
+              end
+
+            _ ->
+              []
+          end
+
+        new_list = existing_list ++ [item]
+        json_val = Jason.encode!(encode_term(new_list))
+
+        case Exqlite.Sqlite3.prepare(
+               state.conn,
+               "INSERT INTO map_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;"
+             ) do
+          {:ok, insert_stmt} ->
+            :ok = Exqlite.Sqlite3.bind(insert_stmt, [list_key_str, json_val])
+            _ = Exqlite.Sqlite3.step(state.conn, insert_stmt)
+            :ok = Exqlite.Sqlite3.release(state.conn, insert_stmt)
+            {:reply, :ok, state}
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   @impl true
-  def handle_call({:apply, {:put, key, value}}, _from, state) do
-    # Map.put/3 adds or replaces the key with the value.
-    new_data = Map.put(state.data, key, value)
+  def handle_call({:apply, {:put, key, value}}, _from, %{mode: :map} = state) do
+    key_str = db_key(key)
+    json_val = Jason.encode!(encode_term(value))
 
-    # Persist state.
-    :ok = persist(state.path, new_data)
+    case Exqlite.Sqlite3.prepare(
+           state.conn,
+           "INSERT INTO map_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;"
+         ) do
+      {:ok, stmt} ->
+        :ok = Exqlite.Sqlite3.bind(stmt, [key_str, json_val])
+        _ = Exqlite.Sqlite3.step(state.conn, stmt)
+        :ok = Exqlite.Sqlite3.release(state.conn, stmt)
+        {:reply, :ok, state}
 
-    # Reply and update state.
-    {:reply, :ok, %{state | data: new_data}}
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   @impl true
-  def handle_call({:apply, {:delete_in, path}}, _from, state) when is_list(path) do
-    # pop_in/2 removes the element at the nested path and returns a tuple with the element and the new map.
-    {_popped, new_data} = pop_in(state.data, path)
+  def handle_call({:apply, {:delete_in, path}}, _from, %{mode: :map} = state)
+      when is_list(path) do
+    case path do
+      [single_key] ->
+        key_str = db_key(single_key)
 
-    # Persist state.
-    :ok = persist(state.path, new_data)
+        case Exqlite.Sqlite3.prepare(state.conn, "DELETE FROM map_store WHERE key = ?;") do
+          {:ok, stmt} ->
+            :ok = Exqlite.Sqlite3.bind(stmt, [key_str])
+            _ = Exqlite.Sqlite3.step(state.conn, stmt)
+            :ok = Exqlite.Sqlite3.release(state.conn, stmt)
+            {:reply, :ok, state}
 
-    # Reply and update state.
-    {:reply, :ok, %{state | data: new_data}}
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
+
+      [top_key | rest] ->
+        top_key_str = db_key(top_key)
+
+        case Exqlite.Sqlite3.prepare(state.conn, "SELECT value FROM map_store WHERE key = ?;") do
+          {:ok, stmt} ->
+            :ok = Exqlite.Sqlite3.bind(stmt, [top_key_str])
+            row_result = Exqlite.Sqlite3.step(state.conn, stmt)
+            :ok = Exqlite.Sqlite3.release(state.conn, stmt)
+
+            case row_result do
+              {:row, [value_str]} ->
+                map = decode_term(Jason.decode!(value_str))
+
+                if is_map(map) do
+                  {_popped, updated_map} = pop_in(map, rest)
+                  json_val = Jason.encode!(encode_term(updated_map))
+
+                  case Exqlite.Sqlite3.prepare(
+                         state.conn,
+                         "INSERT INTO map_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;"
+                       ) do
+                    {:ok, insert_stmt} ->
+                      :ok = Exqlite.Sqlite3.bind(insert_stmt, [top_key_str, json_val])
+                      _ = Exqlite.Sqlite3.step(state.conn, insert_stmt)
+                      :ok = Exqlite.Sqlite3.release(state.conn, insert_stmt)
+                      {:reply, :ok, state}
+
+                    {:error, reason} ->
+                      {:reply, {:error, reason}, state}
+                  end
+                else
+                  {:reply, :ok, state}
+                end
+
+              _ ->
+                {:reply, :ok, state}
+            end
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
+    end
   end
 
   @impl true
@@ -227,7 +356,7 @@ defmodule AgentOS.StateStore do
   end
 
   @impl true
-  def terminate(_reason, %{backend: :sqlite, conn: conn}) do
+  def terminate(_reason, %{conn: conn}) do
     Exqlite.Sqlite3.close(conn)
     :ok
   end
@@ -239,13 +368,131 @@ defmodule AgentOS.StateStore do
 
   # Helpers
 
+  defp db_key(key) do
+    cond do
+      is_atom(key) -> "a:#{key}"
+      is_binary(key) -> "s:#{key}"
+      true -> to_string(key)
+    end
+  end
+
+  defp restore_key(db_key_str) do
+    case db_key_str do
+      "a:" <> atom_str ->
+        try do
+          String.to_existing_atom(atom_str)
+        rescue
+          _ -> String.to_atom(atom_str)
+        end
+
+      "s:" <> string_str ->
+        string_str
+
+      _ ->
+        db_key_str
+    end
+  end
+
+  defp encode_term(val) do
+    cond do
+      is_struct(val) ->
+        map = Map.from_struct(val)
+        encoded_map = encode_map(map)
+        Map.put(encoded_map, "__struct__", to_string(val.__struct__))
+
+      is_tuple(val) ->
+        %{"__tuple__" => true, "elements" => Enum.map(Tuple.to_list(val), &encode_term/1)}
+
+      is_map(val) ->
+        encode_map(val)
+
+      is_list(val) ->
+        Enum.map(val, &encode_term/1)
+
+      is_atom(val) and not is_nil(val) and not is_boolean(val) ->
+        %{"__atom__" => true, "value" => to_string(val)}
+
+      true ->
+        val
+    end
+  end
+
+  defp encode_map(map) do
+    Enum.reduce(map, %{}, fn {k, v}, acc ->
+      encoded_key =
+        cond do
+          is_atom(k) -> "a:#{k}"
+          is_binary(k) -> "s:#{k}"
+          true -> to_string(k)
+        end
+
+      Map.put(acc, encoded_key, encode_term(v))
+    end)
+  end
+
+  defp decode_term(val) do
+    cond do
+      is_map(val) ->
+        cond do
+          Map.get(val, "__atom__") == true ->
+            atom_str = Map.get(val, "value")
+
+            try do
+              String.to_existing_atom(atom_str)
+            rescue
+              _ -> String.to_atom(atom_str)
+            end
+
+          Map.get(val, "__tuple__") == true ->
+            list = Enum.map(Map.get(val, "elements") || [], &decode_term/1)
+            List.to_tuple(list)
+
+          struct_str = Map.get(val, "__struct__") ->
+            struct_module = String.to_existing_atom(struct_str)
+            decoded_map = decode_map(Map.delete(val, "__struct__"))
+            struct!(struct_module, decoded_map)
+
+          true ->
+            decode_map(val)
+        end
+
+      is_list(val) ->
+        Enum.map(val, &decode_term/1)
+
+      true ->
+        val
+    end
+  end
+
+  defp decode_map(map) do
+    Enum.reduce(map, %{}, fn {k, v}, acc ->
+      decoded_key =
+        case k do
+          "a:" <> atom_str ->
+            try do
+              String.to_existing_atom(atom_str)
+            rescue
+              _ -> String.to_atom(atom_str)
+            end
+
+          "s:" <> string_str ->
+            string_str
+
+          _ ->
+            k
+        end
+
+      Map.put(acc, decoded_key, decode_term(v))
+    end)
+  end
+
   defp do_sqlite_append(state, record) do
     json_data = Jason.encode!(record)
 
     case Exqlite.Sqlite3.prepare(state.conn, "INSERT INTO records (data) VALUES (?);") do
       {:ok, stmt} ->
         :ok = Exqlite.Sqlite3.bind(stmt, [json_data])
-        :done = Exqlite.Sqlite3.step(state.conn, stmt)
+        _ = Exqlite.Sqlite3.step(state.conn, stmt)
         :ok = Exqlite.Sqlite3.release(state.conn, stmt)
         {:reply, :ok, state}
 
@@ -340,24 +587,5 @@ defmodule AgentOS.StateStore do
       {:error, reason} ->
         {:error, reason}
     end
-  end
-
-  # Atomic write: serialize to a tmp file, then rename into place.
-  # This guarantees that if the node crashes mid-write, the existing file is untouched.
-  defp persist(path, data) do
-    # Ensure directory structure exists.
-    path |> Path.dirname() |> File.mkdir_p!()
-
-    # Append ".tmp" to the path.
-    tmp = path <> ".tmp"
-
-    # Serialize the data using Erlang External Term Format, and write it to the tmp file.
-    File.write!(tmp, :erlang.term_to_binary(data))
-
-    # Atomically rename the tmp file to the target path.
-    File.rename!(tmp, path)
-
-    # Return :ok.
-    :ok
   end
 end

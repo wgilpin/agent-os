@@ -12,7 +12,7 @@ defmodule AgentOS.IsolationTest do
     tmp_roster =
       Path.join(
         System.tmp_dir!(),
-        "roster_isolation_#{System.unique_integer([:positive])}.term"
+        "roster_isolation_#{System.unique_integer([:positive])}.db"
       )
 
     on_exit(fn ->

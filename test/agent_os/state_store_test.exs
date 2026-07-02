@@ -6,8 +6,8 @@ defmodule AgentOS.StateStoreTest do
 
   setup do
     # Unique temp paths per test
-    tmp1 = Path.join(System.tmp_dir!(), "state_1_#{System.unique_integer([:positive])}.term")
-    tmp2 = Path.join(System.tmp_dir!(), "state_2_#{System.unique_integer([:positive])}.term")
+    tmp1 = Path.join(System.tmp_dir!(), "state_1_#{System.unique_integer([:positive])}.db")
+    tmp2 = Path.join(System.tmp_dir!(), "state_2_#{System.unique_integer([:positive])}.db")
 
     on_exit(fn ->
       File.rm(tmp1)
