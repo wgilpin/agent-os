@@ -4,13 +4,14 @@ defmodule AgentOS.ProposedAction do
   """
 
   @enforce_keys [:type]
-  defstruct [:type, :recipient, :method, :payload]
+  defstruct [:type, :recipient, :method, :payload, :grant_resolved_namespace]
 
   @type t :: %__MODULE__{
           type: String.t(),
           recipient: String.t() | nil,
           method: String.t() | nil,
-          payload: map()
+          payload: map(),
+          grant_resolved_namespace: String.t() | nil
         }
 
   @doc """

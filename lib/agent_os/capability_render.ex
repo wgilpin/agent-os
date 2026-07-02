@@ -106,13 +106,15 @@ defmodule AgentOS.CapabilityRender do
   # - otherwise -> :external
   defp danger_tier(cap) do
     cond do
-      not cap.mutating? -> :read_only
+      not cap.mutating? ->
+        :read_only
 
       is_nil(cap.credential) and not Map.get(cap, :requires_deploy_consent?, false) and
-          not Map.get(cap, :requires_runtime_approval?, false) and cap.cost == 0 ->
+        not Map.get(cap, :requires_runtime_approval?, false) and cap.cost == 0 ->
         :local
 
-      true -> :external
+      true ->
+        :external
     end
   end
 end

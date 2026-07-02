@@ -103,6 +103,8 @@ defmodule AgentOS.Connector do
     AgentOS.Connector.GmailRead,
     AgentOS.Connector.GmailDraft,
     AgentOS.Connector.WebSearch,
+    AgentOS.Connector.StoreAppend,
+    AgentOS.Connector.StoreFind,
     AgentOS.Connector.TestFixture,
     AgentOS.Connector.TimeoutFixture,
     AgentOS.Connector.CrashFixture

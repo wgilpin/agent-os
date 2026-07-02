@@ -110,10 +110,20 @@ defmodule AgentOS.Manifest do
     methods = Map.get(raw_grant, "methods")
     if methods != nil and not is_list(methods), do: raise("Grant 'methods' must be a list")
 
+    handle = Map.get(raw_grant, "handle")
+    if handle != nil and not is_binary(handle), do: raise("Grant 'handle' must be a string")
+
+    namespace = Map.get(raw_grant, "namespace")
+
+    if namespace != nil and not is_binary(namespace),
+      do: raise("Grant 'namespace' must be a string")
+
     struct!(Grant,
       connector: connector,
       recipients: recipients,
-      methods: methods
+      methods: methods,
+      handle: handle,
+      namespace: namespace
     )
   end
 

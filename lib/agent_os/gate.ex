@@ -18,7 +18,13 @@ defmodule AgentOS.Gate do
           | {:breach, :spend}
   def evaluate(%ProposedAction{} = action, %Manifest{} = manifest, registry, %{spent: spent}) do
     # 1. Grant match
-    case Enum.find(manifest.grants, fn g -> g.connector == action.type end) do
+    action_handle =
+      Map.get(action.payload || %{}, "handle") || Map.get(action.payload || %{}, :handle)
+
+    case Enum.find(manifest.grants, fn g ->
+           g.connector == action.type and
+             (is_nil(g.handle) or g.handle == action_handle)
+         end) do
       nil ->
         Logger.warning(
           "dropped proposed action: ungranted (type '#{action.type}' not allowed by manifest)"
@@ -101,10 +107,12 @@ defmodule AgentOS.Gate do
             case evaluate(action, manifest, registry, %{spent: cur_spent}) do
               {:approve, grant} ->
                 cost = get_cost(action.type, registry)
+                action = %{action | grant_resolved_namespace: grant.namespace}
                 {[%{action: action, grant: grant} | app], park, rej, bre, cur_spent + cost}
 
               {:needs_approval, grant} ->
                 cost = get_cost(action.type, registry)
+                action = %{action | grant_resolved_namespace: grant.namespace}
                 {app, [%{action: action, grant: grant} | park], rej, bre, cur_spent + cost}
 
               {:reject, reason} ->

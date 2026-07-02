@@ -74,6 +74,14 @@ defmodule AgentOS.StateStore do
     GenServer.call(via_tuple(name), {:apply, action})
   end
 
+  @doc """
+  Queries records matching field predicates from the given record store.
+  """
+  @spec query(String.t(), map()) :: {:ok, [map()]} | {:error, term()}
+  def query(name, query_params) when is_map(query_params) do
+    GenServer.call(via_tuple(name), {:query, query_params})
+  end
+
   # Server callbacks
 
   @impl true
@@ -82,25 +90,97 @@ defmodule AgentOS.StateStore do
     path = Keyword.fetch!(opts, :path)
     initial = Keyword.get(opts, :initial, %{})
 
-    # Attempt to load state from disk.
-    data =
-      if File.exists?(path) do
-        # Read raw binary and deserialize using Erlang term deserializer.
-        # :erlang.binary_to_term/1 converts a binary back to an Elixir map/term.
-        path |> File.read!() |> :erlang.binary_to_term()
-      else
-        # If the file does not exist, use the initial state.
-        initial
+    if path == ":memory:" or String.ends_with?(path, ".db") do
+      # Ensure parent directory exists for file-based DBs
+      if path != ":memory:" do
+        path |> Path.dirname() |> File.mkdir_p!()
       end
 
-    # Return {:ok, initial_state}
-    {:ok, %{path: path, data: data}}
+      # Open SQLite connection
+      {:ok, conn} = Exqlite.Sqlite3.open(path)
+
+      # Enable WAL mode for crash-durability and concurrency (if not in-memory)
+      if path != ":memory:" do
+        {:ok, statement} = Exqlite.Sqlite3.prepare(conn, "PRAGMA journal_mode=WAL;")
+        _ = Exqlite.Sqlite3.step(conn, statement)
+        :ok = Exqlite.Sqlite3.release(conn, statement)
+      end
+
+      # Create table records
+      create_sql = """
+      CREATE TABLE IF NOT EXISTS records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        data TEXT NOT NULL,
+        created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+      """
+
+      {:ok, statement} = Exqlite.Sqlite3.prepare(conn, create_sql)
+      _ = Exqlite.Sqlite3.step(conn, statement)
+      :ok = Exqlite.Sqlite3.release(conn, statement)
+
+      {:ok, %{backend: :sqlite, conn: conn, path: path}}
+    else
+      # Attempt to load state from disk.
+      data =
+        if File.exists?(path) do
+          # Read raw binary and deserialize using Erlang term deserializer.
+          # :erlang.binary_to_term/1 converts a binary back to an Elixir map/term.
+          path |> File.read!() |> :erlang.binary_to_term()
+        else
+          # If the file does not exist, use the initial state.
+          initial
+        end
+
+      # Return {:ok, initial_state}
+      {:ok, %{backend: :term_file, path: path, data: data}}
+    end
+  end
+
+  @impl true
+  def handle_call(:snapshot, _from, %{backend: :sqlite} = state) do
+    case Exqlite.Sqlite3.prepare(
+           state.conn,
+           "SELECT data FROM records ORDER BY id ASC;"
+         ) do
+      {:ok, stmt} ->
+        {:ok, rows} = fetch_all(state.conn, stmt)
+        :ok = Exqlite.Sqlite3.release(state.conn, stmt)
+        records = Enum.map(rows, fn [data_str] -> Jason.decode!(data_str) end)
+        {:reply, records, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   @impl true
   def handle_call(:snapshot, _from, state) do
     # Return `{:reply, response, new_state}` where response is the state data copy.
     {:reply, state.data, state}
+  end
+
+  @impl true
+  def handle_call({:query, query_params}, _from, %{backend: :sqlite} = state) do
+    case build_and_execute_query(state.conn, query_params) do
+      {:ok, records} -> {:reply, {:ok, records}, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:query, _query_params}, _from, state) do
+    {:reply, {:error, :unsupported_backend}, state}
+  end
+
+  @impl true
+  def handle_call({:apply, {:append, _list_key, record}}, _from, %{backend: :sqlite} = state) do
+    do_sqlite_append(state, record)
+  end
+
+  @impl true
+  def handle_call({:apply, {:append, record}}, _from, %{backend: :sqlite} = state) do
+    do_sqlite_append(state, record)
   end
 
   @impl true
@@ -144,6 +224,122 @@ defmodule AgentOS.StateStore do
   def handle_call({:apply, _bad}, _from, state) do
     # Fallback to handle malformed action calls.
     {:reply, {:error, :bad_action}, state}
+  end
+
+  @impl true
+  def terminate(_reason, %{backend: :sqlite, conn: conn}) do
+    Exqlite.Sqlite3.close(conn)
+    :ok
+  end
+
+  @impl true
+  def terminate(_reason, _state) do
+    :ok
+  end
+
+  # Helpers
+
+  defp do_sqlite_append(state, record) do
+    json_data = Jason.encode!(record)
+
+    case Exqlite.Sqlite3.prepare(state.conn, "INSERT INTO records (data) VALUES (?);") do
+      {:ok, stmt} ->
+        :ok = Exqlite.Sqlite3.bind(stmt, [json_data])
+        :done = Exqlite.Sqlite3.step(state.conn, stmt)
+        :ok = Exqlite.Sqlite3.release(state.conn, stmt)
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  defp fetch_all(conn, stmt, acc \\ []) do
+    case Exqlite.Sqlite3.step(conn, stmt) do
+      {:row, row} -> fetch_all(conn, stmt, [row | acc])
+      :done -> {:ok, Enum.reverse(acc)}
+    end
+  end
+
+  defp build_and_execute_query(conn, params) do
+    predicates = Map.get(params, "predicates") || Map.get(params, :predicates) || []
+    limit = Map.get(params, "limit") || Map.get(params, :limit)
+    order_by = Map.get(params, "order_by") || Map.get(params, :order_by)
+    order = Map.get(params, "order") || Map.get(params, :order) || "asc"
+
+    # Build WHERE clause
+    {where_clauses, bindings} =
+      Enum.reduce(predicates, {[], []}, fn pred, {clauses, binds} ->
+        {field, op, val} =
+          case pred do
+            %{} = m ->
+              f = Map.get(m, "field") || Map.get(m, :field)
+              o = Map.get(m, "operator") || Map.get(m, :operator)
+              v = Map.get(m, "value") || Map.get(m, :value)
+              {f, o, v}
+
+            {f, o, v} ->
+              {f, o, v}
+          end
+
+        # Validate operator to prevent SQL injection
+        valid_operators = ["=", "!=", "<", ">", "<=", ">="]
+
+        if op in valid_operators and is_binary(field) do
+          clause = "json_extract(data, '$.#{field}') #{op} ?"
+          {[clause | clauses], [val | binds]}
+        else
+          {clauses, binds}
+        end
+      end)
+
+    where_sql =
+      if Enum.empty?(where_clauses) do
+        ""
+      else
+        "WHERE " <> Enum.join(Enum.reverse(where_clauses), " AND ")
+      end
+
+    # Build ORDER BY clause
+    order_sql =
+      if is_binary(order_by) do
+        direction =
+          if to_string(order) |> String.downcase() == "desc", do: "DESC", else: "ASC"
+
+        "ORDER BY json_extract(data, '$.#{order_by}') #{direction}"
+      else
+        "ORDER BY id ASC"
+      end
+
+    # Build LIMIT clause
+    limit_sql =
+      if is_integer(limit) do
+        "LIMIT #{limit}"
+      else
+        ""
+      end
+
+    sql = "SELECT data FROM records #{where_sql} #{order_sql} #{limit_sql};"
+
+    case Exqlite.Sqlite3.prepare(conn, sql) do
+      {:ok, stmt} ->
+        raw_bindings = Enum.reverse(bindings)
+        :ok = Exqlite.Sqlite3.bind(stmt, raw_bindings)
+
+        case fetch_all(conn, stmt) do
+          {:ok, rows} ->
+            :ok = Exqlite.Sqlite3.release(conn, stmt)
+            records = Enum.map(rows, fn [data_str] -> Jason.decode!(data_str) end)
+            {:ok, records}
+
+          {:error, reason} ->
+            :ok = Exqlite.Sqlite3.release(conn, stmt)
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   # Atomic write: serialize to a tmp file, then rename into place.

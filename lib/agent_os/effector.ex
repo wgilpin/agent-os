@@ -177,7 +177,7 @@ defmodule AgentOS.Effector do
     end
   end
 
-  defp allowed_store?(store_name, _grant) do
+  defp allowed_store?(store_name, grant) do
     system_stores = [
       "spend_ledger",
       "pending_approvals",
@@ -190,6 +190,16 @@ defmodule AgentOS.Effector do
     ]
 
     store_name_str = to_string(store_name)
-    store_name_str not in system_stores
+
+    cond do
+      store_name_str in system_stores ->
+        false
+
+      grant && grant.namespace && store_name_str != to_string(grant.namespace) ->
+        false
+
+      true ->
+        true
+    end
   end
 end

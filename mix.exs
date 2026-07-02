@@ -27,6 +27,7 @@ defmodule AgentOS.MixProject do
       {:phoenix_live_view, "~> 0.20.2"},
       {:phoenix_html, "~> 4.0"},
       {:plug_cowboy, "~> 2.6"},
+      {:exqlite, ">= 0.11.0"},
       {:floki, ">= 0.30.0", only: :test}
     ]
   end

@@ -288,7 +288,8 @@ defmodule AgentOS.Provisioner do
     spend_under_threshold? = manifest.spend.cap <= threshold
 
     # 4. No deploy consent required on any entry
-    no_deploy_consent_required? = Enum.all?(entries, fn entry -> not entry.requires_deploy_consent? end)
+    no_deploy_consent_required? =
+      Enum.all?(entries, fn entry -> not entry.requires_deploy_consent? end)
 
     read_only? and no_egress? and spend_under_threshold? and no_deploy_consent_required?
   end
