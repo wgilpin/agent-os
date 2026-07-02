@@ -62,6 +62,10 @@ defmodule AgentOS.Application do
            path: Application.get_env(:agent_os, :judge_results_path, "data/judge_results.term"),
            initial: %{}},
           {AgentOS.StateStore,
+           name: "pipeline_runs",
+           path: Application.get_env(:agent_os, :pipeline_runs_path, "data/pipeline_runs.term"),
+           initial: %{}},
+          {AgentOS.StateStore,
            name: "security_review_results",
            path:
              Application.get_env(
@@ -75,6 +79,9 @@ defmodule AgentOS.Application do
           {AgentOS.InferencePriceSync, []},
           {Phoenix.PubSub, name: AgentOS.PubSub},
           AgentOSWeb.Endpoint,
+
+          # ConnectorSupervisor isolates dynamic connector executions
+          {Task.Supervisor, name: AgentOS.ConnectorSupervisor},
 
           # RunSupervisor handles starting and retrying worker execution tasks.
           AgentOS.RunSupervisor,

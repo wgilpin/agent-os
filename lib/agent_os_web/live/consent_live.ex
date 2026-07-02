@@ -156,7 +156,8 @@ defmodule AgentOSWeb.ConsentLive do
       hash = AgentOS.Provisioner.manifest_hash(socket.assigns.manifest_path)
 
       # 2. Record approved provenance state
-      :ok = AgentOS.Provisioner.record_provenance(socket.assigns.agent_name, :reviewed_human, hash)
+      :ok =
+        AgentOS.Provisioner.record_provenance(socket.assigns.agent_name, :reviewed_human, hash)
 
       # 3. Resume the deploy execution via TriggerGateway approval if ref exists
       if socket.assigns.ref do

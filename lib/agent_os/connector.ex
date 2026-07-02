@@ -1,6 +1,6 @@
 defmodule AgentOS.Connector do
   @moduledoc """
-  Defines the connector capability registry.
+  Defines the connector capability behaviour and auto-discovered registry.
   """
 
   @type capability :: %{
@@ -12,43 +12,22 @@ defmodule AgentOS.Connector do
           cost: integer()
         }
 
-  @registry %{
-    "kv_append" => %{
-      name: "kv_append",
-      mutating?: true,
-      requires_approval?: false,
-      credential: nil,
-      cost: 0
-    },
-    "external_send" => %{
-      name: "external_send",
-      mutating?: true,
-      requires_approval?: true,
-      credential: :outbound_token,
-      cost: 2000
-    },
-    "gmail_read" => %{
-      name: "gmail_read",
-      mutating?: false,
-      requires_approval?: false,
-      credential: nil,
-      cost: 0
-    },
-    "gmail_draft" => %{
-      name: "gmail_draft",
-      mutating?: true,
-      requires_approval?: false,
-      credential: nil,
-      cost: 0
-    }
-  }
+  # Callbacks for dynamic connector capabilities
+  @callback metadata() :: capability()
+  @callback scope(boundaries :: map()) :: AgentOS.Manifest.Grant.t()
+  @callback execute(action :: AgentOS.ProposedAction.t(), secret :: String.t() | nil) ::
+              :ok | {:error, term()}
+  @callback render(grant :: AgentOS.Manifest.Grant.t()) :: String.t()
 
   @doc """
   Returns the complete connector registry map.
   """
   @spec registry() :: %{String.t() => capability()}
   def registry do
-    Application.get_env(:agent_os, :connector_registry, @registry)
+    case Application.get_env(:agent_os, :connector_registry) do
+      nil -> discover_and_build_registry()
+      override -> override
+    end
   end
 
   @doc """
@@ -68,7 +47,81 @@ defmodule AgentOS.Connector do
   """
   @spec registered_names() :: [String.t()]
   def registered_names do
-    Map.keys(@registry)
+    Map.keys(registry())
+  end
+
+  @doc """
+  Retrieves the backing module implementing the capability.
+  Returns `{:ok, module}` or `{:error, :unknown_connector}`.
+  """
+  @spec get_module(String.t()) :: {:ok, module()} | {:error, :unknown_connector}
+  def get_module(name) when is_binary(name) do
+    result =
+      Enum.find_value(all_modules(), fn mod ->
+        case Code.ensure_loaded(mod) do
+          {:module, loaded_mod} ->
+            attrs = loaded_mod.module_info(:attributes)
+            behaviours =
+              Keyword.get(attrs, :behaviour, []) ++ Keyword.get(attrs, :behavior, [])
+
+            if AgentOS.Connector in behaviours do
+              meta = loaded_mod.metadata()
+
+              if meta.name == name do
+                {:ok, loaded_mod}
+              else
+                nil
+              end
+            else
+              nil
+            end
+
+          _ ->
+            nil
+        end
+      end)
+
+    result || {:error, :unknown_connector}
+  end
+
+  # Helper to scan modules at boot and compile registry map from metadata
+  defp discover_and_build_registry do
+    all_modules()
+    |> Enum.reduce(%{}, fn mod, acc ->
+      case Code.ensure_loaded(mod) do
+        {:module, loaded_mod} ->
+          attrs = loaded_mod.module_info(:attributes)
+          behaviours =
+            Keyword.get(attrs, :behaviour, []) ++ Keyword.get(attrs, :behavior, [])
+
+          if AgentOS.Connector in behaviours do
+            meta = loaded_mod.metadata()
+            Map.put(acc, meta.name, meta)
+          else
+            acc
+          end
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  # Returns all modules in the application spec, plus dynamically loaded ones starting with Elixir.AgentOS.Connector
+  defp all_modules do
+    app_modules =
+      case Application.spec(:agent_os, :modules) do
+        nil -> []
+        list -> list
+      end
+
+    loaded_modules =
+      for {mod, _} <- :code.all_loaded(),
+          String.starts_with?(to_string(mod), "Elixir.AgentOS.Connector.") do
+        mod
+      end
+
+    Enum.uniq(app_modules ++ loaded_modules)
   end
 
   @doc """

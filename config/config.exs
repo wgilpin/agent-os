@@ -12,6 +12,7 @@ config :agent_os,
   conformance_path: "data/conformance.term",
   provenance_path: "data/provenance.term",
   judge_results_path: "data/judge_results.term",
+  pipeline_runs_path: "data/pipeline_runs.term",
   admin_alerts_path: "data/admin_alerts.md",
   audit_run_hour: 8,
   conformance_window: 20,
@@ -74,4 +75,3 @@ if config_env() == :test do
     server: false,
     http: [ip: {127, 0, 0, 1}, port: 4002]
 end
-

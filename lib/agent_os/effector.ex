@@ -15,41 +15,10 @@ defmodule AgentOS.Effector do
   @doc """
   Executes a single gate-approved action on the agent's behalf.
 
-  Returns `:ok` or `{:error, reason}`.
+  Returns `:ok` or `{:error, any()}`.
   """
   @spec act(%{action: ProposedAction.t(), grant: AgentOS.Manifest.Grant.t()}) ::
           :ok | {:error, any()}
-  def act(%{action: %ProposedAction{type: "kv_append", method: "append", payload: payload}}) do
-    AgentOS.StateStore.apply_action("roster_trust", {:append, :records, payload})
-  end
-
-  def act(%{action: %ProposedAction{type: "external_send"} = action}) do
-    registry = AgentOS.Connector.registry()
-
-    case Map.fetch(registry, "external_send") do
-      {:ok, %{credential: nil}} ->
-        AgentOS.Connector.external_send_sink(action, "")
-
-      {:ok, %{credential: credential_id}} ->
-        case AgentOS.CredentialProxy.with_credential(credential_id, fn secret ->
-               AgentOS.Connector.external_send_sink(action, secret)
-             end) do
-          :ok ->
-            :ok
-
-          {:error, {:unknown_credential, id}} ->
-            Logger.error(
-              "Failed to execute external_send: unknown credential :#{id}. Failing closed."
-            )
-
-            {:error, {:unknown_credential, id}}
-        end
-
-      _ ->
-        {:error, {:unknown_action, "external_send"}}
-    end
-  end
-
   def act(%{
         action: %ProposedAction{
           type: "deploy",
@@ -63,21 +32,102 @@ defmodule AgentOS.Effector do
     :ok
   end
 
-  def act(%{action: %ProposedAction{type: other_type}}) do
-    {:error, {:unknown_action, other_type}}
+  def act(%{action: %ProposedAction{type: type} = action}) do
+    case AgentOS.Connector.get_module(type) do
+      {:ok, mod} ->
+        meta = mod.metadata()
+
+        case meta.credential do
+          nil ->
+            execute_isolated(mod, action, nil)
+
+          credential_id ->
+            case AgentOS.CredentialProxy.with_credential(credential_id, fn secret ->
+                   execute_isolated(mod, action, secret)
+                 end) do
+              {:error, {:unknown_credential, id}} ->
+                Logger.error(
+                  "Failed to execute #{type}: unknown credential :#{id}. Failing closed."
+                )
+
+                {:error, {:unknown_credential, id}}
+
+              result ->
+                result
+            end
+        end
+
+      {:error, :unknown_connector} ->
+        {:error, {:unknown_action, type}}
+    end
   end
 
   @doc """
   Maps the execution of multiple approved actions in order.
   Returns `:ok`.
-
-  ### Known Limitation:
-  Currently discards per-action return values/errors (swallowing errors like `{:error, {:unknown_credential, id}}`).
-  Batch error aggregation is out of scope for spec 004 and is deferred.
   """
   @spec act_all([%{action: ProposedAction.t(), grant: AgentOS.Manifest.Grant.t()}]) :: :ok
   def act_all(approved_actions) when is_list(approved_actions) do
     Enum.each(approved_actions, &act/1)
     :ok
+  end
+
+  # Helpers
+
+  defp execute_isolated(mod, action, secret) do
+    # Resolve supervisor name or pid
+    {sup, should_stop?} =
+      case Process.whereis(AgentOS.ConnectorSupervisor) do
+        nil ->
+          {:ok, pid} = Task.Supervisor.start_link()
+          {pid, true}
+
+        pid ->
+          {pid, false}
+      end
+
+    # Spawn task under Supervisor without linking
+    task =
+      Task.Supervisor.async_nolink(sup, fn ->
+        try do
+          mod.execute(action, secret)
+        rescue
+          e ->
+            Logger.error("Connector #{mod.metadata().name} raised exception: #{inspect(e)}")
+            {:error, {:raised, e}}
+        catch
+          kind, reason ->
+            Logger.error(
+              "Connector #{mod.metadata().name} caught: #{inspect({kind, reason})}"
+            )
+
+            {:error, {:caught, kind, reason}}
+        end
+      end)
+
+    # Yield to task with a 5000 ms timeout
+    result =
+      case Task.yield(task, 5000) || Task.shutdown(task) do
+        {:ok, val} ->
+          val
+
+        nil ->
+          Logger.error("Connector #{mod.metadata().name} execution timed out. Failing closed.")
+          {:error, :timeout}
+
+        {:exit, reason} ->
+          Logger.error(
+            "Connector #{mod.metadata().name} exited: #{inspect(reason)}. Failing closed."
+          )
+
+          {:error, {:exit, reason}}
+      end
+
+    # Clean up the dynamic supervisor if we started it
+    if should_stop? do
+      GenServer.stop(sup)
+    end
+
+    result
   end
 end

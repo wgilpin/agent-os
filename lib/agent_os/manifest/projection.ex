@@ -124,37 +124,9 @@ defmodule AgentOS.Manifest.Projection do
   # Private helpers
 
   defp map_capability_to_grant!(cap_name, boundaries) do
-    case Connector.get(cap_name) do
-      {:ok, _cap} ->
-        case cap_name do
-          "external_send" ->
-            recipients =
-              if boundaries.egress_domains && boundaries.egress_domains != [] do
-                Enum.sort(boundaries.egress_domains)
-              else
-                nil
-              end
-
-            %Grant{
-              connector: "external_send",
-              recipients: recipients,
-              methods: ["send"]
-            }
-
-          "kv_append" ->
-            %Grant{
-              connector: "kv_append",
-              recipients: nil,
-              methods: ["append"]
-            }
-
-          other ->
-            %Grant{
-              connector: other,
-              recipients: nil,
-              methods: nil
-            }
-        end
+    case Connector.get_module(cap_name) do
+      {:ok, mod} ->
+        mod.scope(boundaries)
 
       {:error, :unknown_connector} ->
         raise RuntimeError, "Connector '#{cap_name}' is missing from the capability registry."

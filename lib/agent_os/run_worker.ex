@@ -160,13 +160,24 @@ defmodule AgentOS.RunWorker do
                       "cidfile_#{System.unique_integer([:positive])}.txt"
                     )
 
+                # Retrieve the configured dedicated inference GID and align user option
+                configured_gid = AgentOS.InferenceBroker.get_configured_gid()
+                user_opt = Keyword.get(opts_with_env, :user, "1000:1000")
+
+                aligned_user =
+                  case String.split(user_opt, ":") do
+                    [uid] -> "#{uid}:#{configured_gid}"
+                    [uid, _gid] -> "#{uid}:#{configured_gid}"
+                    _ -> "1000:#{configured_gid}"
+                  end
+
                 sandbox = %AgentOS.Sandbox{
                   image: Keyword.get(opts_with_env, :image, "agent-discovery:dev"),
                   cidfile: cidfile,
                   network: Keyword.get(opts_with_env, :network, "none"),
                   memory_mb: Keyword.get(opts_with_env, :memory_mb, 128),
                   cpus: Keyword.get(opts_with_env, :cpus, "0.5"),
-                  user: Keyword.get(opts_with_env, :user, "1000:1000"),
+                  user: aligned_user,
                   env: Keyword.get(opts_with_env, :env, %{}),
                   entrypoint: Keyword.get(opts_with_env, :entrypoint),
                   cmd_args: Keyword.get(opts_with_env, :cmd_args),

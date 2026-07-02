@@ -86,11 +86,22 @@ defmodule AgentOS.Sandbox do
         :ok
     end
 
-    # Ensure no writable host mounts exist other than /tmp/inference.sock
+    # Ensure no writable host mounts exist other than /tmp/inference.sock,
+    # and that the host path for /tmp/inference.sock exactly matches the configured inference UDS path.
+    configured_socket_path =
+      Path.expand(Application.get_env(:agent_os, :inference_uds_path, "data/inference.sock"))
+
     for {host, container} <- sandbox.mounts || [] do
-      if container != "/tmp/inference.sock" and not String.ends_with?(container, ":ro") do
-        raise ArgumentError,
-              "Only the legitimate inference-UDS mount (/tmp/inference.sock) is allowed to be writable. All other mounts must be read-only (end with :ro). Got mount: {#{inspect(host)}, #{inspect(container)}}"
+      if container == "/tmp/inference.sock" do
+        if Path.expand(host) != configured_socket_path do
+          raise ArgumentError,
+                "Inference socket mount source must match the configured UDS path #{configured_socket_path}. Got: #{host}"
+        end
+      else
+        if not String.ends_with?(container, ":ro") do
+          raise ArgumentError,
+                "Only the legitimate inference-UDS mount (/tmp/inference.sock) is allowed to be writable. All other mounts must be read-only (end with :ro). Got mount: {#{inspect(host)}, #{inspect(container)}}"
+        end
       end
     end
 

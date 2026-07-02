@@ -6,7 +6,9 @@ defmodule AgentOSWeb.ConsentLiveTest do
   @endpoint AgentOSWeb.Endpoint
 
   setup do
-    tmp_dir = Path.join(System.tmp_dir!(), "consent_live_test_#{System.unique_integer([:positive])}")
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "consent_live_test_#{System.unique_integer([:positive])}")
+
     File.mkdir_p!(tmp_dir)
 
     tmp_pending = Path.join(tmp_dir, "pending_approvals.term")
@@ -16,10 +18,21 @@ defmodule AgentOSWeb.ConsentLiveTest do
 
     # Start prerequisite systems manually in isolation
     start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})
-    start_supervised!({AgentOS.StateStore, name: "pending_approvals", path: tmp_pending, initial: %{approvals: %{}}})
-    start_supervised!({AgentOS.StateStore, name: "provenance", path: tmp_provenance, initial: %{}})
+
+    start_supervised!(
+      {AgentOS.StateStore,
+       name: "pending_approvals", path: tmp_pending, initial: %{approvals: %{}}}
+    )
+
+    start_supervised!(
+      {AgentOS.StateStore, name: "provenance", path: tmp_provenance, initial: %{}}
+    )
+
     start_supervised!({AgentOS.StateStore, name: "judge_results", path: tmp_judge, initial: %{}})
-    start_supervised!({AgentOS.StateStore, name: "security_review_results", path: tmp_security, initial: %{}})
+
+    start_supervised!(
+      {AgentOS.StateStore, name: "security_review_results", path: tmp_security, initial: %{}}
+    )
 
     start_supervised!({Phoenix.PubSub, name: AgentOS.PubSub})
     start_supervised!(AgentOS.TriggerGateway)
@@ -33,7 +46,10 @@ defmodule AgentOSWeb.ConsentLiveTest do
     {:ok, tmp_dir: tmp_dir, conn: build_conn()}
   end
 
-  test "renders all capability grants, spend cap, and badge details correctly", %{tmp_dir: tmp_dir, conn: conn} do
+  test "renders all capability grants, spend cap, and badge details correctly", %{
+    tmp_dir: tmp_dir,
+    conn: conn
+  } do
     manifest_path = Path.join(tmp_dir, "my_agent.md")
 
     File.write!(manifest_path, """
@@ -80,7 +96,10 @@ defmodule AgentOSWeb.ConsentLiveTest do
     assert html =~ "$0.15"
   end
 
-  test "approve unblocks deployment, records provenance and TriggerGateway approval", %{tmp_dir: tmp_dir, conn: conn} do
+  test "approve unblocks deployment, records provenance and TriggerGateway approval", %{
+    tmp_dir: tmp_dir,
+    conn: conn
+  } do
     manifest_path = Path.join(tmp_dir, "test_agent.md")
 
     File.write!(manifest_path, """
@@ -100,14 +119,21 @@ defmodule AgentOSWeb.ConsentLiveTest do
 
     # Seed a pending deploy approval
     ref = "ref_deploy_test_agent_1"
+
     action = %AgentOS.ProposedAction{
       type: "deploy",
       recipient: "test_agent",
       method: manifest_path,
       payload: %{"hash" => "HASH123"}
     }
+
     grant = %AgentOS.Manifest.Grant{connector: "deploy"}
-    :ok = AgentOS.StateStore.apply_action("pending_approvals", {:put, :approvals, %{ref => %{ref: ref, action: action, grant: grant}}})
+
+    :ok =
+      AgentOS.StateStore.apply_action(
+        "pending_approvals",
+        {:put, :approvals, %{ref => %{ref: ref, action: action, grant: grant}}}
+      )
 
     # Access the LiveView
     assert {:ok, lv, html} = live(conn, "/consent?manifest=#{manifest_path}")
@@ -127,7 +153,10 @@ defmodule AgentOSWeb.ConsentLiveTest do
     refute Map.has_key?(approvals, ref)
   end
 
-  test "reject blocks deploy, cancels pending approval ref, and leaves agent code unexecuted", %{tmp_dir: tmp_dir, conn: conn} do
+  test "reject blocks deploy, cancels pending approval ref, and leaves agent code unexecuted", %{
+    tmp_dir: tmp_dir,
+    conn: conn
+  } do
     manifest_path = Path.join(tmp_dir, "reject_agent.md")
 
     File.write!(manifest_path, """
@@ -147,14 +176,21 @@ defmodule AgentOSWeb.ConsentLiveTest do
 
     # Seed a pending deploy approval
     ref = "ref_deploy_reject_agent_1"
+
     action = %AgentOS.ProposedAction{
       type: "deploy",
       recipient: "reject_agent",
       method: manifest_path,
       payload: %{"hash" => "HASH987"}
     }
+
     grant = %AgentOS.Manifest.Grant{connector: "deploy"}
-    :ok = AgentOS.StateStore.apply_action("pending_approvals", {:put, :approvals, %{ref => %{ref: ref, action: action, grant: grant}}})
+
+    :ok =
+      AgentOS.StateStore.apply_action(
+        "pending_approvals",
+        {:put, :approvals, %{ref => %{ref: ref, action: action, grant: grant}}}
+      )
 
     # Access the LiveView
     assert {:ok, lv, html} = live(conn, "/consent?manifest=#{manifest_path}")
@@ -174,13 +210,20 @@ defmodule AgentOSWeb.ConsentLiveTest do
     refute Map.has_key?(approvals, ref)
   end
 
-  test "surfaces connector registration lookup loud-failure error on missing registry connector", %{tmp_dir: tmp_dir, conn: conn} do
+  test "surfaces connector registration lookup loud-failure error on missing registry connector",
+       %{tmp_dir: tmp_dir, conn: conn} do
     # Temporarily override connector registry to simulate a missing connector
     original_registry = Application.get_env(:agent_os, :connector_registry)
 
     # Put a registry without "gmail_read"
     Application.put_env(:agent_os, :connector_registry, %{
-      "kv_append" => %{name: "kv_append", mutating?: true, requires_approval?: false, credential: nil, cost: 0}
+      "kv_append" => %{
+        name: "kv_append",
+        mutating?: true,
+        requires_approval?: false,
+        credential: nil,
+        cost: 0
+      }
     })
 
     on_exit(fn ->

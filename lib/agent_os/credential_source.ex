@@ -20,27 +20,30 @@ defmodule AgentOS.CredentialSource do
     # Fall back to application configuration environment (mainly for tests)
     config = Application.get_env(:agent_os, :credentials, %{})
 
-    model_key = System.get_env("MODEL_KEY") || Map.get(config, :model_key)
-    outbound_token = System.get_env("OUTBOUND_TOKEN") || Map.get(config, :outbound_token)
-
-    # Exclude empty or whitespace-only credentials
-    credentials = %{}
-
-    credentials =
-      if non_blank?(model_key) do
-        Map.put(credentials, :model_key, String.trim(model_key))
-      else
-        credentials
+    # Collect all credentials declared by auto-discovered connectors, plus :model_key
+    connector_credential_ids =
+      try do
+        AgentOS.Connector.registry()
+        |> Map.values()
+        |> Enum.map(&Map.get(&1, :credential))
+        |> Enum.filter(&not is_nil(&1))
+      rescue
+        _ -> []
       end
 
-    credentials =
-      if non_blank?(outbound_token) do
-        Map.put(credentials, :outbound_token, String.trim(outbound_token))
-      else
-        credentials
-      end
+    all_credential_ids = Enum.uniq([:model_key | connector_credential_ids])
 
-    credentials
+    # Resolve each dynamically
+    Enum.reduce(all_credential_ids, %{}, fn credential_id, acc ->
+      env_var_name = credential_id |> Atom.to_string() |> String.upcase()
+      value = System.get_env(env_var_name) || Map.get(config, credential_id)
+
+      if non_blank?(value) do
+        Map.put(acc, credential_id, String.trim(value))
+      else
+        acc
+      end
+    end)
   end
 
   # Helper to parse a local .env file (if present) and populate System environment variables

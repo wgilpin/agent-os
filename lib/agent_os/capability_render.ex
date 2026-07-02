@@ -7,7 +7,6 @@ defmodule AgentOS.CapabilityRender do
   alias AgentOS.Manifest
 
   # Phrasing map keyed by generic capability names.
-  # Keys are agent-agnostic (FR-008, Constitution IX).
   @phrases %{
     "kv_append" => "WRITE TO YOUR LOCAL STATE STORE",
     "external_send" => "SEND MESSAGES OUT TO EXTERNAL RECIPIENTS",
@@ -28,9 +27,15 @@ defmodule AgentOS.CapabilityRender do
           danger = danger_tier(cap)
 
           {phrase, phrase_source} =
-            case Map.fetch(@phrases, connector_name) do
-              {:ok, mapped_phrase} -> {mapped_phrase, :mapped}
-              :error -> {"USE CAPABILITY: #{connector_name}", :fallback}
+            case AgentOS.Connector.get_module(connector_name) do
+              {:ok, mod} ->
+                {mod.render(grant), :mapped}
+
+              _ ->
+                case Map.fetch(@phrases, connector_name) do
+                  {:ok, mapped_phrase} -> {mapped_phrase, :mapped}
+                  :error -> {"USE CAPABILITY: #{connector_name}", :fallback}
+                end
             end
 
           %Entry{
@@ -58,24 +63,28 @@ defmodule AgentOS.CapabilityRender do
   def format(entries) do
     lines =
       Enum.map(entries, fn entry ->
-        badge = if entry.danger == :external, do: "[EXTERNAL] ", else: ""
+        if String.contains?(entry.phrase, " (") or String.starts_with?(entry.phrase, "[") do
+          "  - #{entry.phrase}"
+        else
+          badge = if entry.danger == :external, do: "[EXTERNAL] ", else: ""
 
-        scope_str =
-          cond do
-            entry.recipients && entry.methods ->
-              " (recipients: #{inspect(entry.recipients)}, methods: #{inspect(entry.methods)})"
+          scope_str =
+            cond do
+              entry.recipients && entry.methods ->
+                " (recipients: #{inspect(entry.recipients)}, methods: #{inspect(entry.methods)})"
 
-            entry.recipients ->
-              " (recipients: #{inspect(entry.recipients)})"
+              entry.recipients ->
+                " (recipients: #{inspect(entry.recipients)})"
 
-            entry.methods ->
-              " (methods: #{inspect(entry.methods)})"
+              entry.methods ->
+                " (methods: #{inspect(entry.methods)})"
 
-            true ->
-              ""
-          end
+              true ->
+                ""
+            end
 
-        "  - #{badge}#{entry.phrase}#{scope_str}"
+          "  - #{badge}#{entry.phrase}#{scope_str}"
+        end
       end)
 
     "CAPABILITIES:\n" <> Enum.join(lines, "\n") <> "\n"

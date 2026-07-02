@@ -135,6 +135,15 @@ defmodule AgentOS.SandboxTest do
       user: "1000:1000"
     }
 
+    original_uds_path = Application.get_env(:agent_os, :inference_uds_path)
+    Application.put_env(:agent_os, :inference_uds_path, "/host/path")
+
+    on_exit(fn ->
+      if original_uds_path,
+        do: Application.put_env(:agent_os, :inference_uds_path, original_uds_path),
+        else: Application.delete_env(:agent_os, :inference_uds_path)
+    end)
+
     argv = Sandbox.build_argv(%{base | mounts: [{"/host/path", "/tmp/inference.sock"}]})
     assert "-v" in argv
     assert "/host/path:/tmp/inference.sock" in argv
@@ -146,6 +155,35 @@ defmodule AgentOS.SandboxTest do
     argv_ro = Sandbox.build_argv(%{base | mounts: [{"/host/path", "/tmp/other.sock:ro"}]})
     assert "-v" in argv_ro
     assert "/host/path:/tmp/other.sock:ro" in argv_ro
+  end
+
+  test "US2: build_argv/1 generates correct user argument when group is custom GID" do
+    sandbox = %Sandbox{
+      image: "agent-discovery:dev",
+      cidfile: "/tmp/cidfile.txt",
+      user: "1000:1050"
+    }
+
+    argv = Sandbox.build_argv(sandbox)
+    assert get_val(argv, "--user") == "1000:1050"
+  end
+
+  test "US4: build_argv/1 blocks writable mounts that are not configured inference socket" do
+    base = %Sandbox{
+      image: "agent-discovery:dev",
+      cidfile: "/tmp/cidfile.txt",
+      user: "1000:1000"
+    }
+
+    # Custom writable mount to other path is blocked
+    assert_raise ArgumentError, ~r/only.*inference-UDS.*allowed to be writable/i, fn ->
+      Sandbox.build_argv(%{base | mounts: [{"/host/path", "/tmp/other.sock"}]})
+    end
+
+    # Mount to /tmp/inference.sock but with wrong host path is blocked
+    assert_raise ArgumentError, ~r/Inference socket mount source must match/i, fn ->
+      Sandbox.build_argv(%{base | mounts: [{"/wrong/host/path", "/tmp/inference.sock"}]})
+    end
   end
 
   # Helper to fetch the value following a flag in the argv list

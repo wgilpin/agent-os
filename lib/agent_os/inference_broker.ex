@@ -239,24 +239,95 @@ defmodule AgentOS.InferenceBroker do
     {:error, :missing_usage}
   end
 
+  @doc """
+  Gets the configured dedicated inference GID.
+  Defaults to the current process's primary GID if not configured.
+  """
+  @spec get_configured_gid() :: integer()
+  def get_configured_gid do
+    raw_gid = System.get_env("INFERENCE_GID") || Application.get_env(:agent_os, :inference_gid)
+
+    case raw_gid do
+      nil ->
+        get_default_gid()
+
+      num when is_integer(num) ->
+        num
+
+      str when is_binary(str) ->
+        case Integer.parse(str) do
+          {num, ""} ->
+            num
+
+          _ ->
+            Logger.warning(
+              "Invalid GID configuration, falling back to default GID: #{inspect(str)}"
+            )
+
+            get_default_gid()
+        end
+    end
+  end
+
+  defp get_default_gid do
+    case System.cmd("id", ["-g"]) do
+      {gid_str, 0} ->
+        String.trim(gid_str) |> String.to_integer()
+
+      _ ->
+        1000
+    end
+  end
+
   # --- UDS Listener ---
 
   defp start_uds_listener(socket_path) do
     File.rm(socket_path)
-    Path.dirname(socket_path) |> File.mkdir_p!()
+    parent_dir = Path.dirname(socket_path)
+    File.mkdir_p!(parent_dir)
 
-    case :gen_tcp.listen(0, [
-           :binary,
-           packet: :raw,
-           active: false,
-           reuseaddr: true,
-           ifaddr: {:local, socket_path}
-         ]) do
-      {:ok, listen_socket} ->
-        Logger.info("InferenceBroker UDS listener started at #{socket_path}")
-        Task.start_link(fn -> accept_loop(listen_socket) end)
-        {:ok, listen_socket}
+    with :ok <- File.chmod(parent_dir, 0o700),
+         {:ok, listen_socket} <-
+           :gen_tcp.listen(0, [
+             :binary,
+             packet: :raw,
+             active: false,
+             reuseaddr: true,
+             ifaddr: {:local, socket_path}
+           ]) do
+      case File.chmod(socket_path, 0o660) do
+        :ok ->
+          target_gid = get_configured_gid()
 
+          case :file.change_group(String.to_charlist(socket_path), target_gid) do
+            :ok ->
+              Logger.info(
+                "InferenceBroker UDS listener started at #{socket_path} (mode: 0660, group: #{target_gid})"
+              )
+
+              Task.start_link(fn -> accept_loop(listen_socket) end)
+              {:ok, listen_socket}
+
+            {:error, reason} ->
+              Logger.error(
+                "Failed to change group of socket #{socket_path} to GID #{target_gid}: #{inspect(reason)}"
+              )
+
+              :gen_tcp.close(listen_socket)
+              File.rm(socket_path)
+              {:error, {:change_group_failed, reason}}
+          end
+
+        {:error, reason} ->
+          Logger.error(
+            "Failed to set 0660 permissions on socket #{socket_path}: #{inspect(reason)}"
+          )
+
+          :gen_tcp.close(listen_socket)
+          File.rm(socket_path)
+          {:error, {:chmod_failed, reason}}
+      end
+    else
       {:error, reason} ->
         Logger.error("Failed to start InferenceBroker UDS listener: #{inspect(reason)}")
         {:error, reason}
@@ -379,8 +450,8 @@ defmodule AgentOS.InferenceBroker do
         {:ok, listen_socket} ->
           {:ok, %{listen_socket: listen_socket, tokens: %{}}}
 
-        {:error, _reason} ->
-          {:ok, %{tokens: %{}}}
+        {:error, reason} ->
+          {:stop, {:uds_listener_failed, reason}}
       end
     else
       {:ok, %{tokens: %{}}}

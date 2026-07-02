@@ -311,4 +311,148 @@ defmodule AgentOS.InferenceBrokerTest do
     entry2 = Map.get(ledger2, context.agent_name)
     assert entry2.spent == 1
   end
+
+  test "get_configured_gid/0 resolves GID from environment, application config, or user fallback" do
+    # Save original values
+    orig_env = System.get_env("INFERENCE_GID")
+    orig_config = Application.get_env(:agent_os, :inference_gid)
+
+    on_exit(fn ->
+      if orig_env,
+        do: System.put_env("INFERENCE_GID", orig_env),
+        else: System.delete_env("INFERENCE_GID")
+
+      if orig_config,
+        do: Application.put_env(:agent_os, :inference_gid, orig_config),
+        else: Application.delete_env(:agent_os, :inference_gid)
+    end)
+
+    # 1. Test environment variable precedence
+    System.put_env("INFERENCE_GID", "1234")
+    assert InferenceBroker.get_configured_gid() == 1234
+
+    # 2. Test configuration precedence when env is nil
+    System.delete_env("INFERENCE_GID")
+    Application.put_env(:agent_os, :inference_gid, 5678)
+    assert InferenceBroker.get_configured_gid() == 5678
+
+    # 3. Test configuration parsing of string/integer values
+    Application.put_env(:agent_os, :inference_gid, "9012")
+    assert InferenceBroker.get_configured_gid() == 9012
+
+    # 4. Test dynamic fallback (should match primary user GID)
+    Application.delete_env(:agent_os, :inference_gid)
+    {id_out, 0} = System.cmd("id", ["-g"])
+    expected_gid = String.trim(id_out) |> String.to_integer()
+    assert InferenceBroker.get_configured_gid() == expected_gid
+  end
+
+  test "US1: socket permissions (0660) and GID ownership are correctly applied" do
+    tmp_dir = Path.join(System.tmp_dir!(), "inference_us1_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(tmp_dir)
+    tmp_socket = Path.join(tmp_dir, "inference.sock")
+
+    # Set up autostart config
+    orig_autostart = Application.get_env(:agent_os, :autostart)
+    Application.put_env(:agent_os, :autostart, true)
+    Application.put_env(:agent_os, :inference_uds_path, tmp_socket)
+
+    # Configure primary group as inference GID so chgrp succeeds
+    {id_out, 0} = System.cmd("id", ["-g"])
+    test_gid = String.trim(id_out) |> String.to_integer()
+    Application.put_env(:agent_os, :inference_gid, test_gid)
+
+    on_exit(fn ->
+      File.rm_rf(tmp_dir)
+
+      if orig_autostart != nil,
+        do: Application.put_env(:agent_os, :autostart, orig_autostart),
+        else: Application.delete_env(:agent_os, :autostart)
+
+      Application.delete_env(:agent_os, :inference_uds_path)
+      Application.delete_env(:agent_os, :inference_gid)
+    end)
+
+    # Start a fresh InferenceBroker to trigger init/1 with autostart: true
+    # We must stop the default one running in setup first, or run it under a different ID
+    # But start_supervised! takes care of restarting if it's already started under that name
+    start_supervised!(%{
+      id: InferenceBrokerTestInstance,
+      start: {InferenceBroker, :start_link, [[name: InferenceBrokerTestInstance]]}
+    })
+
+    # Assert permissions and ownership on the socket
+    assert File.exists?(tmp_socket)
+    {:ok, stat} = File.stat(tmp_socket)
+    perms = Bitwise.band(stat.mode, 0o777)
+    assert perms == 0o660
+    assert stat.gid == test_gid
+  end
+
+  test "US3: parent directory is restricted to 0700 permissions" do
+    tmp_dir = Path.join(System.tmp_dir!(), "inference_us3_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(tmp_dir)
+    tmp_socket = Path.join(tmp_dir, "inference.sock")
+
+    orig_autostart = Application.get_env(:agent_os, :autostart)
+    Application.put_env(:agent_os, :autostart, true)
+    Application.put_env(:agent_os, :inference_uds_path, tmp_socket)
+
+    {id_out, 0} = System.cmd("id", ["-g"])
+    test_gid = String.trim(id_out) |> String.to_integer()
+    Application.put_env(:agent_os, :inference_gid, test_gid)
+
+    on_exit(fn ->
+      File.rm_rf(tmp_dir)
+
+      if orig_autostart != nil,
+        do: Application.put_env(:agent_os, :autostart, orig_autostart),
+        else: Application.delete_env(:agent_os, :autostart)
+
+      Application.delete_env(:agent_os, :inference_uds_path)
+      Application.delete_env(:agent_os, :inference_gid)
+    end)
+
+    start_supervised!(%{
+      id: InferenceBrokerTestInstanceUS3,
+      start: {InferenceBroker, :start_link, [[name: InferenceBrokerTestInstanceUS3]]}
+    })
+
+    # Assert permissions on the parent directory
+    assert File.exists?(tmp_dir)
+    {:ok, stat} = File.stat(tmp_dir)
+    perms = Bitwise.band(stat.mode, 0o777)
+    assert perms == 0o700
+  end
+
+  test "US5: InferenceBroker refuses to start (fails secure) when GID cannot be applied" do
+    tmp_dir = Path.join(System.tmp_dir!(), "inference_us5_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(tmp_dir)
+    tmp_socket = Path.join(tmp_dir, "inference.sock")
+
+    orig_autostart = Application.get_env(:agent_os, :autostart)
+    Application.put_env(:agent_os, :autostart, true)
+    Application.put_env(:agent_os, :inference_uds_path, tmp_socket)
+
+    # Configure an invalid GID that will cause :file.change_group/2 to return eperm
+    Application.put_env(:agent_os, :inference_gid, 99999)
+
+    on_exit(fn ->
+      File.rm_rf(tmp_dir)
+
+      if orig_autostart != nil,
+        do: Application.put_env(:agent_os, :autostart, orig_autostart),
+        else: Application.delete_env(:agent_os, :autostart)
+
+      Application.delete_env(:agent_os, :inference_uds_path)
+      Application.delete_env(:agent_os, :inference_gid)
+    end)
+
+    # start_supervised should return {:error, _} because start_uds_listener fails
+    assert {:error, _} =
+             start_supervised(%{
+               id: InferenceBrokerTestInstanceUS5,
+               start: {InferenceBroker, :start_link, [[name: InferenceBrokerTestInstanceUS5]]}
+             })
+  end
 end

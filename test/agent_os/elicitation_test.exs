@@ -86,8 +86,11 @@ defmodule AgentOS.ElicitationTest do
     original_inf_path = Application.get_env(:agent_os, :inference_uds_path)
     original_autostart = Application.get_env(:agent_os, :autostart)
 
-    tmp_socket =
-      Path.join(System.tmp_dir!(), "elicitation_test_#{System.unique_integer([:positive])}.sock")
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "elicitation_test_dir_#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(tmp_dir)
+    tmp_socket = Path.join(tmp_dir, "inference.sock")
 
     Application.put_env(:agent_os, :inference_uds_path, tmp_socket)
     Application.put_env(:agent_os, :autostart, true)
@@ -106,7 +109,7 @@ defmodule AgentOS.ElicitationTest do
 
     on_exit(fn ->
       File.rm(tmp_spend)
-      File.rm(tmp_socket)
+      File.rm_rf(tmp_dir)
 
       if original_inf_path,
         do: Application.put_env(:agent_os, :inference_uds_path, original_inf_path)

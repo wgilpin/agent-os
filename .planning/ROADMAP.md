@@ -22,8 +22,12 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Walking Skeleton (v0)** - BEAM substrate runs one hand-written discovery agent end-to-end on a daily timer
 - [x] **Phase 2: Isolation (v1)** - Containerise the child agent so it is safe against the live web and daily-usable
-- [ ] **Phase 3: Manifest Enforcement (v2)** - Deterministic gate enforces the manifest from outside the agent; world-B airtight
-- [ ] **Phase 4: Generation MVP (v3)** - OS synthesises novel agents from a stated purpose behind the proven gate
+- [x] **Phase 3: Manifest Enforcement (v2)** - Deterministic gate enforces the manifest from outside the agent; world-B airtight
+- [x] **Phase 4: Generation MVP (v3)** - OS synthesises novel agents from a stated purpose behind the proven gate
+- [x] **Phase 5: Live Connectivity & Client (v4)** - Live model calls over the internet via the inference broker
+- [x] **Phase 6: Phoenix/LiveView Control Plane (v5)** - User-facing dashboard for the generation cycle
+- [x] **Phase 7: Hardening & Sandbox (v6)** - Production-grade container + socket sandboxing
+- [ ] **Phase 8: Connector Ecosystem (v7)** - Pluggable connector registry + synchronous tools (web search)
 
 ## Phase Details
 
@@ -116,15 +120,15 @@ Plans:
 
 *Rail (generation-independent; built & proven on the EXISTING hand-written discovery agent — same "earn it on easy mode first" discipline as v2):*
 - [x] 04-01: Deterministic capability render — manifest → faithful/total/danger-ranked normie-readable consent view; a mechanical lookup from capability-type to phrase, NEVER LLM-written, and unable to drift from the actual grants (permission-visibility axis; always on, no flag)
-- [ ] 04-02: Conformance auditor — post-deploy, reads run-traces, compares stated purpose vs observed behaviour, FLAG-ONLY (never blesses, never auto-gates deploy); provenance rendered in the inventory — REQ-check-conformance
+- [x] 04-02: Conformance auditor — post-deploy, reads run-traces, compares stated purpose vs observed behaviour, FLAG-ONLY (never blesses, never auto-gates deploy); provenance rendered in the inventory — REQ-check-conformance
 - [x] 04-03: Review modes + deterministic envelope predicate — `--always-review` (v3-launch default) | `--review-if-risky` | `--dangerously-skip-review`; the envelope is a deterministic predicate over manifest fields (read-only / no-egress / spend-under-threshold), never an LLM judgement; all three modes sit ABOVE the gate and none is permission to cross it; deploy provenance (reviewed=human | skipped-in-envelope | dangerously-skipped) recorded (commit eb675cf) — **resolves OQ: envelope threshold + auditor-as-precondition for envelope-eligibility**
 
 *Generation pipeline (the novel part; the OS authors an agent):*
 - [x] 04-04: Stage 1 — elicit the spec; the orchestrator questions the user until the purpose is KISS-clear (the load-bearing human-in-the-loop step that the co-generation caveat depends on) — REQ-elicit-spec
 - [x] 04-05: Stage 2 — write the manifest (the safety artifact, not the judge) from the elicited spec; reuses the 04-01 render for the consent view — REQ-gen-manifest
-- [ ] 04-06: Stage 3 — write the judge; eval-lite that certifies code-matches-manifest (NOT manifest-matches-intent) — **resolves OQ: judge co-generation (does the judge need an independent derivation path, or is stage-1 elicitation enough?)** — REQ-write-judge
+- [x] 04-06: Stage 3 — write the judge; eval-lite that certifies code-matches-manifest (NOT manifest-matches-intent) — **resolves OQ: judge co-generation (does the judge need an independent derivation path, or is stage-1 elicitation enough?)** — REQ-write-judge
 - [x] 04-07: Stage 4 — write the novel agent body; synthesise NEW Python/PydanticAI code (not template, not composition) across the port boundary — REQ-write-novel-agent (merged 2026-07-01)
-- [ ] 04-08: Stage 5 — security-review agent; reads code+manifest+purpose, judges "written to satisfy purpose without breaching manifest" as a smoke detector, not the firewall — **resolves OQ: security-review ↔ conformance-auditor shared injection/evasion surface** — REQ-security-review
+- [x] 04-08: Stage 5 — security-review agent; reads code+manifest+purpose, judges "written to satisfy purpose without breaching manifest" as a smoke detector, not the firewall — **resolves OQ: security-review ↔ conformance-auditor shared injection/evasion surface** — REQ-security-review
 
 *Wire it shut:*
 - [x] 04-09: Stage 6 — deploy-on-green; gate deploy on a pass from BOTH judge AND security-review, plugged into the 04-03 review-mode rail; re-verify the manifest-not-readable-by-agent invariant now holds for a MACHINE-WRITTEN manifest — REQ-deploy-on-green
@@ -148,9 +152,9 @@ Plans:
   1. Users can interactively converse with the elicitation orchestrator through a web interface.
   2. A secure consent screen displays exact permission grants before code execution.
 **Plans**: 3
-- [ ] 06-01: Interactive Elicitation UI — Conversational LiveView workspace for user specification elicitation.
-- [ ] 06-02: Consent Screen UI — LiveView render of the mechanical capability render for approval.
-- [ ] 06-03: Standing Inventory Dashboard — Renders active agent roster, spend status, and audit logs.
+- [x] 06-01: Interactive Elicitation UI — Conversational LiveView workspace for user specification elicitation.
+- [x] 06-02: Consent Screen UI — LiveView render of the mechanical capability render for approval.
+- [x] 06-03: Standing Inventory Dashboard — Renders active agent roster, spend status, and audit logs.
 
 ### Phase 7: Hardening & Sandbox (v6)
 **Goal**: Elevate sandboxing security and communication interfaces to production standards.
@@ -159,8 +163,24 @@ Plans:
   1. Agent container execution drops privileges and isolates the host system.
   2. Unix socket communication is secured via runtime constraints.
 **Plans**: 2
-- [ ] 07-01: Container Privilege Restriction — Restrict docker capabilities, implement read-only filesystems, and strict CPU/memory limits.
-- [ ] 07-02: Socket Security & Permissions — Restrict socket accessibility and sanitize mounted directories inside the container.
+- [x] 07-01: Container Privilege Restriction — Restrict docker capabilities, implement read-only filesystems, and strict CPU/memory limits.
+- [x] 07-02: Socket Security & Permissions — Restrict socket accessibility and sanitize mounted directories inside the container.
+
+### Phase 8: Connector Ecosystem (v7)
+**Goal**: Grow what agents can *do* by making connectors pluggable and extending the catalogue beyond the built-in four. A connector becomes a self-contained module (metadata + grant-scope + execute) discovered from a registry, so adding a capability means dropping in one module — not editing the gate, the effector, and the credential loader. Enforcement is unchanged: the deterministic gate keeps validating every action against the manifest grants, and world-B stays green throughout. The first new capability *channel* is synchronous tools, landed via web search.
+**Depends on**: Phase 4 (the gate, effector, credential proxy, and manifest projection that connectors plug into)
+**Success Criteria** (what must be TRUE):
+  1. Adding a connector is dropping ONE self-contained module into `lib/agent_os/connector/` — auto-discovered via the behaviour, with no edit to a central registry list, `Gate`, `Effector`, `CredentialSource`, `Manifest.Projection`, or `CapabilityRender`.
+  2. The existing four connectors (`kv_append`, `external_send`, `gmail_read`, `gmail_draft`) run on the pluggable path with the world-B suite unchanged and green.
+  3. Credential injection is generic: a connector declaring a credential gets it resolved (declared id → env var) and injected at the effector chokepoint post-approval (the `external_send` special-case is gone).
+  4. A connector that raises or hangs during execution is contained — it fails closed as `{:error, …}`, is logged loudly, and never crashes the run worker or the substrate.
+  5. web_search executes synchronously mid-reasoning, is gated by the manifest grant (no grant → no call), and its per-query cost meters against the spend cap.
+**Plans**: 3
+
+Plans:
+- [ ] 08-01 (Spec A): Pluggable connector registry — `AgentOS.Connector` becomes a behaviour; the registry is **auto-discovered** (modules implementing the behaviour under `lib/agent_os/connector/`), so there is no central list to edit; `registry/0` assembles the metadata map so `Gate` is untouched; effector dispatch + credential resolution become generic (credential by declared id → env var). Each `execute/2` runs **fault-contained** (timeboxed + rescue-wrapped → fail-closed `{:error}`, never crashes the run). Proven by **migrating the existing four connectors** with world-B green — no new connector added. Deliberately does NOT add a tool-channel callback (08-02), and does NOT change connectors from writing state to returning effects — that contract isolation (T1) is deferred to 08-03 since all v7 connectors are first-party.
+- [ ] 08-02 (Spec B): Synchronous tools + web_search — add a mid-inference tool-use channel over the inference broker (agent pauses reasoning → substrate runs the query → results injected into context in the same pass); land `web_search` as the first tool connector (metered per-query, credential-injected via `:search_api_key`), reusing the 08-01 registry for grant/scope. Depends on 08-01. NOTE: this same channel is the right home for an agent-initiated `kv_read` *tool* (selective/synchronous read driven by reasoning), as opposed to the ambient state push in the input payload — reads stay mounts, not grants, unless an agent genuinely needs to pull a key mid-reasoning. Deferred until a concrete agent requires it; do not build speculatively.
+- [ ] 08-03: Connector admission & compile-isolated plugins — the trust/loading boundary for connectors that are NOT first-party: contract isolation (T1 — connectors return effects, never touch substrate state directly), compile isolation (connectors as a separate Mix app / package so a bad connector can't break the core build), dynamic loading (install without rebuilding the core), and an admission gate (review + credential provisioning) since connector code runs inside the trusted substrate. The point where "no editing core code to add a connector" fully lands for third-party authors. Depends on 08-01.
 
 **Sequencing rationale**: the rail (04-01…03) is generation-independent and built on the existing
 discovery agent, delivering standing legibility/safety value (consent screen, auditor, review modes)
@@ -172,14 +192,15 @@ world-B-on-machine-written acceptance that is the whole point of v3. Phases 5–
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Walking Skeleton (v0) | 5/5 | Complete | 2026-06-28 |
 | 2. Isolation (v1) | 3/3 | Complete | 2026-06-28 |
 | 3. Manifest Enforcement (v2) | 8/8 | Complete — world-B proven | 2026-06-29 |
-| 4. Generation MVP (v3) | 5/10 | In progress — completed: 04-01, 04-03, 04-04, 04-05, 04-07 | - |
-| 5. Live Connectivity (v4) | 0/3 | Not started | - |
-| 6. LiveView Control Plane (v5) | 0/3 | Not started | - |
-| 7. Hardening & Sandbox (v6) | 0/2 | Not started | - |
+| 4. Generation MVP (v3) | 10/10 | Complete | 2026-07-01 |
+| 5. Live Connectivity (v4) | 3/3 | Complete | 2026-07-01 |
+| 6. LiveView Control Plane (v5) | 3/3 | Complete | 2026-07-01 |
+| 7. Hardening & Sandbox (v6) | 2/2 | Complete | 2026-07-01 |
+| 8. Connector Ecosystem (v7) | 0/3 | Not started | - |
