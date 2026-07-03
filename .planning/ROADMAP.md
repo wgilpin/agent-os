@@ -37,7 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 6: Phoenix/LiveView Control Plane (v5)** - User-facing dashboard for the generation cycle
 - [x] **Phase 7: Hardening & Sandbox (v6)** - Production-grade container + socket sandboxing
 - [x] **Phase 8: Connector Ecosystem (v7)** - Pluggable connector registry + synchronous tools (web search)
-- [ ] **Phase 9: Persistent State & Permissions (v8)** - Queryable durable store, split build-time/runtime consent, agent-invisible namespaces
+- [x] **Phase 9: Persistent State & Permissions (v8)** - Queryable durable store, split build-time/runtime consent, agent-invisible namespaces
 
 ## Phase Details
 
@@ -215,7 +215,7 @@ world-B-on-machine-written acceptance that is the whole point of v3. Phases 5–
 Plans:
 - [x] 09-01: Split the connector approval flag into `requires_deploy_consent?` (build-time) + `requires_runtime_approval?` (per-call runtime); the gate parks only on the runtime flag; capability-render surfaces each distinctly. Clean cutover — no live state, so no migration: `requires_approval?` removed everywhere, and existing connectors mapped directly (only `external_send` → both true; `gmail_read` / `gmail_draft` / `kv_append` → both false).
 - [x] 09-02: Queryable record store (**record/predicate mode only**) — embedded SQLite (`exqlite`) backend behind the `StateStore` single-writer contract; `store_find` (read, `:local`) + `store_append` (write, `:local`) connectors; append-cheap + predicate query + crash-durable; **policy-bound, agent-invisible namespaces** (namespace bound in the grant and resolved substrate-side; the agent never names or sees a store; where an agent uses multiple stores it addresses them by a manifest-assigned logical handle). Read/write asymmetry (agent queries history, only the substrate writes ledger/verdicts) falls out of granting `store_find` without `store_append`. De-hardcode `kv_append`'s `"roster_trust"`. Does NOT serve the map contract or touch existing mounts (that is 09-03). Depends on 09-01. **Engine choice open**: SQLite vs a zero-dependency append-log + ETS index — decide before implementing.
-- [ ] 09-03: Retire the term-file backend — first ADD a map/key-value mode (`:put`/`:delete_in`/`:append`/`snapshot`, per-key storage) to the 09-02 backend, then migrate the small-state mounts (`inference_broker`, `trigger_gateway`, `conformance_auditor`, `run_worker`, `inventory`, `provisioner`, `stage5_review`, `consent_live`) onto it, keep the single-writer GenServer contract, and delete term-file persistence entirely. No behaviour change visible to callers. Depends on 09-02.
+- [x] 09-03: Retire the term-file backend — first ADD a map/key-value mode (`:put`/`:delete_in`/`:append`/`snapshot`, per-key storage) to the 09-02 backend, then migrate the small-state mounts (`inference_broker`, `trigger_gateway`, `conformance_auditor`, `run_worker`, `inventory`, `provisioner`, `stage5_review`, `consent_live`) onto it, keep the single-writer GenServer contract, and delete term-file persistence entirely. No behaviour change visible to callers. Depends on 09-02.
 
 > **BACKLOG (surfaced by the buying-agent example; do NOT build speculatively — same discipline as 08-02):** connector-catalogue and standing-objective primitives a real monitoring/purchasing agent would need — an **eBay read connector** (the first live-egress `execute/2`; OAuth app-token held and refreshed by the credential source, injected per-call), a **notify connector** (approved once at deploy via `requires_deploy_consent?`, `requires_runtime_approval?: false`, metered so the spend cap IS the rate limit — likely a scoped variant of `external_send`), a **durable "watch" objective** (a standing user-owned goal carrying dedupe/seen-set state that drives scheduled re-invocation), and **feedback conditioning** (substrate-written user verdicts read back via `store_find`; runtime-conditioning by default, regeneration through the consent envelope only for a genuine purpose shift). Build each when a concrete agent needs it. **Feasibility flag:** Facebook Marketplace has no API and blocks automation against the user's personal account — treat as out of scope; eBay (real Browse API + OAuth) is the clean first target.
 
@@ -234,4 +234,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 6. LiveView Control Plane (v5) | 3/3 | Complete | 2026-07-01 |
 | 7. Hardening & Sandbox (v6) | 2/2 | Complete | 2026-07-01 |
 | 8. Connector Ecosystem (v7) | 3/3 | Complete | 2026-07-02 |
-| 9. Persistent State & Permissions (v8) | 2/3 | In progress — 09-03 (retire term-file) outstanding | - |
+| 9. Persistent State & Permissions (v8) | 3/3 | Complete | 2026-07-02 |
