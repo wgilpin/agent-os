@@ -9,10 +9,11 @@ erl_crash.dump
 *.ez
 agent_os-*.tar
 
-# Mutable substrate state (run_log.md stays tracked — it's the legible run trace)
+# Mutable substrate state (run_log.md is ignored)
 /data/*.db
 /data/*.db-wal
 /data/*.db-shm
+/data/run_log.md
 
 # Python-generated files
 __pycache__/
