@@ -17,8 +17,8 @@
 
 **Purpose**: Project initialization and basic structure
 
-- [ ] T001 Create connector file structure in lib/agent_os/connector/discord_notify.ex
-- [ ] T002 Create connector test file structure in test/agent_os/connector/discord_notify_test.exs
+- [x] T001 Create connector file structure in lib/agent_os/connector/discord_notify.ex
+- [x] T002 Create connector test file structure in test/agent_os/connector/discord_notify_test.exs
 
 ---
 
@@ -28,7 +28,7 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T003 Implement the `AgentOS.Connector` behaviour and register the module capability metadata in `lib/agent_os/connector/discord_notify.ex`.
+- [x] T003 Implement the `AgentOS.Connector` behaviour and register the module capability metadata in `lib/agent_os/connector/discord_notify.ex`.
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -44,13 +44,13 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T004 [US1] Write test for successful HTTP POST payload formatting and delivery using injected test transport in test/agent_os/connector/discord_notify_test.exs
+- [x] T004 [US1] Write test for successful HTTP POST payload formatting and delivery using injected test transport in test/agent_os/connector/discord_notify_test.exs
 
 ### Implementation for User Story 1
 
-- [ ] T005 [US1] Implement the `execute/2` function for `notify` action in `lib/agent_os/connector/discord_notify.ex`
-- [ ] T006 [US1] Inject transport via `Application.get_env` in `lib/agent_os/connector/discord_notify.ex`
-- [ ] T007 [US1] Return `{:error, {:unknown_method, other}}` for unknown actions.
+- [x] T005 [US1] Implement the `execute/2` function for `notify` action in `lib/agent_os/connector/discord_notify.ex`
+- [x] T006 [US1] Inject transport via `Application.get_env` in `lib/agent_os/connector/discord_notify.ex`
+- [x] T007 [US1] Return `{:error, {:unknown_method, other}}` for unknown actions.
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
@@ -64,13 +64,13 @@
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T008 [US2] Write tests for non-2xx response handling returning `{:error, reason}` in test/agent_os/connector/discord_notify_test.exs
-- [ ] T009 [US2] Write tests for network timeout returning `{:error, reason}` in test/agent_os/connector/discord_notify_test.exs
+- [x] T008 [US2] Write tests for non-2xx response handling returning `{:error, reason}` in test/agent_os/connector/discord_notify_test.exs
+- [x] T009 [US2] Write tests for network timeout returning `{:error, reason}` in test/agent_os/connector/discord_notify_test.exs
 
 ### Implementation for User Story 2
 
-- [ ] T010 [US2] Add pattern matching for `Req` error responses in `lib/agent_os/connector/discord_notify.ex`
-- [ ] T011 [US2] Add pattern matching for non-200 status codes to return error tuples in `lib/agent_os/connector/discord_notify.ex`
+- [x] T010 [US2] Add pattern matching for `Req` error responses in `lib/agent_os/connector/discord_notify.ex`
+- [x] T011 [US2] Add pattern matching for non-200 status codes to return error tuples in `lib/agent_os/connector/discord_notify.ex`
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 
@@ -80,8 +80,8 @@
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T012 Run quickstart.md validation locally to ensure manual smoke testing works.
-- [ ] T013 Verify world-B verification suite passes.
+- [x] T012 Run quickstart.md validation locally to ensure manual smoke testing works.
+- [x] T013 Verify world-B verification suite passes.
 
 ---
 
