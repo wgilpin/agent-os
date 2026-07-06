@@ -39,4 +39,4 @@ Thumbs.db
 *.swp
 .vscode/
 .idea/
-
+*.term
