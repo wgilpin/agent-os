@@ -107,12 +107,24 @@ defmodule AgentOS.Gate do
             case evaluate(action, manifest, registry, %{spent: cur_spent}) do
               {:approve, grant} ->
                 cost = get_cost(action.type, registry)
-                action = %{action | grant_resolved_namespace: grant.namespace}
+
+                action = %{
+                  action
+                  | grant_resolved_namespace: grant.namespace,
+                    grant_resolved_path: grant.path
+                }
+
                 {[%{action: action, grant: grant} | app], park, rej, bre, cur_spent + cost}
 
               {:needs_approval, grant} ->
                 cost = get_cost(action.type, registry)
-                action = %{action | grant_resolved_namespace: grant.namespace}
+
+                action = %{
+                  action
+                  | grant_resolved_namespace: grant.namespace,
+                    grant_resolved_path: grant.path
+                }
+
                 {app, [%{action: action, grant: grant} | park], rej, bre, cur_spent + cost}
 
               {:reject, reason} ->
