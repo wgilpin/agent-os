@@ -38,6 +38,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 7: Hardening & Sandbox (v6)** - Production-grade container + socket sandboxing
 - [x] **Phase 8: Connector Ecosystem (v7)** - Pluggable connector registry + synchronous tools (web search)
 - [x] **Phase 9: Persistent State & Permissions (v8)** - Queryable durable store, split build-time/runtime consent, agent-invisible namespaces
+- [ ] **Phase 10: Priorities Coach (v9)** - First *live* read + notify + OAuth: a generated daily coaching agent that reads a doc, pings Google Chat, ingests the reply, and writes the doc back
 
 ## Phase Details
 
@@ -219,10 +220,32 @@ Plans:
 
 > **BACKLOG (surfaced by the buying-agent example; do NOT build speculatively — same discipline as 08-02):** connector-catalogue and standing-objective primitives a real monitoring/purchasing agent would need — an **eBay read connector** (the first live-egress `execute/2`; OAuth app-token held and refreshed by the credential source, injected per-call), a **notify connector** (approved once at deploy via `requires_deploy_consent?`, `requires_runtime_approval?: false`, metered so the spend cap IS the rate limit — likely a scoped variant of `external_send`), a **durable "watch" objective** (a standing user-owned goal carrying dedupe/seen-set state that drives scheduled re-invocation), and **feedback conditioning** (substrate-written user verdicts read back via `store_find`; runtime-conditioning by default, regeneration through the consent envelope only for a genuine purpose shift). Build each when a concrete agent needs it. **Feasibility flag:** Facebook Marketplace has no API and blocks automation against the user's personal account — treat as out of scope; eBay (real Browse API + OAuth) is the clean first target.
 
+### Phase 10: Priorities Coach (v9)
+**Goal**: Deliver the **Priorities Coach** as a real, generated, *live* agent (not a mock): a daily 0800 run reads the user's priorities doc, pings them on Discord asking whether yesterday's stated intentions actually happened, coaches if appropriate, and writes the doc back — the user's Discord reply flowing back in to drive the update. All coaching/diff logic is machine-written agent body (Constitution IX); this phase builds only the substrate grants the manifest projection would need and can't yet issue. It is the widest gap-opener on the matrix: it lights four open columns (`Rd`, live `Mut`, `OAuth`, `Notif`) and is the first *live* exercise of `Evt` from a real external channel. **Part build (new primitives/connectors), part complete-not-mock:** no connector `execute/2` has ever crossed the network boundary (all egress is stubbed/sink-routed), the credential source is static-env-only (no OAuth), and the trigger gateway has message machinery but no real inbound surface. **Channel note:** Google Chat was ruled out — its webhooks/Chat-app API need a Google Workspace account and the operator is a personal `@gmail.com`; Discord incoming webhooks are a static per-channel URL that works on a personal account (outbound), though the inbound reply (10-03) needs a Discord bot/gateway rather than a plain inbound webhook.
+**Depends on**: Phase 8 (pluggable connector registry + credential proxy + admission) and Phase 9 (queryable store — "since yesterday" is a live `store_find`).
+**Surfaced by**: the Priorities-Coach candidate in [agent-primitive-matrix.md](agent-primitive-matrix.md). A validation scenario for the workload-driven loop, not a committed product.
+**Success Criteria** (what must be TRUE):
+  1. A generated agent makes a real outbound call — `chat_notify.execute/2` POSTs a live message to a real Google Chat space; nothing on this path is sink-routed or canned.
+  2. A generated agent reads real external data bounded by a gate-enforced grant — a path-scoped grant (local file, Wave A) or an id-scoped Drive grant (Wave B).
+  3. The user's Chat reply re-enters the substrate through an authenticated inbound endpoint and drives the same run's doc update (first live `Evt` from a real channel).
+  4. The coach is machine-generated and auto-deployed through the unchanged pipeline, and world-B-on-generated stays green with the new grant shapes — no breach case dropped or relaxed.
+  5. (Wave B) The credential source holds and refreshes an OAuth token, injecting the current access token per call without the agent ever observing it; Drive read + write-back work live.
+**Plans**: 7 (Wave A: working live coach on a local file, no OAuth; Wave B: OAuth/Drive upgrade)
+**Roadmap detail**: full breakdown, doc-location decision, and per-plan dependencies in [phase-10-priorities-coach-roadmap.md](phase-10-priorities-coach-roadmap.md). Per-plan `/speckit-specify` prompts drafted plan-by-plan when each is started (begin with 10-01).
+
+Plans:
+- [ ] 10-01: `discord_notify` connector — first connector `execute/2` that actually POSTs over the network (Discord incoming webhook). Static per-channel URL via the existing static credential source (no OAuth); metered, `requires_deploy_consent?: true`. Completes the live-egress path (`Notif` live). No deps.
+- [ ] 10-02: Path-scoped file connectors `file_read` + `file_write` — first *live* `Rd` and `Mut` on a filesystem grant; forces a new **path-scoped grant shape** in the manifest/gate. No credential. No deps.
+- [ ] 10-03: Inbound external message trigger — a Discord bot/gateway connection (persistent websocket or interactions endpoint) that receives the user's reply and maps it onto the waiting agent's message trigger (spec 007). First real external `Evt`; heavier than a plain inbound webhook. Depends on trigger gateway (present).
+- [ ] 10-04: Generate the Priorities Coach end-to-end, live (Wave-A acceptance) — elicit → manifest (path read+write, `chat_notify`, chat-reply event, daily trigger, spend cap) → judge → novel body → security-review → deploy-on-green; re-prove world-B-on-generated with the new grant shapes; live smoke of the full 0800 loop. Depends on 10-01, 10-02, 10-03.
+- [ ] 10-05: OAuth-with-refresh credential source (`OAuth` primitive) — extend `CredentialSource` (static-env only today) to hold a refresh token, rotate the access token, and inject the current one per call behind the credential-proxy boundary. Provisioned at admission (08-03). No deps (Wave B only).
+- [ ] 10-06: `drive_read` + `drive_write` connectors — live read + write-back of a Google Doc over the 10-01 egress path using 10-05's OAuth credential; id-scoped grant. Depends on 10-01, 10-05.
+- [ ] 10-07: Regenerate the coach against Drive (Wave-B acceptance) — re-run 10-04 with the doc source switched to Drive; confirm OAuth injection, live read/write, world-B still green. Depends on 10-04, 10-06.
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -235,3 +258,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 7. Hardening & Sandbox (v6) | 2/2 | Complete | 2026-07-01 |
 | 8. Connector Ecosystem (v7) | 3/3 | Complete | 2026-07-02 |
 | 9. Persistent State & Permissions (v8) | 3/3 | Complete | 2026-07-02 |
+| 10. Priorities Coach (v9) | 0/7 | Planned — see [phase-10-priorities-coach-roadmap.md](phase-10-priorities-coach-roadmap.md) | — |
