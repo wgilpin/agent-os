@@ -20,7 +20,7 @@ defmodule AgentOS.RunWorker do
   alias AgentOS.Manifest
   alias AgentOS.StateStore
   alias AgentOS.PortRunner
-  alias AgentOS.Effector
+  alias AgentOS.OutcomeRecord
   alias AgentOS.RunLog
 
   @doc """
@@ -118,11 +118,22 @@ defmodule AgentOS.RunWorker do
             {:error, reason}
 
           {:ok, manifest} ->
-            run_token = Base.encode16(:crypto.strong_rand_bytes(16))
+            # Run token identifies this invocation across the broker, capability rail,
+            # and action transcript. Injectable via opts so tests can pre-seed the
+            # transcript deterministically; a fresh random token otherwise.
+            run_token =
+              Keyword.get(opts, :run_token) || Base.encode16(:crypto.strong_rand_bytes(16))
 
             if GenServer.whereis(AgentOS.InferenceBroker) do
               effective_model = Application.get_env(:agent_os, :agent_runtime_model)
-              AgentOS.InferenceBroker.register(run_token, agent_name, manifest, :live, effective_model)
+
+              AgentOS.InferenceBroker.register(
+                run_token,
+                agent_name,
+                manifest,
+                :live,
+                effective_model
+              )
             end
 
             original_run_token = System.get_env("RUN_TOKEN")
@@ -144,12 +155,21 @@ defmodule AgentOS.RunWorker do
               Keyword.update(
                 opts,
                 :env,
-                %{"RUN_TOKEN" => run_token, "INFERENCE_SOCKET" => "/tmp/inference.sock"} |> (fn env -> if effective_model, do: Map.put(env, "AGENT_MODEL", effective_model), else: env end).(),
+                %{"RUN_TOKEN" => run_token, "INFERENCE_SOCKET" => "/tmp/inference.sock"}
+                |> (fn env ->
+                      if effective_model,
+                        do: Map.put(env, "AGENT_MODEL", effective_model),
+                        else: env
+                    end).(),
                 fn existing_env ->
                   existing_env
                   |> Map.put("RUN_TOKEN", run_token)
                   |> Map.put("INFERENCE_SOCKET", "/tmp/inference.sock")
-                  |> (fn env -> if effective_model, do: Map.put(env, "AGENT_MODEL", effective_model), else: env end).()
+                  |> (fn env ->
+                        if effective_model,
+                          do: Map.put(env, "AGENT_MODEL", effective_model),
+                          else: env
+                      end).()
                 end
               )
 
@@ -196,7 +216,7 @@ defmodule AgentOS.RunWorker do
                 {"docker", AgentOS.Sandbox.build_argv(sandbox)}
               end
 
-            res = execute_run(cmd, args, manifest, agent_name, opts_with_env)
+            res = execute_run(cmd, args, manifest, agent_name, run_token, opts_with_env)
 
             if original_run_token,
               do: System.put_env("RUN_TOKEN", original_run_token),
@@ -219,7 +239,7 @@ defmodule AgentOS.RunWorker do
     end
   end
 
-  defp execute_run(cmd, args, manifest, agent_name, opts) do
+  defp execute_run(cmd, args, manifest, agent_name, run_token, opts) do
     run_log_path = Keyword.get(opts, :run_log_path, Path.join(["data", "run_log.md"]))
     timeout_ms = Keyword.get(opts, :timeout_ms, 30_000)
 
@@ -239,6 +259,8 @@ defmodule AgentOS.RunWorker do
         {[], 0}
       end
 
+    items_in = length(items) + dropped_count
+
     now = Keyword.get(opts, :now, DateTime.utc_now())
     spend_ledger = StateStore.snapshot("spend_ledger")
     raw_entry = Map.get(spend_ledger, agent_name, %{spent: 0, window_start: now})
@@ -253,16 +275,14 @@ defmodule AgentOS.RunWorker do
         "Inference pre-check breach: agent '#{agent_name}' spent (#{agent_entry.spent}) >= cap (#{manifest.spend.cap})"
       )
 
+      # Agent never ran; no effects to report — an empty tally.
       dispatch_on_breach(
         manifest.spend.on_breach,
         run_log_path,
         trigger,
-        length(items) + dropped_count,
-        [],
-        [],
-        [],
-        [:inference],
-        dropped_count
+        items_in,
+        dropped_count,
+        %{}
       )
     else
       with snapshot <- StateStore.snapshot("roster_trust"),
@@ -273,12 +293,17 @@ defmodule AgentOS.RunWorker do
                 Jason.encode!(%{"roster" => snapshot.records || []})
               end),
            {:ok, stdout} <- PortRunner.run(input_json, cmd, args, timeout_ms: timeout_ms),
-           %{"actions" => actions} <- Jason.decode!(stdout) do
-        # Re-fetch spend ledger in case inference during the run pushed us over cap
+           {:ok, _outcome} <- OutcomeRecord.parse(stdout) do
+        # The agent acted only through the broker tool-call channel during inference; the
+        # capability rail already gated, executed, parked, and recorded every effect to the
+        # ActionTranscript, and the broker already charged the spend ledger. run_worker is a
+        # reader: it derives the run-log tally from the transcript and never re-executes.
         spend_ledger = StateStore.snapshot("spend_ledger")
         raw_entry = Map.get(spend_ledger, agent_name, %{spent: 0, window_start: now})
         agent_entry = AgentOS.SpendLedger.current_entry(raw_entry, now, manifest.spend.window)
         spent = agent_entry.spent
+
+        tally = tally_transcript(run_token)
 
         if spent >= manifest.spend.cap do
           Logger.warning(
@@ -289,89 +314,52 @@ defmodule AgentOS.RunWorker do
             manifest.spend.on_breach,
             run_log_path,
             trigger,
-            length(items) + dropped_count,
-            actions,
-            [],
-            [],
-            [:inference],
-            dropped_count
+            items_in,
+            dropped_count,
+            tally
           )
         else
-          registry = AgentOS.Connector.registry()
+          RunLog.append(
+            %{
+              status: :ok,
+              actions: tally.approved,
+              trigger: trigger,
+              exit_code: 0,
+              items_in: items_in,
+              items_dropped: dropped_count + tally.rejected + tally.parked,
+              approved_count: tally.approved,
+              rejected_count: tally.rejected,
+              parked_count: tally.parked,
+              breached_count: 0,
+              gate_reasons: tally.gate_reasons,
+              note: "run complete"
+            },
+            path: run_log_path
+          )
 
-          {approved, parked, rejected, breached} =
-            AgentOS.Gate.partition_batch(actions, manifest, registry, %{spent: spent})
-
-          items_in = length(items) + dropped_count
-
-          cond do
-            breached != [] ->
-              dispatch_on_breach(
-                manifest.spend.on_breach,
-                run_log_path,
-                trigger,
-                items_in,
-                actions,
-                rejected,
-                parked,
-                breached,
-                dropped_count
-              )
-
-            true ->
-              Effector.act_all(approved)
-
-              total_approved_cost =
-                Enum.reduce(approved, 0, fn %{action: action}, acc ->
-                  acc + get_cost(action.type, registry)
-                end)
-
-              if total_approved_cost > 0 do
-                new_spent = spent + total_approved_cost
-                updated_entry = Map.put(agent_entry, :spent, new_spent)
-                StateStore.apply_action("spend_ledger", {:put, agent_name, updated_entry})
-              end
-
-              if parked != [] do
-                pending_store = StateStore.snapshot("pending_approvals")
-                approvals = Map.get(pending_store, :approvals, %{})
-
-                updated_approvals =
-                  Enum.reduce(parked, approvals, fn %{action: act, grant: grt}, acc ->
-                    ref = "ref_#{System.unique_integer([:positive])}"
-                    Map.put(acc, ref, %{ref: ref, action: act, grant: grt})
-                  end)
-
-                StateStore.apply_action(
-                  "pending_approvals",
-                  {:put, :approvals, updated_approvals}
-                )
-              end
-
-              reasons = Enum.map(rejected, fn {_raw, reason} -> reason end) |> Enum.uniq()
-
-              RunLog.append(
-                %{
-                  status: :ok,
-                  actions: length(approved),
-                  trigger: trigger,
-                  exit_code: 0,
-                  items_in: items_in,
-                  items_dropped: dropped_count + length(rejected) + length(parked),
-                  approved_count: length(approved),
-                  rejected_count: length(rejected),
-                  parked_count: length(parked),
-                  breached_count: 0,
-                  gate_reasons: reasons,
-                  note: "run complete"
-                },
-                path: run_log_path
-              )
-
-              :ok
-          end
+          :ok
         end
       else
+        {:error, :malformed} ->
+          # Clean cutover: stdout that is not a terminal outcome record — including the
+          # retired {"actions":[…]} shape — is malformed. Any effects the rail already
+          # recorded to the transcript stand; we do not undo them.
+          RunLog.append(
+            %{
+              status: :error,
+              actions: 0,
+              trigger: trigger,
+              failure_cause: "malformed_outcome",
+              items_in: items_in,
+              items_dropped: dropped_count,
+              note:
+                "malformed outcome record on stdout (retired {\"actions\"} protocol not accepted)"
+            },
+            path: run_log_path
+          )
+
+          {:error, :malformed_outcome}
+
         {:error, reason} ->
           {exit_code, failure_cause} =
             case reason do
@@ -380,8 +368,6 @@ defmodule AgentOS.RunWorker do
               :timeout -> {nil, "timeout"}
               _other -> {nil, "other"}
             end
-
-          items_in = length(items) + dropped_count
 
           RunLog.append(
             %{
@@ -400,8 +386,6 @@ defmodule AgentOS.RunWorker do
           {:error, reason}
 
         other ->
-          items_in = length(items) + dropped_count
-
           RunLog.append(
             %{
               status: :error,
@@ -418,6 +402,27 @@ defmodule AgentOS.RunWorker do
           {:error, other}
       end
     end
+  end
+
+  # Reads the action transcript for this run token and reduces it to run-log counts.
+  # Granted/parked/rejected entries were written by the capability rail during inference.
+  defp tally_transcript(run_token) do
+    entries = AgentOS.ActionTranscript.read(run_token).entries
+
+    rejected_entries = Enum.filter(entries, &(&1.kind == :rejected))
+
+    reasons =
+      rejected_entries
+      |> Enum.map(& &1.reason_code)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    %{
+      approved: Enum.count(entries, &(&1.kind == :granted)),
+      parked: Enum.count(entries, &(&1.kind == :parked)),
+      rejected: length(rejected_entries),
+      gate_reasons: reasons
+    }
   end
 
   @doc """
@@ -443,24 +448,12 @@ defmodule AgentOS.RunWorker do
     end
   end
 
-  defp get_cost(type, registry) do
-    case Map.get(registry, type) do
-      nil -> 0
-      conn -> Map.get(conn, :cost, 0)
-    end
-  end
+  # Logs a spend-breach run and returns the killed sentinel. Effect counts come from the
+  # transcript tally (empty on a pre-run breach where the agent never executed).
+  defp dispatch_on_breach(:kill, run_log_path, trigger, items_in, dropped_count, tally) do
+    rejected = Map.get(tally, :rejected, 0)
+    parked = Map.get(tally, :parked, 0)
 
-  defp dispatch_on_breach(
-         :kill,
-         run_log_path,
-         trigger,
-         items_in,
-         actions,
-         rejected,
-         parked,
-         breached,
-         dropped_count
-       ) do
     RunLog.append(
       %{
         status: :killed,
@@ -469,11 +462,11 @@ defmodule AgentOS.RunWorker do
         exit_code: 0,
         failure_cause: :spend_breach,
         items_in: items_in,
-        items_dropped: dropped_count + length(actions),
-        approved_count: 0,
-        rejected_count: length(rejected),
-        parked_count: length(parked),
-        breached_count: length(breached),
+        items_dropped: dropped_count + rejected + parked,
+        approved_count: Map.get(tally, :approved, 0),
+        rejected_count: rejected,
+        parked_count: parked,
+        breached_count: 1,
         gate_reasons: [:spend_breach],
         note: "killed: :spend_breach"
       },

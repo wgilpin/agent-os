@@ -288,16 +288,47 @@ defmodule AgentOS.Pipeline.Stage4 do
   # Decodes the broker's `{"files": [...]}` completion into typed GeneratedFile structs,
   # rejecting (not raising on) any malformed shape — mirrors Stage3.parse_tests/1.
   defp parse_files(completion) when is_binary(completion) do
-    sanitized =
+    case lenient_decode(completion) do
+      {:ok, decoded} -> parse_files(decoded)
+      :error -> {:error, :invalid_synthesis_output}
+    end
+  end
+
+  # Decodes the model's synthesis output tolerantly: different authoring models wrap the
+  # JSON differently (```json fences, ```python fences, or prose around it). Try a direct
+  # decode after stripping outer fences, then fall back to decoding the outermost {...}
+  # object or [...] array span extracted from the text.
+  defp lenient_decode(completion) do
+    stripped =
       completion
       |> String.trim()
-      |> String.replace(~r/^```(?:json)?/i, "")
-      |> String.replace(~r/```$/, "")
+      |> String.replace(~r/^```[a-zA-Z0-9]*\s*/, "")
+      |> String.replace(~r/```\s*$/, "")
       |> String.trim()
 
-    case Jason.decode(sanitized) do
-      {:ok, decoded} -> parse_files(decoded)
-      {:error, _} -> {:error, :invalid_synthesis_output}
+    [stripped, extract_span(stripped, "{", "}"), extract_span(stripped, "[", "]")]
+    |> Enum.find_value(:error, fn
+      nil ->
+        false
+
+      candidate ->
+        case Jason.decode(candidate) do
+          {:ok, decoded} -> {:ok, decoded}
+          {:error, _} -> false
+        end
+    end)
+  end
+
+  # Slices the substring from the first `open` bracket to the last `close` bracket,
+  # or nil if either is absent. Lets us pull a JSON payload out of surrounding prose.
+  defp extract_span(text, open, close) do
+    with {start, _} <- :binary.match(text, open),
+         [_ | _] = matches <- :binary.matches(text, close),
+         {stop, len} <- List.last(matches),
+         true <- stop >= start do
+      binary_part(text, start, stop + len - start)
+    else
+      _ -> nil
     end
   end
 

@@ -157,10 +157,14 @@ defmodule AgentOS.Pipeline.Stage3 do
       with {:ok, run_token} <- require_token(opts),
            {:ok, spec} <- load_spec(agent_name, opts) do
            
-        # Register the token specifically for this agent's manifest during evaluation
+        # Judging is one-off SETUP, not a runtime agent run: it must never be metered
+        # against the agent's runtime spend cap. Evaluate with the agent's real grants
+        # (so capability boundaries are still enforced) but an effectively unlimited
+        # budget — the manifest spend cap governs live agent runs only.
         effective_model = Application.get_env(:agent_os, :agent_runtime_model)
-        :ok = AgentOS.InferenceBroker.register(run_token, agent_name, manifest, :record, effective_model)
-        
+        eval_manifest = %{manifest | spend: %{manifest.spend | cap: 1_000_000_000}}
+        :ok = AgentOS.InferenceBroker.register(run_token, agent_name, eval_manifest, :record, effective_model)
+
         evaluate_spec(agent_name, spec, run_token, opts)
       else
         {:error, :missing_run_token} ->

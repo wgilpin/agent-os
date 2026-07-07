@@ -10,7 +10,9 @@ defmodule AgentOS.PortRunnerTest do
     assert {:ok, output} =
              PortRunner.run(input, ".venv/bin/python", ["agents/discovery/main.py"], [])
 
-    assert output =~ "actions"
+    # With no broker env available here, discovery refuses cleanly and prints a
+    # terminal outcome record (no longer the retired actions list).
+    assert output =~ "outcome"
   end
 
   test "bash echo hello" do
