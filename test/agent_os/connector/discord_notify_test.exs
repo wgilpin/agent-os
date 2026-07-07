@@ -6,7 +6,12 @@ defmodule AgentOS.Connector.DiscordNotifyTest do
   alias AgentOS.Manifest.Grant
 
   setup do
-    Application.delete_env(:agent_os, :discord_notify_transport)
+    # Reset to the suite-wide SAFE stub (test_helper.exs) — never delete_env, which
+    # would expose the real &Req.post/2 default to concurrently running tests.
+    Application.put_env(:agent_os, :discord_notify_transport, fn _url, _opts ->
+      {:ok, %Req.Response{status: 204}}
+    end)
+
     :ok
   end
 
@@ -18,6 +23,7 @@ defmodule AgentOS.Connector.DiscordNotifyTest do
     assert meta.requires_runtime_approval? == false
     assert meta.credential == :discord_webhook_url
     assert meta.cost > 0
+
     assert %{
              "type" => "function",
              "function" => %{
@@ -47,7 +53,9 @@ defmodule AgentOS.Connector.DiscordNotifyTest do
 
     assert_receive {:post_called, url, payload}
     assert url == secret
-    assert payload == %{json: %{content: "Hello world"}}
+    # Req.post/2 requires a keyword list — a map crashes live (masked by stubs).
+    assert Keyword.keyword?(payload)
+    assert payload == [json: %{content: "Hello world"}]
   end
 
   test "execute_tool/2 successful HTTPS POST payload formatting" do
@@ -59,11 +67,15 @@ defmodule AgentOS.Connector.DiscordNotifyTest do
     end)
 
     secret = "https://hooks.discord.com/fake"
-    assert :ok = DiscordNotify.execute_tool(%{"text" => "Hello tool"}, secret)
+
+    assert {:ok, %{"status" => "sent"}} =
+             DiscordNotify.execute_tool(%{"text" => "Hello tool"}, secret)
 
     assert_receive {:post_called, url, payload}
     assert url == secret
-    assert payload == %{json: %{content: "Hello tool"}}
+    # Same regression guard as execute/2: options must be a keyword list.
+    assert Keyword.keyword?(payload)
+    assert payload == [json: %{content: "Hello tool"}]
   end
 
   test "execute/2 returns unknown_method for invalid actions" do

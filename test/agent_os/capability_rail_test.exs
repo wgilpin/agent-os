@@ -25,7 +25,11 @@ defmodule AgentOS.CapabilityRailTest do
     end)
 
     start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})
-    start_supervised!({AgentOS.StateStore, name: "action_transcript", path: tmp_transcript, initial: %{}})
+
+    start_supervised!(
+      {AgentOS.StateStore, name: "action_transcript", path: tmp_transcript, initial: %{}}
+    )
+
     start_supervised!({AgentOS.StateStore, name: "spend_ledger", path: tmp_spend, initial: %{}})
 
     start_supervised!(AgentOS.CredentialProxy)
@@ -122,7 +126,9 @@ defmodule AgentOS.CapabilityRailTest do
     # Grant an unknown connector
     manifest = %{
       context.manifest
-      | grants: [%Manifest.Grant{connector: "not_a_real_connector", methods: nil, recipients: nil}]
+      | grants: [
+          %Manifest.Grant{connector: "not_a_real_connector", methods: nil, recipients: nil}
+        ]
     }
 
     tool_calls = [
@@ -182,7 +188,8 @@ defmodule AgentOS.CapabilityRailTest do
                context.run_token
              )
 
-    assert cost == 1000 # Configured cost for web_search
+    # Configured cost for web_search
+    assert cost == 1000
     assert length(messages) == 1
     assert hd(messages)["content"] == "mock results"
 

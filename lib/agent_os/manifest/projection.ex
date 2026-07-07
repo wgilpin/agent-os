@@ -110,12 +110,23 @@ defmodule AgentOS.Manifest.Projection do
           (manifest.triggers
            |> Enum.map(fn t ->
              case Map.get(t, :type) || Map.get(t, "type") do
-               :time -> "  - type: time\n    at: \"#{t.at}\""
-               :event -> "  - type: event\n    name: \"#{t.name}\""
-               :message -> "  - type: message"
-               "time" -> "  - type: time\n    at: \"#{Map.get(t, :at) || Map.get(t, "at")}\""
-               "event" -> "  - type: event\n    name: \"#{Map.get(t, :name) || Map.get(t, "name")}\""
-               "message" -> "  - type: message"
+               :time ->
+                 "  - type: time\n    at: \"#{t.at}\""
+
+               :event ->
+                 "  - type: event\n    name: \"#{t.name}\""
+
+               :message ->
+                 "  - type: message"
+
+               "time" ->
+                 "  - type: time\n    at: \"#{Map.get(t, :at) || Map.get(t, "at")}\""
+
+               "event" ->
+                 "  - type: event\n    name: \"#{Map.get(t, :name) || Map.get(t, "name")}\""
+
+               "message" ->
+                 "  - type: message"
              end
            end)
            |> Enum.join("\n"))

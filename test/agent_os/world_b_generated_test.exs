@@ -116,11 +116,19 @@ defmodule AgentOS.WorldBGeneratedTest do
       registry = AgentOS.Connector.registry()
 
       {approved, _parked, rejected, _breached} =
-        Gate.partition_batch([
-        %{"type" => "file_write", "payload" => %{"handle" => "priorities_doc", "content" => "hostile_payload"}},
-        %{"type" => "unknown_connector"},
-        %{"foo" => "bar"}
-      ], context.manifest, registry, %{spent: 0})
+        Gate.partition_batch(
+          [
+            %{
+              "type" => "file_write",
+              "payload" => %{"handle" => "priorities_doc", "content" => "hostile_payload"}
+            },
+            %{"type" => "unknown_connector"},
+            %{"foo" => "bar"}
+          ],
+          context.manifest,
+          registry,
+          %{spent: 0}
+        )
 
       assert length(approved) == 1
       assert [%{action: %AgentOS.ProposedAction{type: "file_write"}}] = approved
@@ -141,11 +149,19 @@ defmodule AgentOS.WorldBGeneratedTest do
       narrow_manifest = %Manifest{context.manifest | grants: []}
 
       {approved_narrow, _, rejected_narrow, _} =
-        Gate.partition_batch([
-        %{"type" => "file_write", "payload" => %{"handle" => "priorities_doc", "content" => "hostile_payload"}},
-        %{"type" => "unknown_connector"},
-        %{"foo" => "bar"}
-      ], narrow_manifest, registry, %{spent: 0})
+        Gate.partition_batch(
+          [
+            %{
+              "type" => "file_write",
+              "payload" => %{"handle" => "priorities_doc", "content" => "hostile_payload"}
+            },
+            %{"type" => "unknown_connector"},
+            %{"foo" => "bar"}
+          ],
+          narrow_manifest,
+          registry,
+          %{spent: 0}
+        )
 
       assert approved_narrow == []
       assert length(rejected_narrow) == 3
@@ -159,8 +175,15 @@ defmodule AgentOS.WorldBGeneratedTest do
       {:ok, spoofed_recipient} =
         AgentOS.ProposedAction.from_map(%{"type" => "discord_notify", "method" => "delete"})
 
-      {:ok, spoofed_method} = AgentOS.ProposedAction.from_map(%{"type" => "discord_notify", "method" => "delete"})
-      {:ok, in_scope} = AgentOS.ProposedAction.from_map(%{"type" => "discord_notify", "method" => "notify", "payload" => %{"text" => "hello"}})
+      {:ok, spoofed_method} =
+        AgentOS.ProposedAction.from_map(%{"type" => "discord_notify", "method" => "delete"})
+
+      {:ok, in_scope} =
+        AgentOS.ProposedAction.from_map(%{
+          "type" => "discord_notify",
+          "method" => "notify",
+          "payload" => %{"text" => "hello"}
+        })
 
       assert {:reject, :method_out_of_scope} =
                Gate.evaluate(spoofed_recipient, context.manifest, registry, %{spent: 0})
@@ -181,11 +204,19 @@ defmodule AgentOS.WorldBGeneratedTest do
       registry = AgentOS.Connector.registry()
 
       {approved, _, _, _} =
-        Gate.partition_batch([
-        %{"type" => "file_write", "payload" => %{"handle" => "priorities_doc", "content" => "hostile_payload"}},
-        %{"type" => "unknown_connector"},
-        %{"foo" => "bar"}
-      ], context.manifest, registry, %{spent: 0})
+        Gate.partition_batch(
+          [
+            %{
+              "type" => "file_write",
+              "payload" => %{"handle" => "priorities_doc", "content" => "hostile_payload"}
+            },
+            %{"type" => "unknown_connector"},
+            %{"foo" => "bar"}
+          ],
+          context.manifest,
+          registry,
+          %{spent: 0}
+        )
 
       Enum.each(approved, context.effector_fn)
 
@@ -223,7 +254,7 @@ defmodule AgentOS.WorldBGeneratedTest do
       ledger = AgentOS.StateStore.snapshot("spend_ledger")
       entry = Map.get(ledger, context.agent_name)
       assert entry != nil
-      assert entry.spent == 203000
+      assert entry.spent == 203_000
 
       assert entry.spent > context.manifest.spend.cap
     end
@@ -375,7 +406,11 @@ defmodule AgentOS.WorldBGeneratedTest do
 
       # 2. Prove that runtime gate evaluates over this loaded manifest as an external predicate
       registry = AgentOS.Connector.registry()
-      allowed_action = %AgentOS.ProposedAction{type: "file_write", payload: %{"handle" => "priorities_doc", "content" => "test"}}
+
+      allowed_action = %AgentOS.ProposedAction{
+        type: "file_write",
+        payload: %{"handle" => "priorities_doc", "content" => "test"}
+      }
 
       disallowed_action = %AgentOS.ProposedAction{
         type: "discord_notify",
@@ -415,7 +450,9 @@ defmodule AgentOS.WorldBGeneratedTest do
     test "chained attempt (self-approve of out-of-scope action) stops at first boundary",
          context do
       registry = AgentOS.Connector.registry()
-      {:ok, spoofed} = AgentOS.ProposedAction.from_map(%{"type" => "discord_notify", "method" => "delete"})
+
+      {:ok, spoofed} =
+        AgentOS.ProposedAction.from_map(%{"type" => "discord_notify", "method" => "delete"})
 
       assert {:reject, :method_out_of_scope} =
                Gate.evaluate(spoofed, context.manifest, registry, %{spent: 0})

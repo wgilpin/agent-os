@@ -342,5 +342,4 @@ defmodule AgentOS.RunSupervisorTest do
       refute File.exists?(log_path) and File.read!(log_path) =~ "status=alert"
     end
   end
-
 end

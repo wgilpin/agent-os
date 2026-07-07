@@ -71,7 +71,9 @@ defmodule AgentOS.CapabilityRender do
           else
             badge = if entry.danger == :external, do: "[EXTERNAL] ", else: ""
             deploy_badge = if entry.requires_deploy_consent?, do: "[DEPLOY_CONSENT] ", else: ""
-            runtime_badge = if entry.requires_runtime_approval?, do: "[RUNTIME_APPROVAL] ", else: ""
+
+            runtime_badge =
+              if entry.requires_runtime_approval?, do: "[RUNTIME_APPROVAL] ", else: ""
 
             scope_str =
               cond do
@@ -92,6 +94,7 @@ defmodule AgentOS.CapabilityRender do
           end
 
         methods_str = if entry.methods, do: inspect(entry.methods), else: "any"
+
         "  - #{base_line}\n    -> exact connector_id to use: \"#{entry.connector}\"\n    -> exact methods allowed: #{methods_str}"
       end)
 

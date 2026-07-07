@@ -26,6 +26,7 @@ config :agent_os,
   agent_runtime_model: "google/gemini-3-flash-preview",
   judge_model: "google/gemini-3.5-flash",
   autostart: true,
+  load_dotenv: true,
   credentials: %{},
   inference_prices: %{}
 
@@ -61,12 +62,20 @@ config :phoenix, :json_library, Jason
 if config_env() == :test do
   config :agent_os,
     autostart: false,
+    # Never load real secrets from .env into the test VM (Constitution IV): tests
+    # that flip :autostart (e.g. the UDS broker harness) must not pull the live
+    # webhook/model keys into System env for the rest of the suite.
+    load_dotenv: false,
     review_mode: :dangerously_skip_review,
     bookmarks_path: "test/fixtures/hostile_bookmarks.json",
     credentials: %{
       outbound_token: "test_secret_outbound_token_value",
       model_key: "test_secret_model_key_value",
-      search_api_key: "test_search_api_key_value"
+      search_api_key: "test_search_api_key_value",
+      # Fake webhook so tests never depend on a developer shell exporting the real
+      # DISCORD_WEBHOOK_URL (System env still takes precedence in the resolver; the
+      # suite-wide transport stub in test_helper.exs is the hard guard).
+      discord_webhook_url: "https://discord.invalid/webhook-test"
     },
     inference_prices: %{
       "mock-model" => %{input: 10_000_000, output: 30_000_000},

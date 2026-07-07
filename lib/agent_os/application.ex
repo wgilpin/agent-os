@@ -85,7 +85,8 @@ defmodule AgentOS.Application do
            initial: %{}},
           {AgentOS.StateStore,
            name: "action_transcript",
-           path: Application.get_env(:agent_os, :action_transcript_path, "data/action_transcript.db"),
+           path:
+             Application.get_env(:agent_os, :action_transcript_path, "data/action_transcript.db"),
            initial: %{}},
           AgentOS.CredentialProxy,
           AgentOS.InferenceBroker,

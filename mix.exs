@@ -29,7 +29,8 @@ defmodule AgentOS.MixProject do
       {:plug_cowboy, "~> 2.6"},
       {:websockex, "~> 0.5.1"},
       {:exqlite, ">= 0.11.0"},
-      {:floki, ">= 0.30.0", only: :test}
+      {:floki, ">= 0.30.0", only: :test},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
 end

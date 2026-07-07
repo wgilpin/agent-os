@@ -1,6 +1,16 @@
 # Exclude container/docker tests by default to keep the local suite hermetic.
 # Run them explicitly via: mix test --include docker
 System.put_env("SEARCH_API_KEY", "test_search_api_key_value")
+
+# Constitution IV guard: no test may reach the live Discord webhook. The credential
+# resolver falls back to System env (a developer shell may export the REAL
+# DISCORD_WEBHOOK_URL), so a suite-wide safe transport stub is installed here.
+# Tests asserting transport behavior override it per-test with put_env — never
+# delete_env, which would drop this guard for concurrently running tests.
+Application.put_env(:agent_os, :discord_notify_transport, fn _url, _opts ->
+  {:ok, %Req.Response{status: 204}}
+end)
+
 ExUnit.start(exclude: [:docker])
 
 defmodule AgentOS.TestHelper do
@@ -171,6 +181,66 @@ defmodule AgentOS.TestHelper do
 
     ExUnit.Callbacks.start_supervised!(AgentOS.InferenceBroker)
     sock
+  end
+
+  @doc """
+  Posts a tool submission to the broker's `/v1/tool_calls` route over the UDS,
+  mirroring the HTTP-over-UDS framing an agent process uses. Returns
+  `{status_code, decoded_json_body}`. Used by the channel tests to exercise routing
+  without a Python container.
+  """
+  def submit_tool_calls_uds(sock_path, %{} = payload) do
+    body = Jason.encode!(payload)
+
+    request =
+      "POST /v1/tool_calls HTTP/1.1\r\n" <>
+        "Host: localhost\r\n" <>
+        "Content-Type: application/json\r\n" <>
+        "Content-Length: #{byte_size(body)}\r\n" <>
+        "Connection: close\r\n\r\n" <> body
+
+    {:ok, socket} =
+      :gen_tcp.connect({:local, sock_path}, 0, [:binary, packet: :raw, active: false])
+
+    :ok = :gen_tcp.send(socket, request)
+    response = recv_all(socket, "")
+    :gen_tcp.close(socket)
+
+    [headers, resp_body] = String.split(response, "\r\n\r\n", parts: 2)
+    status = headers |> String.split(" ") |> Enum.at(1) |> String.to_integer()
+    {status, Jason.decode!(resp_body)}
+  end
+
+  defp recv_all(socket, acc) do
+    case :gen_tcp.recv(socket, 0, 5000) do
+      {:ok, data} -> recv_all(socket, acc <> data)
+      {:error, :closed} -> acc
+      {:error, _} -> acc
+    end
+  end
+
+  @doc """
+  Asserts that an agent's spend ledger reflects ONLY metered connector cost and no
+  inference charge — the direct-channel invariant that a no-LLM run's spend equals
+  the sum of executed connector costs exactly (default 0 when no connector executed).
+  """
+  def refute_inference_spend(agent_name, connector_cost \\ 0) do
+    ledger = AgentOS.StateStore.snapshot("spend_ledger")
+
+    spent =
+      case Map.get(ledger, agent_name) do
+        nil -> 0
+        %{spent: s} -> s
+      end
+
+    if spent != connector_cost do
+      raise ExUnit.AssertionError,
+        message:
+          "expected spend for #{agent_name} to equal connector cost #{connector_cost} " <>
+            "(zero inference charge), got #{spent}"
+    end
+
+    :ok
   end
 
   @high_signal ~w(high valid signal breakthrough alice) ++ ["plain string"]
