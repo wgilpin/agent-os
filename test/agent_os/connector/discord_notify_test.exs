@@ -18,6 +18,13 @@ defmodule AgentOS.Connector.DiscordNotifyTest do
     assert meta.requires_runtime_approval? == false
     assert meta.credential == :discord_webhook_url
     assert meta.cost > 0
+    assert %{
+             "type" => "function",
+             "function" => %{
+               "name" => "discord_notify",
+               "parameters" => %{"required" => ["text"]}
+             }
+           } = meta.tool_declaration
   end
 
   test "execute/2 successful HTTPS POST payload formatting" do
@@ -28,7 +35,12 @@ defmodule AgentOS.Connector.DiscordNotifyTest do
       {:ok, %Req.Response{status: 204}}
     end)
 
-    action = %ProposedAction{type: "external_send", method: "notify", payload: %{"text" => "Hello world"}}
+    action = %ProposedAction{
+      type: "external_send",
+      method: "notify",
+      payload: %{"text" => "Hello world"}
+    }
+
     secret = "https://hooks.discord.com/fake"
 
     assert :ok = DiscordNotify.execute(action, secret)
@@ -36,6 +48,22 @@ defmodule AgentOS.Connector.DiscordNotifyTest do
     assert_receive {:post_called, url, payload}
     assert url == secret
     assert payload == %{json: %{content: "Hello world"}}
+  end
+
+  test "execute_tool/2 successful HTTPS POST payload formatting" do
+    test_pid = self()
+
+    Application.put_env(:agent_os, :discord_notify_transport, fn url, body ->
+      send(test_pid, {:post_called, url, body})
+      {:ok, %Req.Response{status: 204}}
+    end)
+
+    secret = "https://hooks.discord.com/fake"
+    assert :ok = DiscordNotify.execute_tool(%{"text" => "Hello tool"}, secret)
+
+    assert_receive {:post_called, url, payload}
+    assert url == secret
+    assert payload == %{json: %{content: "Hello tool"}}
   end
 
   test "execute/2 returns unknown_method for invalid actions" do
@@ -48,8 +76,23 @@ defmodule AgentOS.Connector.DiscordNotifyTest do
       {:ok, %Req.Response{status: 400, body: "Bad Request"}}
     end)
 
-    action = %ProposedAction{type: "external_send", method: "notify", payload: %{"text" => "Hello"}}
-    assert {:error, {:http_status, 400, "Bad Request"}} = DiscordNotify.execute(action, "secret")
+    action = %ProposedAction{
+      type: "external_send",
+      method: "notify",
+      payload: %{"text" => "Hello"}
+    }
+
+    assert {:error, {:http_status, 400, "Bad Request"}} =
+             DiscordNotify.execute(action, "secret")
+  end
+
+  test "execute_tool/2 loud failure on 4xx/5xx responses" do
+    Application.put_env(:agent_os, :discord_notify_transport, fn _url, _body ->
+      {:ok, %Req.Response{status: 400, body: "Bad Request"}}
+    end)
+
+    assert {:error, {:http_status, 400, "Bad Request"}} =
+             DiscordNotify.execute_tool(%{"text" => "Hello"}, "secret")
   end
 
   test "execute/2 loud failure on network timeout/error" do
@@ -57,7 +100,12 @@ defmodule AgentOS.Connector.DiscordNotifyTest do
       {:error, :timeout}
     end)
 
-    action = %ProposedAction{type: "external_send", method: "notify", payload: %{"text" => "Hello"}}
+    action = %ProposedAction{
+      type: "external_send",
+      method: "notify",
+      payload: %{"text" => "Hello"}
+    }
+
     assert {:error, :timeout} = DiscordNotify.execute(action, "secret")
   end
 end

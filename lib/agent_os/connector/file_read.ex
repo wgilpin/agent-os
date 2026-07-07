@@ -15,10 +15,38 @@ defmodule AgentOS.Connector.FileRead do
       requires_deploy_consent?: false,
       requires_runtime_approval?: false,
       credential: nil,
-      cost: 0
+      cost: 0,
+      tool_declaration: %{
+        "type" => "function",
+        "function" => %{
+          "name" => "file_read",
+          "description" => "Read a bound file from the file system.",
+          "parameters" => %{
+            "type" => "object",
+            "properties" => %{},
+            "required" => []
+          }
+        }
+      }
     }
   end
+  @impl AgentOS.Connector
+  def scope(boundaries) do
+    path =
+      case Map.get(boundaries, :target_locations, []) do
+        [first | _] -> first
+        _ -> nil
+      end
 
+    %Grant{
+      connector: "file_read",
+      recipients: nil,
+      methods: nil,
+      handle: "priorities_doc",
+      namespace: nil,
+      path: path
+    }
+  end
   @impl AgentOS.Connector
   def render(%Grant{path: path}) do
     "[EXTERNAL] READ DOCUMENT AT #{path}"

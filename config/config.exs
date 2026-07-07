@@ -22,13 +22,12 @@ config :agent_os,
   conformance_denied_threshold: 3,
   spend_defaults: %{window: :daily, on_breach: :kill},
   elicitor_spend_cap: 10_000_000,
+  agent_codegen_model: "google/gemini-3-flash-preview",
+  agent_runtime_model: "google/gemini-3-flash-preview",
+  judge_model: "google/gemini-3-flash-preview",
   autostart: true,
   credentials: %{},
-  # Prod placeholder for the real Gemini 3-series model in micro-dollars
-  inference_prices: %{
-    # "gemini-3-flash" => %{input: 75, output: 250}
-    "google/gemini-2.5-flash" => %{input: 75_000_000, output: 250_000_000}
-  }
+  inference_prices: %{}
 
 # Hard-wired agent configuration (manifest path, command, timezone, schedule, and capabilities)
 config :agent_os, :agent,
@@ -71,7 +70,8 @@ if config_env() == :test do
     },
     inference_prices: %{
       "mock-model" => %{input: 10_000_000, output: 30_000_000},
-      "google/gemini-2.5-flash" => %{input: 10_000_000, output: 30_000_000}
+      "google/gemini-2.5-flash" => %{input: 10_000_000, output: 30_000_000},
+      "google/gemini-3-flash-preview" => %{input: 10_000_000, output: 30_000_000}
     }
 
   config :agent_os, AgentOSWeb.Endpoint,

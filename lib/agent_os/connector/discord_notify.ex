@@ -12,7 +12,24 @@ defmodule AgentOS.Connector.DiscordNotify do
       requires_deploy_consent?: true,
       requires_runtime_approval?: false,
       credential: :discord_webhook_url,
-      cost: 1000
+      cost: 1000,
+      tool_declaration: %{
+        "type" => "function",
+        "function" => %{
+          "name" => "discord_notify",
+          "description" => "Notify the user on Discord.",
+          "parameters" => %{
+            "type" => "object",
+            "properties" => %{
+              "text" => %{
+                "type" => "string",
+                "description" => "The message text to send to Discord."
+              }
+            },
+            "required" => ["text"]
+          }
+        }
+      }
     }
   end
 
@@ -26,7 +43,8 @@ defmodule AgentOS.Connector.DiscordNotify do
   end
 
   @impl AgentOS.Connector
-  def execute(%ProposedAction{method: "notify", payload: %{"text" => text}}, secret) when is_binary(secret) do
+  def execute(%ProposedAction{method: "notify", payload: %{"text" => text}}, secret)
+      when is_binary(secret) do
     transport_fn = Application.get_env(:agent_os, :discord_notify_transport, &Req.post/2)
     payload = %{json: %{content: text}}
 
@@ -45,6 +63,12 @@ defmodule AgentOS.Connector.DiscordNotify do
   @impl AgentOS.Connector
   def execute(%ProposedAction{method: other}, _secret) do
     {:error, {:unknown_method, other}}
+  end
+
+  @impl AgentOS.Connector
+  def execute_tool(%{"text" => text}, secret) when is_binary(secret) do
+    # Simply reuse the internal payload construction
+    execute(%ProposedAction{type: "external_send", method: "notify", payload: %{"text" => text}}, secret)
   end
 
   @impl AgentOS.Connector

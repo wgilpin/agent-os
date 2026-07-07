@@ -118,12 +118,18 @@ defmodule AgentOS.Manifest do
     if namespace != nil and not is_binary(namespace),
       do: raise("Grant 'namespace' must be a string")
 
+    path = Map.get(raw_grant, "path")
+
+    if path != nil and not is_binary(path),
+      do: raise("Grant 'path' must be a string")
+
     struct!(Grant,
       connector: connector,
       recipients: recipients,
       methods: methods,
       handle: handle,
-      namespace: namespace
+      namespace: namespace,
+      path: path
     )
   end
 

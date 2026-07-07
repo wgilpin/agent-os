@@ -11,7 +11,7 @@ workloads. **The language boundary is the trust boundary** — do not infer the 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-[plan.md](file:///Users/will/projects/agent_os/specs/035-file-connectors/plan.md)
+[plan.md](file:///Users/will/projects/agent_os/specs/037-priorities-coach-generation/plan.md)
 <!-- SPECKIT END -->
 
 # Speckit Hook Preferences
@@ -19,3 +19,8 @@ shell commands, and other important information, read the current plan:
 - On speckit skills, if you are not executing an optional hook, then do not mention it.
 
 
+# Bug Reporting Workflow
+
+- When I report a bug, always use a two-phase response:
+  1. Diagnose the problem, present it, and wait for confirmation.
+  2. Fix the problem only after I confirm.

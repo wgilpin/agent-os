@@ -1,7 +1,7 @@
 defmodule AgentOS.Connector.GmailRead do
   @behaviour AgentOS.Connector
 
-  alias AgentOS.ProposedAction
+
   alias AgentOS.Manifest.Grant
 
   @impl AgentOS.Connector
@@ -11,8 +11,25 @@ defmodule AgentOS.Connector.GmailRead do
       mutating?: false,
       requires_deploy_consent?: false,
       requires_runtime_approval?: false,
-      credential: nil,
-      cost: 0
+      credential: :gmail_oauth_token,
+      cost: 500,
+      tool_declaration: %{
+        "type" => "function",
+        "function" => %{
+          "name" => "gmail_read",
+          "description" => "Read emails from Gmail.",
+          "parameters" => %{
+            "type" => "object",
+            "properties" => %{
+              "query" => %{
+                "type" => "string",
+                "description" => "The search query."
+              }
+            },
+            "required" => ["query"]
+          }
+        }
+      }
     }
   end
 

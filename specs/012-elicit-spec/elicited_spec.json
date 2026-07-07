@@ -1,0 +1,15 @@
+{
+  "boundaries": {
+    "egress_domains": [],
+    "target_locations": []
+  },
+  "capabilities": [
+    "discord_notify"
+  ],
+  "confirmed": true,
+  "purpose": "Send a 'Hello, World!' notification to a Discord channel via a pre-configured webhook upon receiving a message trigger, then exit.",
+  "spend_limits": {
+    "dollar_cap": 0.05,
+    "token_limit": 50000
+  }
+}

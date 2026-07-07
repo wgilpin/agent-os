@@ -83,6 +83,10 @@ defmodule AgentOS.Application do
                "data/security_review_results.db"
              ),
            initial: %{}},
+          {AgentOS.StateStore,
+           name: "action_transcript",
+           path: Application.get_env(:agent_os, :action_transcript_path, "data/action_transcript.db"),
+           initial: %{}},
           AgentOS.CredentialProxy,
           AgentOS.InferenceBroker,
           {AgentOS.InferencePriceSync, []},
@@ -100,6 +104,9 @@ defmodule AgentOS.Application do
 
           # Scheduler is the GenServer running the daily 07:00 self-rescheduling timer loop.
           {AgentOS.Scheduler, []},
+
+          # DiscordGateway maintains the websocket connection to Discord.
+          AgentOS.DiscordGateway,
 
           # ConformanceAuditor.Scheduler reschedules itself daily to run the conformance audit.
           {AgentOS.ConformanceAuditor.Scheduler, []}

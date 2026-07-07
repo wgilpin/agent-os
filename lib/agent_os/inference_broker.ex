@@ -49,9 +49,9 @@ defmodule AgentOS.InferenceBroker do
   @doc """
   Registers a per-run token to its corresponding agent name and manifest.
   """
-  @spec register(String.t(), String.t(), AgentOS.Manifest.t()) :: :ok
-  def register(token, agent_name, manifest) when is_binary(token) and is_binary(agent_name) do
-    GenServer.call(__MODULE__, {:register, token, agent_name, manifest})
+  @spec register(String.t(), String.t(), AgentOS.Manifest.t(), :live | :record, String.t() | nil) :: :ok
+  def register(token, agent_name, manifest, mode \\ :live, effective_model \\ nil) when is_binary(token) and is_binary(agent_name) do
+    GenServer.call(__MODULE__, {:register, token, agent_name, manifest, mode, effective_model})
   end
 
   @doc """
@@ -66,7 +66,7 @@ defmodule AgentOS.InferenceBroker do
   Resolves a per-run token to its agent name and manifest.
   """
   @spec resolve(String.t()) ::
-          {:ok, {String.t(), AgentOS.Manifest.t()}} | {:error, :unknown_run_token}
+          {:ok, map()} | {:error, :unknown_run_token}
   def resolve(token) when is_binary(token) do
     GenServer.call(__MODULE__, {:resolve, token})
   end
@@ -84,10 +84,13 @@ defmodule AgentOS.InferenceBroker do
   @spec complete(request(), opts :: keyword()) :: result()
   def complete(request, opts \\ []) do
     token = Map.get(request, :run_token) || Map.get(request, "run_token")
-    model = Map.get(request, :model) || Map.get(request, "model")
+    requested_model = Map.get(request, :model) || Map.get(request, "model")
     messages = Map.get(request, :messages) || Map.get(request, "messages")
 
-    with {:ok, {agent_name, manifest}} <- resolve(token),
+    with {:ok, resolved} <- resolve(token),
+         model = resolved.effective_model || requested_model,
+         agent_name = resolved.agent_name,
+         manifest = resolved.manifest,
          prices =
            Keyword.get(opts, :prices) || Application.get_env(:agent_os, :inference_prices, %{}),
          {:ok, price_entry} <- InferencePrice.lookup(prices, model) do
@@ -119,6 +122,7 @@ defmodule AgentOS.InferenceBroker do
           default_provider
 
       do_complete_loop(
+        token,
         messages,
         agent_entry.spent,
         agent_name,
@@ -135,7 +139,7 @@ defmodule AgentOS.InferenceBroker do
         {:error, :unknown_run_token}
 
       {:error, :unpriced_model} ->
-        Logger.error("Inference failed: unpriced model '#{inspect(model)}'")
+        Logger.error("Inference failed: unpriced model (requested: '#{inspect(requested_model)}')")
         {:error, :unpriced_model}
 
       other ->
@@ -146,6 +150,7 @@ defmodule AgentOS.InferenceBroker do
 
   # Helper to recursively call completions and execute tool requests
   defp do_complete_loop(
+         run_token,
          messages,
          spent,
          agent_name,
@@ -165,14 +170,28 @@ defmodule AgentOS.InferenceBroker do
     else
       tools = build_tools_list(manifest)
 
+      capabilities_context = """
+      [OS CONTEXT INJECTED BY INFERENCE BROKER]
+      You are an AgentOS autonomous agent.
+      Your runtime capabilities are strictly limited to the following:
+      #{AgentOS.CapabilityRender.render(manifest)}
+      """
+
+      system_msg = %{
+        role: "system",
+        content: capabilities_context
+      }
+
+      injected_messages = [system_msg | messages]
+
       provider_result =
         AgentOS.CredentialProxy.with_credential(:model_key, fn secret ->
           cond do
             is_function(provider_fn, 4) ->
-              provider_fn.(model, messages, tools, secret)
+              provider_fn.(model, injected_messages, tools, secret)
 
             is_function(provider_fn, 3) ->
-              provider_fn.(model, messages, secret)
+              provider_fn.(model, injected_messages, secret)
 
             true ->
               raise ArgumentError, "provider_fn must have arity 3 or 4"
@@ -215,7 +234,7 @@ defmodule AgentOS.InferenceBroker do
               updated_messages = messages ++ [assistant_msg]
 
               # Execute all requested tool calls in order
-              case execute_tool_calls(tool_calls, agent_name, manifest, opts) do
+              case AgentOS.CapabilityRail.evaluate_tool_calls(tool_calls, agent_name, manifest, run_token) do
                 {:ok, tool_messages, tool_cost} ->
                   final_spent = new_spent + tool_cost
 
@@ -239,6 +258,7 @@ defmodule AgentOS.InferenceBroker do
 
                     # Recurse completions with updated message history
                     do_complete_loop(
+                      run_token,
                       updated_messages ++ tool_messages,
                       final_spent,
                       agent_name,
@@ -282,139 +302,18 @@ defmodule AgentOS.InferenceBroker do
         {:ok, %{tool_declaration: declaration}} when not is_nil(declaration) ->
           acc ++ [declaration]
 
-        _ ->
-          acc
+        {:ok, _cap} ->
+          raise ArgumentError,
+            "Granted connector '#{grant.connector}' is missing a tool_declaration."
+
+        :error ->
+          # If the connector is entirely missing from registry, just skip or raise. 
+          # For defense in depth against bad manifests, raise.
+          raise ArgumentError,
+            "Granted connector '#{grant.connector}' is unknown."
       end
     end)
   end
-
-  # Iterates through tool calls and returns {:ok, tool_messages, accumulated_cost}
-  defp execute_tool_calls(tool_calls, agent_name, manifest, _opts) do
-    registry = AgentOS.Connector.registry()
-
-    Enum.reduce_while(tool_calls, {:ok, [], 0}, fn tool_call, {:ok, msg_acc, cost_acc} ->
-      tool_name = get_in(tool_call, ["function", "name"]) || get_in(tool_call, [:function, :name])
-      tool_call_id = Map.get(tool_call, "id") || Map.get(tool_call, :id)
-
-      args_str =
-        get_in(tool_call, ["function", "arguments"]) || get_in(tool_call, [:function, :arguments])
-
-      # Sandbox check: is the tool explicitly granted?
-      is_granted? = Enum.any?(manifest.grants, fn g -> g.connector == tool_name end)
-
-      if not is_granted? do
-        Logger.error("Sandbox blocked ungranted tool: '#{tool_name}'")
-        {:halt, {:error, {:unauthorized_tool, tool_name}}}
-      else
-        case Map.fetch(registry, tool_name) do
-          {:ok, cap} ->
-            tool_cost = Map.get(cap, :cost, 0)
-
-            # Spend ledger lookup prior to tool call
-            ledger = StateStore.snapshot("spend_ledger")
-            raw_entry = Map.get(ledger, agent_name, %{spent: 0})
-            current_spent = raw_entry.spent + cost_acc
-
-            if current_spent + tool_cost >= manifest.spend.cap do
-              Logger.warning("Spend cap exceeded before executing tool '#{tool_name}'")
-              {:halt, {:breach, :spend}}
-            else
-              args =
-                case Jason.decode(args_str) do
-                  {:ok, decoded} -> decoded
-                  {:error, _} -> %{}
-                end
-
-              {:ok, mod} = AgentOS.Connector.get_module(tool_name)
-              credential_id = Map.get(cap, :credential)
-
-              # Execute dynamic tool isolated and timeboxed
-              tool_exec_result =
-                if credential_id do
-                  AgentOS.CredentialProxy.with_credential(credential_id, fn secret ->
-                    execute_tool_isolated(mod, args, secret)
-                  end)
-                else
-                  execute_tool_isolated(mod, args, nil)
-                end
-
-              case tool_exec_result do
-                {:ok, res} ->
-                  res_str = if is_binary(res), do: res, else: Jason.encode!(res)
-
-                  msg = %{
-                    "role" => "tool",
-                    "tool_call_id" => tool_call_id,
-                    "name" => tool_name,
-                    "content" => res_str
-                  }
-
-                  {:cont, {:ok, msg_acc ++ [msg], cost_acc + tool_cost}}
-
-                {:error, reason} ->
-                  reason_str = "Error: " <> inspect(reason)
-
-                  msg = %{
-                    "role" => "tool",
-                    "tool_call_id" => tool_call_id,
-                    "name" => tool_name,
-                    "content" => reason_str
-                  }
-
-                  {:cont, {:ok, msg_acc ++ [msg], cost_acc + tool_cost}}
-              end
-            end
-
-          :error ->
-            {:halt, {:error, {:unknown_connector, tool_name}}}
-        end
-      end
-    end)
-  end
-
-  # Executes a tool connector inside a timeboxed, crash-isolated dynamic Task
-  defp execute_tool_isolated(mod, arguments, secret) do
-    # Fallback to local task supervisor if the global registry one is missing
-    supervisor =
-      case Process.whereis(AgentOS.ConnectorSupervisor) do
-        nil ->
-          {:ok, pid} = Task.Supervisor.start_link()
-          pid
-
-        pid ->
-          pid
-      end
-
-    if function_exported?(mod, :execute_tool, 2) do
-      task =
-        Task.Supervisor.async_nolink(supervisor, fn ->
-          try do
-            mod.execute_tool(arguments, secret)
-          catch
-            kind, reason ->
-              {:error, {:exception, kind, reason}}
-          end
-        end)
-
-      case Task.yield(task, 5000) || Task.shutdown(task) do
-        {:ok, {:ok, res}} ->
-          {:ok, res}
-
-        {:ok, {:error, reason}} ->
-          {:error, reason}
-
-        {:ok, other} ->
-          {:error, other}
-
-        nil ->
-          {:error, :timeout}
-      end
-    else
-      {:error, :not_implemented}
-    end
-  end
-
-  # Default/Real provider function using OpenRouter transport.
   defp real_provider_fn(model, messages, secret) do
     real_provider_fn(model, messages, [], secret)
   end
@@ -445,7 +344,7 @@ defmodule AgentOS.InferenceBroker do
           }
         end
 
-      case Req.post(url, json: body, headers: headers) do
+      case Req.post(url, json: body, headers: headers, receive_timeout: 120_000) do
         {:ok, %Req.Response{status: 200, body: response_body}} ->
           case parse_openrouter_response(response_body) do
             {:ok, usage_data} ->
@@ -720,8 +619,14 @@ defmodule AgentOS.InferenceBroker do
   end
 
   @impl true
-  def handle_call({:register, token, agent_name, manifest}, _from, state) do
-    new_tokens = Map.put(state.tokens, token, {agent_name, manifest})
+  def handle_call({:register, token, agent_name, manifest, mode, effective_model}, _from, state) do
+    entry = %{
+      agent_name: agent_name,
+      manifest: manifest,
+      mode: mode,
+      effective_model: effective_model
+    }
+    new_tokens = Map.put(state.tokens, token, entry)
     {:reply, :ok, Map.put(state, :tokens, new_tokens)}
   end
 

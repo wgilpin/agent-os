@@ -20,6 +20,7 @@ def call_inference_broker(model: str, messages: list[dict[str, str]]) -> dict:
     """Routes an inference call to the substrate broker over the mounted UDS."""
     run_token = os.environ.get("RUN_TOKEN")
     socket_path = os.environ.get("INFERENCE_SOCKET")
+    agent_model = os.environ.get("AGENT_MODEL", "")
 
     if not run_token or not socket_path:
         raise RuntimeError("Inference environment variables not set")
@@ -31,7 +32,7 @@ def call_inference_broker(model: str, messages: list[dict[str, str]]) -> dict:
     # Construct request body
     payload = {
         "run_token": run_token,
-        "model": model,
+        "model": agent_model,
         "messages": messages
     }
     body = json.dumps(payload)

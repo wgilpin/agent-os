@@ -162,6 +162,21 @@ defmodule AgentOS.Pipeline.Stage4Test do
       refute File.exists?(agent_files_path(ctx.spec_dir, "recruiter_agent", "models.py"))
     end
 
+    test "rejects manifest with a granted connector missing tool_declaration (T010/T012)", ctx do
+      # For example, gmail_read is currently mocked or missing a tool_declaration in tests
+      manifest = %{ctx.manifest | grants: [%AgentOS.Manifest.Grant{connector: "missing_declaration", methods: nil, recipients: nil}]}
+      assert {:error, :missing_tool_declaration} = Stage4.generate("recruiter_agent", manifest, ctx.base_opts)
+    end
+
+    test "rejects synthesis output containing manifest literals (T012)", ctx do
+      # Manifest grant literal "gmail_draft"
+      leaking_main = String.replace(valid_main_py(), "kv_append", "gmail_draft")
+      opts = Keyword.put(ctx.base_opts, :provider_fn, provider_returning(files_json(leaking_main)))
+
+      assert {:error, :manifest_leak_detected} =
+               Stage4.generate("recruiter_agent", ctx.manifest, opts)
+    end
+
     test "rejects a main.py missing the typed stdin/stdout contract and writes nothing", ctx do
       untyped_main = "print('hello world')\n"
 
@@ -182,6 +197,47 @@ defmodule AgentOS.Pipeline.Stage4Test do
                Stage4.generate("recruiter_agent", ctx.manifest, opts)
 
       refute File.exists?(agent_files_path(ctx.spec_dir, "recruiter_agent", "main.py"))
+    end
+  end
+
+  describe "US1: judge-blindness (T013-T014)" do
+    test "synthesis prompt contains no free-text actions protocol (T012)", ctx do
+      require AgentOS.InferenceBroker
+
+      # Inspect the actual messages sent to the broker
+      opts =
+        Keyword.put(ctx.base_opts, :provider_fn, fn _model, messages, _secret ->
+          system_prompt = Enum.map_join(messages, "\n", &(&1.content || ""))
+          
+          # The system prompt MUST NOT ask the model to produce free text {"actions": [...]}
+          send(self(), {:system_prompt, system_prompt})
+          
+          %{input_tokens: 5, output_tokens: 5, completion: files_json()}
+        end)
+
+      assert {:ok, _} = Stage4.generate("recruiter_agent", ctx.manifest, opts)
+      
+      assert_received {:system_prompt, system_prompt}
+      
+      refute system_prompt =~ "free-text markdown block or JSON blob"
+      refute system_prompt =~ "return its actions in a free-text"
+      refute system_prompt =~ "\"actions\":"
+    end
+
+    test "synthesis prompt contains no hardcoded model identifier string (T026)", ctx do
+      opts =
+        Keyword.put(ctx.base_opts, :provider_fn, fn _model, messages, _secret ->
+          system_prompt = Enum.map_join(messages, "\n", &(&1.content || ""))
+          send(self(), {:system_prompt, system_prompt})
+          %{input_tokens: 5, output_tokens: 5, completion: files_json()}
+        end)
+
+      assert {:ok, _} = Stage4.generate("recruiter_agent", ctx.manifest, opts)
+      
+      assert_received {:system_prompt, system_prompt}
+      
+      refute system_prompt =~ "google/gemini"
+      refute system_prompt =~ "mock-model"
     end
   end
 

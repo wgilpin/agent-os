@@ -60,7 +60,7 @@ defmodule AgentOS.Pipeline.Stage5 do
 
   defp execute_review(agent_name, manifest, code_files, run_token, opts) do
     now = Keyword.get(opts, :now) || DateTime.utc_now()
-    model = Keyword.get(opts, :model, "gemini-3-flash-preview")
+    model = Keyword.get(opts, :model, "google/gemini-3-flash-preview")
     messages = build_messages(agent_name, manifest, code_files)
 
     request = %{

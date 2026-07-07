@@ -14,6 +14,7 @@ defmodule AgentOS.ElicitedSpec do
             dollar_cap: float(),
             token_limit: integer()
           },
+          triggers: [map()],
           confirmed: boolean()
         }
 
@@ -22,6 +23,7 @@ defmodule AgentOS.ElicitedSpec do
     :capabilities,
     boundaries: %{egress_domains: [], target_locations: []},
     spend_limits: %{dollar_cap: 0.0, token_limit: 0},
+    triggers: [],
     confirmed: false
   ]
 
@@ -32,6 +34,16 @@ defmodule AgentOS.ElicitedSpec do
   def from_map(map) when is_map(map) do
     boundaries = Map.get(map, "boundaries", %{})
     spend_limits = Map.get(map, "spend_limits", %{})
+    triggers = Map.get(map, "triggers", [])
+      |> Enum.map(fn t ->
+        case Map.get(t, "type") do
+          "time" -> %{type: :time, at: Map.get(t, "at")}
+          "event" -> %{type: :event, name: Map.get(t, "name")}
+          "message" -> %{type: :message}
+          type when is_atom(type) -> t
+          _ -> t
+        end
+      end)
 
     %__MODULE__{
       purpose: Map.get(map, "purpose"),
@@ -44,6 +56,7 @@ defmodule AgentOS.ElicitedSpec do
         dollar_cap: to_float(Map.get(spend_limits, "dollar_cap")),
         token_limit: to_integer(Map.get(spend_limits, "token_limit"))
       },
+      triggers: triggers,
       confirmed: Map.get(map, "confirmed", false)
     }
   end
@@ -157,6 +170,10 @@ defmodule AgentOS.ConversationSession do
             "dollar_cap" => session.spec_draft.spend_limits.dollar_cap,
             "token_limit" => session.spec_draft.spend_limits.token_limit
           },
+          "triggers" => Enum.map(session.spec_draft.triggers, fn t ->
+            t_map = Map.new(t, fn {k, v} -> {to_string(k), v} end)
+            Map.put(t_map, "type", to_string(t.type))
+          end),
           "confirmed" => session.spec_draft.confirmed
         }
       else

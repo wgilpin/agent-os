@@ -22,6 +22,26 @@ defmodule AgentOS.Fixtures.Generation do
   end
 
   @doc """
+  Returns a confirmed ElicitedSpec for "Priorities Coach".
+  """
+  def priorities_coach_confirmed_spec do
+    %ElicitedSpec{
+      purpose: "Priorities Coach",
+      capabilities: ["file_read", "file_write", "discord_notify"],
+      boundaries: %{
+        egress_domains: [],
+        target_locations: [Path.join(System.tmp_dir!(), "priorities.md")]
+      },
+      spend_limits: %{dollar_cap: 0.1, token_limit: 100_000},
+      triggers: [
+        %{type: :message},
+        %{type: :time, at: "08:00"}
+      ],
+      confirmed: true
+    }
+  end
+
+  @doc """
   A fixed Stage-4 agent body files map.
   """
   def stub_agent_body do

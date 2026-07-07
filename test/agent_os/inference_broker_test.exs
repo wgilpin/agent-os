@@ -14,10 +14,20 @@ defmodule AgentOS.InferenceBrokerTest do
         "spend_ledger_broker_test_#{System.unique_integer([:positive])}.db"
       )
 
-    on_exit(fn -> File.rm(tmp_spend) end)
+    tmp_transcript =
+      Path.join(
+        System.tmp_dir!(),
+        "action_transcript_broker_test_#{System.unique_integer([:positive])}.db"
+      )
+
+    on_exit(fn -> 
+      File.rm(tmp_spend) 
+      File.rm(tmp_transcript)
+    end)
 
     start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})
     start_supervised!({StateStore, name: "spend_ledger", path: tmp_spend, initial: %{}})
+    start_supervised!({StateStore, name: "action_transcript", path: tmp_transcript, initial: %{}})
 
     # Start the InferenceBroker and CredentialProxy GenServers
     start_supervised!(AgentOS.CredentialProxy)
@@ -492,7 +502,7 @@ defmodule AgentOS.InferenceBrokerTest do
 
     # Provider fn returns a tool call on first call, then final text response on second call
     provider_fn = fn
-      "mock-model", [%{role: "user"}], _tools, _secret ->
+      "mock-model", [%{role: "system"}, %{role: "user"}], _tools, _secret ->
         %{
           input_tokens: 10,
           output_tokens: 10,
@@ -514,9 +524,9 @@ defmodule AgentOS.InferenceBrokerTest do
         }
 
       "mock-model", messages, _tools, _secret ->
-        # The history should contain the user prompt, assistant tool call, and tool result
-        assert length(messages) == 3
-        [_, assistant_msg, tool_msg] = messages
+        # The history should contain the system context, user prompt, assistant tool call, and tool result
+        assert length(messages) == 4
+        [_, _, assistant_msg, tool_msg] = messages
         assert assistant_msg["role"] == "assistant"
         assert tool_msg["role"] == "tool"
         assert tool_msg["content"] == "Team Elixir won!"
@@ -547,34 +557,311 @@ defmodule AgentOS.InferenceBrokerTest do
       messages: [%{role: "user", content: "search web"}]
     }
 
-    provider_fn = fn "mock-model", _messages, _tools, _secret ->
-      %{
-        input_tokens: 10,
-        output_tokens: 10,
-        completion: nil,
-        message: %{
-          "role" => "assistant",
-          "content" => nil,
-          "tool_calls" => [
-            %{
-              "id" => "call_xyz",
-              "type" => "function",
-              "function" => %{
-                "name" => "web_search",
-                "arguments" => "{\"query\": \"secret\"}"
+    provider_fn = fn
+      "mock-model", [%{role: "system"}, %{role: "user"}], _tools, _secret ->
+        %{
+          input_tokens: 10,
+          output_tokens: 10,
+          completion: nil,
+          message: %{
+            "role" => "assistant",
+            "content" => nil,
+            "tool_calls" => [
+              %{
+                "id" => "call_xyz",
+                "type" => "function",
+                "function" => %{
+                  "name" => "web_search",
+                  "arguments" => "{\"query\": \"secret\"}"
+                }
               }
-            }
-          ]
+            ]
+          }
         }
-      }
+
+      "mock-model", messages, _tools, _secret ->
+        [_, _, _, tool_msg] = messages
+        assert tool_msg["role"] == "tool"
+        assert tool_msg["content"] =~ "unauthorized"
+
+        %{
+          input_tokens: 10,
+          output_tokens: 10,
+          completion: "I am not allowed to search the web."
+        }
     end
 
-    assert {:error, {:unauthorized_tool, "web_search"}} =
+    assert {:ok, %{completion: "I am not allowed to search the web."}} =
              InferenceBroker.complete(req,
                now: context.now,
                provider_fn: provider_fn,
                prices: context.prices
              )
+  end
+
+  test "T008 (b) granted-connector + ungranted-method rejected the same way with :ungranted_method", context do
+    # Granted, but only for "search" method
+    manifest = %{
+      context.manifest
+      | grants: [
+          %Manifest.Grant{connector: "web_search", methods: ["search"], recipients: nil}
+        ]
+    }
+    :ok = InferenceBroker.register(context.run_token, context.agent_name, manifest)
+
+    req = %{
+      run_token: context.run_token,
+      model: "mock-model",
+      messages: [%{role: "user", content: "delete web"}]
+    }
+
+    provider_fn = fn
+      "mock-model", [%{role: "system"}, %{role: "user"}], _tools, _secret ->
+        %{
+          input_tokens: 10,
+          output_tokens: 10,
+          completion: nil,
+          message: %{
+            "role" => "assistant",
+            "content" => nil,
+            "tool_calls" => [
+              %{
+                "id" => "call_xyz2",
+                "type" => "function",
+                "function" => %{
+                  "name" => "web_search",
+                  "arguments" => "{\"method\": \"delete\"}"
+                }
+              }
+            ]
+          }
+        }
+
+      "mock-model", messages, _tools, _secret ->
+        [_, _, _, tool_msg] = messages
+        assert tool_msg["role"] == "tool"
+        assert tool_msg["content"] =~ "unauthorized method 'delete' for tool 'web_search'"
+
+        %{
+          input_tokens: 10,
+          output_tokens: 10,
+          completion: "I am not allowed to delete the web."
+        }
+    end
+
+    assert {:ok, %{completion: "I am not allowed to delete the web."}} =
+             InferenceBroker.complete(req,
+               now: context.now,
+               provider_fn: provider_fn,
+               prices: context.prices
+             )
+  end
+
+  test "T008 (c) a 2-grant manifest injects one declaration per grant and rejects per-call", context do
+    manifest = %{
+      context.manifest
+      | grants: [
+          %Manifest.Grant{connector: "web_search", methods: ["search"], recipients: nil},
+          %Manifest.Grant{connector: "discord_notify", methods: ["notify"], recipients: nil}
+        ],
+        spend: %AgentOS.Manifest.Spend{cap: 10_000, window: :daily, on_breach: :kill}
+    }
+    :ok = InferenceBroker.register(context.run_token, context.agent_name, manifest)
+
+    req = %{
+      run_token: context.run_token,
+      model: "mock-model",
+      messages: [%{role: "user", content: "do stuff"}]
+    }
+
+    provider_fn = fn
+      "mock-model", messages, tools, _secret ->
+        # Tools should have two declarations
+        assert length(tools) == 2
+        assert Enum.any?(tools, fn t -> t["function"]["name"] == "web_search" end)
+        assert Enum.any?(tools, fn t -> t["function"]["name"] == "discord_notify" end)
+
+        if length(messages) == 2 do
+          %{
+            input_tokens: 0,
+            output_tokens: 0,
+            completion: nil,
+            message: %{
+              "role" => "assistant",
+              "content" => nil,
+              "tool_calls" => [
+                %{
+                  "id" => "call_ok",
+                  "type" => "function",
+                  "function" => %{
+                    "name" => "web_search",
+                    "arguments" => "{\"query\": \"test\"}"
+                  }
+                },
+                %{
+                  "id" => "call_bad",
+                  "type" => "function",
+                  "function" => %{
+                    "name" => "unknown_tool",
+                    "arguments" => "{}"
+                  }
+                }
+              ]
+            }
+          }
+        else
+          # It should handle the rejection per-call
+          [_, _, _, ok_tool_msg, bad_tool_msg] = messages
+          assert ok_tool_msg["content"] =~ "Search results for 'test'"
+          assert bad_tool_msg["content"] =~ "unauthorized tool 'unknown_tool'"
+          
+          %{
+            input_tokens: 0,
+            output_tokens: 0,
+            completion: "Done."
+          }
+        end
+    end
+
+    assert {:ok, %{completion: "Done."}} =
+             InferenceBroker.complete(req,
+               now: context.now,
+               provider_fn: provider_fn,
+               prices: context.prices
+             )
+  end
+
+  test "T008 (d) build_tools_list raises when a granted connector has missing tool_declaration", context do
+    manifest = %{
+      context.manifest
+      | grants: [%Manifest.Grant{connector: "missing_declaration", methods: nil, recipients: nil}]
+    }
+    :ok = InferenceBroker.register(context.run_token, context.agent_name, manifest)
+
+    req = %{
+      run_token: context.run_token,
+      model: "mock-model",
+      messages: [%{role: "user", content: "read mail"}]
+    }
+
+    assert_raise ArgumentError, ~r/unknown/, fn ->
+      InferenceBroker.complete(req,
+        now: context.now,
+        provider_fn: fn _, _, _, _ -> %{} end,
+        prices: context.prices
+      )
+    end
+  end
+
+  test "T018 [US3] in :record mode a granted call is not executed, returns synthetic tool message, appends to transcript, and charges no connector cost", context do
+    manifest = %{
+      context.manifest
+      | grants: [%Manifest.Grant{connector: "web_search", methods: nil, recipients: nil}],
+        spend: %AgentOS.Manifest.Spend{cap: 5000, window: :daily, on_breach: :kill}
+    }
+
+    # Register in :record mode
+    :ok = InferenceBroker.register(context.run_token, context.agent_name, manifest, :record)
+
+    req = %{
+      run_token: context.run_token,
+      model: "mock-model",
+      messages: [
+        %{
+          role: "user",
+          content: "Search the web"
+        }
+      ]
+    }
+
+    provider_fn = fn _model, messages, _secret ->
+      if length(messages) == 2 do
+        %{
+          input_tokens: 10,
+          output_tokens: 10,
+          message: %{
+            "role" => "assistant",
+            "content" => nil,
+            "tool_calls" => [
+              %{
+                "id" => "call_ok",
+                "type" => "function",
+                "function" => %{
+                  "name" => "web_search",
+                  "arguments" => "{\"query\": \"test\"}"
+                }
+              }
+            ]
+          },
+          completion: ""
+        }
+      else
+        [_, _, _, tool_msg] = messages
+        assert tool_msg["content"] == "{\"status\":\"recorded\"}"
+        %{
+          input_tokens: 10,
+          output_tokens: 10,
+          completion: "Done."
+        }
+      end
+    end
+
+    # Clean the transcript first
+    AgentOS.ActionTranscript.clear(context.run_token)
+
+    assert {:ok, %{completion: "Done."}} =
+             InferenceBroker.complete(req,
+               now: context.now,
+               provider_fn: provider_fn,
+               prices: context.prices
+             )
+
+    # Transcript should have a granted entry
+    transcript = AgentOS.ActionTranscript.read(context.run_token)
+    assert length(transcript.entries) == 1
+    entry = hd(transcript.entries)
+    assert entry.kind == :granted
+    assert entry.connector == "web_search"
+    assert entry.result == %{"status" => "recorded"}
+
+    # Spend ledger should only contain inference cost, no connector cost.
+    # LLM runs:
+    # 1. 10 in, 10 out -> 100 + 300 = 400
+    # 2. 10 in, 10 out -> 100 + 300 = 400
+    # Total spend = 800 micro-dollars.
+    ledger = AgentOS.StateStore.snapshot("spend_ledger")
+    assert ledger[context.agent_name].spent == 800
+  end
+
+  describe "US4: Model Identity is Substrate Policy" do
+    test "T023 with effective_model set, bogus request model is ignored (SC-006)", context do
+      # Register with an effective_model
+      :ok = InferenceBroker.register(context.run_token, context.agent_name, context.manifest, :live, "mock-model")
+
+      req = %{
+        run_token: context.run_token,
+        model: "unpriced-model-claimed-by-agent",
+        messages: [%{role: "user", content: "hello"}]
+      }
+
+      provider_fn = fn model, _messages, _secret ->
+        # Verify the provider was called with the effective_model, not the requested one
+        assert model == "mock-model"
+        %{input_tokens: 10, output_tokens: 10, completion: "effective model used"}
+      end
+
+      # Since effective_model is "mock-model" which is priced, this should succeed without :unpriced_model error
+      assert {:ok, %{completion: "effective model used"}} =
+               InferenceBroker.complete(req,
+                 now: context.now,
+                 provider_fn: provider_fn,
+                 prices: context.prices
+               )
+
+      # Cost should be correctly metered based on "mock-model" (10 in + 10 out = 400 micro-dollars)
+      ledger = AgentOS.StateStore.snapshot("spend_ledger")
+      assert ledger[context.agent_name].spent == 400
+    end
   end
 
   test "T014 (c) spend metering: tool cost is metered and spend cap limits apply", context do
@@ -662,7 +949,7 @@ defmodule AgentOS.InferenceBrokerTest do
     end)
 
     provider_fn = fn
-      "mock-model", [%{role: "user"}], _tools, _secret ->
+      "mock-model", [%{role: "system"}, %{role: "user"}], _tools, _secret ->
         %{
           input_tokens: 10,
           output_tokens: 10,
@@ -684,7 +971,7 @@ defmodule AgentOS.InferenceBrokerTest do
         }
 
       "mock-model", messages, _tools, _secret ->
-        [_, _, tool_msg] = messages
+        [_, _, _, tool_msg] = messages
         assert tool_msg["role"] == "tool"
         assert tool_msg["content"] =~ "exception" or tool_msg["content"] =~ "WebSearch exploded!"
 

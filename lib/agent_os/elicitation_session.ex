@@ -186,6 +186,10 @@ defmodule AgentOS.ElicitationSession do
               "dollar_cap" => session.spec_draft.spend_limits.dollar_cap,
               "token_limit" => session.spec_draft.spend_limits.token_limit
             },
+            "triggers" => Enum.map(session.spec_draft.triggers, fn t ->
+              t_map = Map.new(t, fn {k, v} -> {to_string(k), v} end)
+              Map.put(t_map, "type", to_string(t.type))
+            end),
             "confirmed" => true
           },
           pretty: true

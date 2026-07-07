@@ -15,10 +15,43 @@ defmodule AgentOS.Connector.FileWrite do
       requires_deploy_consent?: true,
       requires_runtime_approval?: false,
       credential: nil,
-      cost: 0
+      cost: 0,
+      tool_declaration: %{
+        "type" => "function",
+        "function" => %{
+          "name" => "file_write",
+          "description" => "Write to a bound file on the file system.",
+          "parameters" => %{
+            "type" => "object",
+            "properties" => %{
+              "content" => %{
+                "type" => "string",
+                "description" => "The content to write to the file."
+              }
+            },
+            "required" => ["content"]
+          }
+        }
+      }
     }
   end
+  @impl AgentOS.Connector
+  def scope(boundaries) do
+    path =
+      case Map.get(boundaries, :target_locations, []) do
+        [first | _] -> first
+        _ -> nil
+      end
 
+    %Grant{
+      connector: "file_write",
+      recipients: nil,
+      methods: nil,
+      handle: "priorities_doc",
+      namespace: nil,
+      path: path
+    }
+  end
   @impl AgentOS.Connector
   def render(%Grant{path: path}) do
     "[EXTERNAL] WRITE DOCUMENT AT #{path}"

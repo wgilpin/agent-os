@@ -5,7 +5,7 @@ defmodule AgentOS.Manifest.Projection do
 
   alias AgentOS.ElicitedSpec
   alias AgentOS.Manifest
-  alias AgentOS.Manifest.Grant
+
   alias AgentOS.Manifest.Spend
   alias AgentOS.Connector
 
@@ -42,7 +42,7 @@ defmodule AgentOS.Manifest.Projection do
             grants: grants,
             spend: spend,
             mounts: [],
-            triggers: []
+            triggers: spec.triggers || []
           }
 
           {:ok, manifest}
@@ -77,13 +77,54 @@ defmodule AgentOS.Manifest.Projection do
             lines
           end
 
+        lines =
+          if grant.handle do
+            lines ++ ["    handle: #{inspect(grant.handle)}"]
+          else
+            lines
+          end
+
+        lines =
+          if grant.namespace do
+            lines ++ ["    namespace: #{inspect(grant.namespace)}"]
+          else
+            lines
+          end
+
+        lines =
+          if grant.path do
+            lines ++ ["    path: #{inspect(grant.path)}"]
+          else
+            lines
+          end
+
         Enum.join(lines, "\n")
       end)
       |> Enum.join("\n")
 
+    triggers_yaml =
+      if manifest.triggers == [] or is_nil(manifest.triggers) do
+        "[]"
+      else
+        "\n" <>
+          (manifest.triggers
+           |> Enum.map(fn t ->
+             case Map.get(t, :type) || Map.get(t, "type") do
+               :time -> "  - type: time\n    at: \"#{t.at}\""
+               :event -> "  - type: event\n    name: \"#{t.name}\""
+               :message -> "  - type: message"
+               "time" -> "  - type: time\n    at: \"#{Map.get(t, :at) || Map.get(t, "at")}\""
+               "event" -> "  - type: event\n    name: \"#{Map.get(t, :name) || Map.get(t, "name")}\""
+               "message" -> "  - type: message"
+             end
+           end)
+           |> Enum.join("\n"))
+      end
+
     """
     ---
     purpose: #{inspect(manifest.purpose)}
+    triggers: #{triggers_yaml}
     grants:
     #{grants_yaml}
     spend:

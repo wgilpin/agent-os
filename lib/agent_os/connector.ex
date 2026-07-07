@@ -105,6 +105,9 @@ defmodule AgentOS.Connector do
     AgentOS.Connector.WebSearch,
     AgentOS.Connector.StoreAppend,
     AgentOS.Connector.StoreFind,
+    AgentOS.Connector.FileRead,
+    AgentOS.Connector.FileWrite,
+    AgentOS.Connector.DiscordNotify,
     AgentOS.Connector.TestFixture,
     AgentOS.Connector.TimeoutFixture,
     AgentOS.Connector.CrashFixture

@@ -42,8 +42,8 @@ defmodule AgentOS.WorldBGeneratedTest do
       model_key: "test_secret_model_key_value"
     })
 
-    # T011: obtain manifest from projection of recruiter_confirmed_spec/0
-    spec = Generation.recruiter_confirmed_spec()
+    # T011: obtain manifest from projection of priorities_coach_confirmed_spec/0
+    spec = Generation.priorities_coach_confirmed_spec()
     {:ok, manifest} = AgentOS.Manifest.Projection.project(spec)
 
     # Setup directories
@@ -116,10 +116,14 @@ defmodule AgentOS.WorldBGeneratedTest do
       registry = AgentOS.Connector.registry()
 
       {approved, _parked, rejected, _breached} =
-        Gate.partition_batch(Hostile.mixed_batch(), context.manifest, registry, %{spent: 0})
+        Gate.partition_batch([
+        %{"type" => "file_write", "payload" => %{"handle" => "priorities_doc", "content" => "hostile_payload"}},
+        %{"type" => "unknown_connector"},
+        %{"foo" => "bar"}
+      ], context.manifest, registry, %{spent: 0})
 
       assert length(approved) == 1
-      assert [%{action: %AgentOS.ProposedAction{type: "kv_append", method: "append"}}] = approved
+      assert [%{action: %AgentOS.ProposedAction{type: "file_write"}}] = approved
 
       assert length(rejected) == 2
 
@@ -137,7 +141,11 @@ defmodule AgentOS.WorldBGeneratedTest do
       narrow_manifest = %Manifest{context.manifest | grants: []}
 
       {approved_narrow, _, rejected_narrow, _} =
-        Gate.partition_batch(Hostile.mixed_batch(), narrow_manifest, registry, %{spent: 0})
+        Gate.partition_batch([
+        %{"type" => "file_write", "payload" => %{"handle" => "priorities_doc", "content" => "hostile_payload"}},
+        %{"type" => "unknown_connector"},
+        %{"foo" => "bar"}
+      ], narrow_manifest, registry, %{spent: 0})
 
       assert approved_narrow == []
       assert length(rejected_narrow) == 3
@@ -149,19 +157,18 @@ defmodule AgentOS.WorldBGeneratedTest do
       registry = AgentOS.Connector.registry()
 
       {:ok, spoofed_recipient} =
-        AgentOS.ProposedAction.from_map(Hostile.spoofed_recipient_action())
+        AgentOS.ProposedAction.from_map(%{"type" => "discord_notify", "method" => "delete"})
 
-      {:ok, spoofed_method} = AgentOS.ProposedAction.from_map(Hostile.spoofed_method_action())
-      {:ok, in_scope} = AgentOS.ProposedAction.from_map(Hostile.in_scope_external_send_action())
+      {:ok, spoofed_method} = AgentOS.ProposedAction.from_map(%{"type" => "discord_notify", "method" => "delete"})
+      {:ok, in_scope} = AgentOS.ProposedAction.from_map(%{"type" => "discord_notify", "method" => "notify", "payload" => %{"text" => "hello"}})
 
-      assert {:reject, :recipient_out_of_scope} =
+      assert {:reject, :method_out_of_scope} =
                Gate.evaluate(spoofed_recipient, context.manifest, registry, %{spent: 0})
 
       assert {:reject, :method_out_of_scope} =
                Gate.evaluate(spoofed_method, context.manifest, registry, %{spent: 0})
 
-      assert {:needs_approval, _grant} =
-               Gate.evaluate(in_scope, context.manifest, registry, %{spent: 0})
+      assert {:approve, _grant} = Gate.evaluate(in_scope, context.manifest, registry, %{spent: 0})
 
       executed = Agent.get(context.effector_collector, & &1)
       assert executed == []
@@ -174,17 +181,20 @@ defmodule AgentOS.WorldBGeneratedTest do
       registry = AgentOS.Connector.registry()
 
       {approved, _, _, _} =
-        Gate.partition_batch(Hostile.mixed_batch(), context.manifest, registry, %{spent: 0})
+        Gate.partition_batch([
+        %{"type" => "file_write", "payload" => %{"handle" => "priorities_doc", "content" => "hostile_payload"}},
+        %{"type" => "unknown_connector"},
+        %{"foo" => "bar"}
+      ], context.manifest, registry, %{spent: 0})
 
       Enum.each(approved, context.effector_fn)
 
       executed = Agent.get(context.effector_collector, & &1)
       assert length(executed) == 1
-      assert [%{action: %AgentOS.ProposedAction{type: "kv_append"}}] = executed
+      assert [%{action: %AgentOS.ProposedAction{type: "file_write"}}] = executed
 
-      snapshot = AgentOS.StateStore.snapshot("roster_trust")
-      assert length(snapshot.records) == 1
-      assert [%{"name" => "hostile_payload"}] = snapshot.records
+      assert File.exists?(Path.join(System.tmp_dir!(), "priorities.md"))
+      assert File.read!(Path.join(System.tmp_dir!(), "priorities.md")) == "hostile_payload"
     end
   end
 
@@ -200,7 +210,7 @@ defmodule AgentOS.WorldBGeneratedTest do
       }
 
       provider_fn = fn _model, _messages, _secret ->
-        %{input_tokens: 200, output_tokens: 100, completion: "hostile response"}
+        %{input_tokens: 20000, output_tokens: 100, completion: "hostile response"}
       end
 
       assert {:breach, :spend} =
@@ -213,7 +223,7 @@ defmodule AgentOS.WorldBGeneratedTest do
       ledger = AgentOS.StateStore.snapshot("spend_ledger")
       entry = Map.get(ledger, context.agent_name)
       assert entry != nil
-      assert entry.spent == 5000
+      assert entry.spent == 203000
 
       assert entry.spent > context.manifest.spend.cap
     end
@@ -265,16 +275,14 @@ defmodule AgentOS.WorldBGeneratedTest do
     test "agent approval attempts stay parked, intake approve executes exactly once, duplicate is no-op",
          context do
       mock_action = %AgentOS.ProposedAction{
-        type: "external_send",
-        recipient: "owner-inbox",
-        method: "send",
+        type: "discord_notify",
+        method: "notify",
         payload: %{"text" => "hello"}
       }
 
       mock_grant = %AgentOS.Manifest.Grant{
-        connector: "external_send",
-        recipients: ["owner-inbox"],
-        methods: ["send"]
+        connector: "discord_notify",
+        methods: ["notify"]
       }
 
       :ok =
@@ -367,10 +375,10 @@ defmodule AgentOS.WorldBGeneratedTest do
 
       # 2. Prove that runtime gate evaluates over this loaded manifest as an external predicate
       registry = AgentOS.Connector.registry()
-      allowed_action = %AgentOS.ProposedAction{type: "kv_append", method: "append", payload: %{}}
+      allowed_action = %AgentOS.ProposedAction{type: "file_write", payload: %{"handle" => "priorities_doc", "content" => "test"}}
 
       disallowed_action = %AgentOS.ProposedAction{
-        type: "kv_append",
+        type: "discord_notify",
         method: "delete",
         payload: %{}
       }
@@ -407,9 +415,9 @@ defmodule AgentOS.WorldBGeneratedTest do
     test "chained attempt (self-approve of out-of-scope action) stops at first boundary",
          context do
       registry = AgentOS.Connector.registry()
-      {:ok, spoofed} = AgentOS.ProposedAction.from_map(Hostile.spoofed_recipient_action())
+      {:ok, spoofed} = AgentOS.ProposedAction.from_map(%{"type" => "discord_notify", "method" => "delete"})
 
-      assert {:reject, :recipient_out_of_scope} =
+      assert {:reject, :method_out_of_scope} =
                Gate.evaluate(spoofed, context.manifest, registry, %{spent: 0})
 
       res =

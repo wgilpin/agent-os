@@ -42,6 +42,8 @@ defmodule AgentOS.Pipeline.OrchestratorTest do
     end)
 
     # Base options passed to the run function
+    Application.put_env(:agent_os, :agent_runtime_model, "mock-model")
+
     base_opts = [
       spec_dir: dirs.spec_dir,
       manifest_dir: dirs.manifest_dir,
@@ -57,7 +59,7 @@ defmodule AgentOS.Pipeline.OrchestratorTest do
 
   # A dynamic provider function that handles all pipeline stages using stubs
   defp mock_provider(_model, messages, _secret, overrides \\ %{}) do
-    joined_messages = Enum.map_join(messages, "\n", & &1.content)
+    joined_messages = Enum.map_join(messages, "\n", fn msg -> Map.get(msg, :content) || Map.get(msg, "content") || "" end)
 
     cond do
       joined_messages =~ "code-synthesis" or joined_messages =~ "Output exactly two files" ->
@@ -131,6 +133,34 @@ defmodule AgentOS.Pipeline.OrchestratorTest do
   end
 
   describe "US1: Confirmed spec -> deployed novel agent (T005, T006, T007)" do
+    test "US1: Priorities Coach Generation (T004-T007)", ctx do
+      spec = Generation.priorities_coach_confirmed_spec()
+      provider_fn = fn model, msgs, secret -> mock_provider(model, msgs, secret) end
+      opts = Keyword.put(ctx.base_opts, :provider_fn, provider_fn)
+
+      assert {:ok, run} = Orchestrator.run(spec, :dangerously_skip_review, opts)
+
+      assert run.outcome == :deployed
+      assert run.judge_verdict == :pass
+      assert run.security_verdict == :pass
+
+      # Verify manifest contents
+      manifest_path = Path.join([ctx.dirs.manifest_dir, "priorities_coach.md"])
+      assert File.exists?(manifest_path)
+      {:ok, manifest} = AgentOS.Manifest.load(manifest_path)
+
+      # Check triggers
+      assert Enum.any?(manifest.triggers, fn t -> t.type == :message end)
+      assert Enum.any?(manifest.triggers, fn t -> t.type == :time and t.at == "08:00" end)
+      
+      # Check spend cap
+      assert manifest.spend.cap == 100_000
+
+      # Check grants
+      assert Enum.any?(manifest.grants, fn g -> g.connector == "file_read" and not is_nil(g.path) end)
+      assert Enum.any?(manifest.grants, fn g -> g.connector == "file_write" and not is_nil(g.path) end)
+      assert Enum.any?(manifest.grants, fn g -> g.connector == "discord_notify" end)
+    end
     test "T005 Green-path execution with always_review", ctx do
       spec = Generation.recruiter_confirmed_spec()
       provider_fn = fn model, msgs, secret -> mock_provider(model, msgs, secret) end

@@ -26,6 +26,7 @@ defmodule AgentOS.Pipeline.Stage3Test do
     start_supervised!({Registry, keys: :unique, name: AgentOS.StateStoreRegistry})
     start_supervised!({StateStore, name: "spend_ledger", path: spend_path, initial: %{}})
     start_supervised!({StateStore, name: "judge_results", path: judge_path, initial: %{}})
+    start_supervised!({StateStore, name: "action_transcript", path: Path.join(tmp, "transcript_#{uniq}.db"), initial: %{}})
     start_supervised!(AgentOS.CredentialProxy)
     start_supervised!(InferenceBroker)
 
@@ -40,7 +41,8 @@ defmodule AgentOS.Pipeline.Stage3Test do
     }
 
     token = "judge_run_token"
-    :ok = InferenceBroker.register(token, "recruiter_agent", manifest)
+    Application.put_env(:agent_os, :agent_runtime_model, "mock-model")
+    :ok = InferenceBroker.register(token, "recruiter_agent", manifest, :live, "mock-model")
 
     base_opts = [
       run_token: token,
@@ -153,6 +155,47 @@ defmodule AgentOS.Pipeline.Stage3Test do
     end
   end
 
+  describe "US5: Judge realigned (T027)" do
+    test "synthesis prompt references refusal contract and instructs against exact-string checks", ctx do
+      opts =
+        Keyword.put(ctx.base_opts, :provider_fn, fn _model, messages, _secret ->
+          system = Enum.map_join(messages, "\n", &(&1.content || ""))
+          send(self(), {:system_prompt, system})
+          %{input_tokens: 5, output_tokens: 5, completion: tests_json()}
+        end)
+
+      assert {:ok, _} = Stage3.generate("recruiter_agent", ctx.manifest, opts)
+
+      assert_received {:system_prompt, system}
+      assert system =~ "strict REFUSAL CONTRACT"
+      assert system =~ "MUST assert this compliant refusal"
+      assert system =~ "NEVER instruct a test whose pass condition requires the agent to output a specific exact string"
+    end
+
+    test "eval prompt treats substrate rejections as facts and scores purpose-fit", ctx do
+      write_spec_file(ctx.spec_dir, "recruiter_agent")
+      runner_fn = fn _name, _input, _opts -> {:ok, %{actions: [], response: "ok"}} end
+
+      opts =
+        ctx.base_opts
+        |> Keyword.put(:runner_fn, runner_fn)
+        |> Keyword.put(
+          :provider_fn,
+          fn _model, messages, _secret ->
+            system = Enum.map_join(messages, "\n", &(&1.content || ""))
+            send(self(), {:system_prompt, system})
+            %{input_tokens: 5, output_tokens: 5, completion: Jason.encode!(%{"verdict" => "pass", "reasoning" => "ok"})}
+          end
+        )
+
+      assert {:ok, _} = Stage3.run("recruiter_agent", ctx.manifest, opts)
+
+      assert_received {:system_prompt, system}
+      assert system =~ "Any actions blocked by the substrate are OBSERVED FACTS"
+      assert system =~ "score semantic purpose-fit and adherence to the refusal contract"
+    end
+  end
+
   describe "US3: run/2 LLM-as-judge scoring (T013)" do
     setup ctx do
       write_spec_file(ctx.spec_dir, "recruiter_agent")
@@ -171,7 +214,7 @@ defmodule AgentOS.Pipeline.Stage3Test do
         )
 
       assert {:ok, %Verdict{status: :pass, disclaimer: disc}} =
-               Stage3.run("recruiter_agent", opts)
+               Stage3.run("recruiter_agent", ctx.manifest, opts)
 
       assert disc =~ "CODE-MATCHES-MANIFEST"
 
@@ -194,10 +237,143 @@ defmodule AgentOS.Pipeline.Stage3Test do
         )
 
       assert {:ok, %Verdict{status: :fail, reasoning: reason}} =
-               Stage3.run("recruiter_agent", opts)
+               Stage3.run("recruiter_agent", ctx.manifest, opts)
 
       assert reason =~ "external_send"
       assert StateStore.snapshot("judge_results")["recruiter_agent"].status == :fail
+    end
+
+    test "boundary-probe refusal yields :pass (T014)", ctx do
+      runner_fn = fn _name, _input, _opts -> 
+        # Simulated refusal on out-of-scope input
+        {:ok, %{actions: [], response: "I cannot do that.", outcome: "refused", reason: "Out of scope"}}
+      end
+
+      opts =
+        ctx.base_opts
+        |> Keyword.put(:runner_fn, runner_fn)
+        |> Keyword.put(
+          :provider_fn,
+          provider_returning(Jason.encode!(%{"verdict" => "pass", "reasoning" => "properly refused boundary probe"}))
+        )
+
+      assert {:ok, %Verdict{status: :pass}} = Stage3.run("recruiter_agent", ctx.manifest, opts)
+    end
+
+    test "happy-path refusal yields :fail (T014)", ctx do
+      runner_fn = fn _name, _input, _opts -> 
+        # Simulated refusal on happy path input
+        {:ok, %{actions: [], response: "I refuse.", outcome: "refused", reason: "Because I want to"}}
+      end
+
+      opts =
+        ctx.base_opts
+        |> Keyword.put(:runner_fn, runner_fn)
+        |> Keyword.put(
+          :provider_fn,
+          provider_returning(Jason.encode!(%{"verdict" => "fail", "reasoning" => "refused happy path"}))
+        )
+
+      assert {:ok, %Verdict{status: :fail}} = Stage3.run("recruiter_agent", ctx.manifest, opts)
+    end
+
+    test "abnormal termination yields :malfunction (T014)", ctx do
+      # Runner returns something unparseable or crashed
+      runner_fn = fn _name, _input, _opts -> {:error, :abnormal_exit} end
+
+      opts =
+        ctx.base_opts
+        |> Keyword.put(:runner_fn, runner_fn)
+
+      assert {:ok, %Verdict{status: :malfunction, reasoning: reason}} = 
+               Stage3.run("recruiter_agent", ctx.manifest, opts)
+      
+      assert reason =~ "Agent execution failed"
+      assert reason =~ "abnormal_exit"
+    end
+
+    test "record-mode uses the action transcript for observed_actions (T020)", ctx do
+      runner_fn = fn _name, _input, opts ->
+        run_token = Keyword.fetch!(opts, :run_token)
+        AgentOS.ActionTranscript.append(run_token, AgentOS.ActionTranscript.Entry.new(%{
+           kind: :granted,
+           connector: "discord_notify",
+           method: nil,
+           arguments: %{},
+           result: %{"status" => "recorded"},
+           reason_code: nil
+        }))
+        {:ok, %{actions: AgentOS.ActionTranscript.read(run_token).entries, response: "ok"}}
+      end
+
+      provider_fn = fn _model, messages, _secret ->
+        sys_msg = Enum.find(messages, & &1.role == "user")
+        assert sys_msg.content =~ "discord_notify"
+        assert sys_msg.content =~ "status"
+        %{input_tokens: 5, output_tokens: 5, completion: Jason.encode!(%{"verdict" => "pass", "reasoning" => "looks good"})}
+      end
+
+      opts =
+        ctx.base_opts
+        |> Keyword.put(:runner_fn, runner_fn)
+        |> Keyword.put(:provider_fn, provider_fn)
+
+      assert {:ok, %Verdict{status: :pass}} = Stage3.run("recruiter_agent", ctx.manifest, opts)
+    end
+
+    test "record-mode evaluation incurs zero external deliveries across the suite (T022)", ctx do
+      test_pid = self()
+      Application.put_env(:agent_os, :discord_notify_transport, fn _url, _body ->
+        send(test_pid, :discord_called)
+        {:ok, %Req.Response{status: 204}}
+      end)
+      
+      on_exit(fn -> Application.delete_env(:agent_os, :discord_notify_transport) end)
+
+      manifest = %{ctx.manifest | grants: [%Manifest.Grant{connector: "discord_notify", methods: nil, recipients: nil}]}
+
+      runner_fn = fn _name, _input, opts ->
+        run_token = Keyword.fetch!(opts, :run_token)
+
+        provider_fn = fn _model, messages, _secret ->
+          if length(messages) == 0 do
+            %{
+               input_tokens: 10,
+               output_tokens: 10,
+               message: %{
+                 "role" => "assistant",
+                 "content" => nil,
+                 "tool_calls" => [
+                   %{
+                     "id" => "call_test",
+                     "type" => "function",
+                     "function" => %{
+                       "name" => "discord_notify",
+                       "arguments" => "{\"text\": \"hello\"}"
+                     }
+                   }
+                 ]
+               },
+               completion: ""
+             }
+          else
+            %{input_tokens: 10, output_tokens: 10, completion: "Done"}
+          end
+        end
+        
+        req = %{run_token: run_token, model: "mock-model", messages: []}
+        assert {:ok, _} = AgentOS.InferenceBroker.complete(req, provider_fn: provider_fn, now: ctx.base_opts[:now], prices: ctx.base_opts[:prices])
+
+        {:ok, %{actions: AgentOS.ActionTranscript.read(run_token).entries, response: "ok"}}
+      end
+      
+      opts =
+        ctx.base_opts
+        |> Keyword.put(:runner_fn, runner_fn)
+        |> Keyword.put(:provider_fn, provider_returning(Jason.encode!(%{"verdict" => "pass", "reasoning" => "isolated!"})))
+        
+      assert {:ok, %Verdict{status: :pass}} = Stage3.run("recruiter_agent", manifest, opts)
+      refute_receive :discord_called, 50
     end
   end
 
@@ -207,7 +383,7 @@ defmodule AgentOS.Pipeline.Stage3Test do
       opts = Keyword.delete(ctx.base_opts, :run_token)
 
       assert {:ok, %Verdict{status: :error, reasoning: reason}} =
-               Stage3.run("recruiter_agent", opts)
+               Stage3.run("recruiter_agent", ctx.manifest, opts)
 
       assert reason =~ "run token"
     end
@@ -224,28 +400,13 @@ defmodule AgentOS.Pipeline.Stage3Test do
         |> Keyword.put(:runner_fn, runner_fn)
         |> Keyword.put(:provider_fn, bad_provider)
 
-      assert {:ok, %Verdict{status: :error}} = Stage3.run("recruiter_agent", opts)
-    end
-
-    test "agent execution failure fails safe to an :error verdict", ctx do
-      write_spec_file(ctx.spec_dir, "recruiter_agent")
-      runner_fn = fn _name, _input, _opts -> {:error, :timeout} end
-
-      opts =
-        ctx.base_opts
-        |> Keyword.put(:runner_fn, runner_fn)
-        |> Keyword.put(:provider_fn, provider_returning("unused"))
-
-      assert {:ok, %Verdict{status: :error, reasoning: reason}} =
-               Stage3.run("recruiter_agent", opts)
-
-      assert reason =~ "execution failed"
+      assert {:ok, %Verdict{status: :error}} = Stage3.run("recruiter_agent", ctx.manifest, opts)
     end
 
     test "missing judge spec fails safe to an :error verdict", ctx do
       opts = ctx.base_opts
 
-      assert {:ok, %Verdict{status: :error, reasoning: reason}} = Stage3.run("absent_agent", opts)
+      assert {:ok, %Verdict{status: :error, reasoning: reason}} = Stage3.run("absent_agent", ctx.manifest, opts)
       assert reason =~ "Could not load judge spec"
     end
   end

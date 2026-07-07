@@ -76,7 +76,7 @@ defmodule AgentOS.Pipeline.Stage4 do
   alias AgentOS.Pipeline.Stage4.{GeneratedFile, AgentBody}
   alias AgentOS.Manifest
   alias AgentOS.InferenceBroker
-  alias AgentOS.CapabilityRender
+
 
   # Opts forwarded verbatim to InferenceBroker.complete/2 (deterministic-test seams).
   @broker_opt_keys [:provider_fn, :prices, :now]
@@ -134,6 +134,7 @@ defmodule AgentOS.Pipeline.Stage4 do
 
   def generate(agent_name, %Manifest{} = manifest, opts) when is_binary(agent_name) do
     with {:ok, run_token} <- require_token(opts),
+         :ok <- guard_tool_declarations(manifest),
          request = %{
            run_token: run_token,
            model: codegen_model(opts),
@@ -206,8 +207,6 @@ defmodule AgentOS.Pipeline.Stage4 do
   # "what this agent may do" can never diverge from the actual grants, while never
   # exposing the raw manifest struct to anything downstream of this prompt-build step.
   defp synthesis_messages(agent_name, %Manifest{} = manifest) do
-    grants = CapabilityRender.render(manifest)
-
     system = """
     You are a code-synthesis agent inside an OS that authors its own agents. Given an
     agent's name, purpose, and a natural-language description of its capability grants,
@@ -216,11 +215,12 @@ defmodule AgentOS.Pipeline.Stage4 do
     to this purpose.
 
     Output exactly two files, matching this existing port-workload contract:
-    - "main.py": reads ONE line of JSON from stdin, validates it against a Pydantic
-      model imported from "models.py", reasons over it, and prints a single line of
-      JSON to stdout containing a list of typed proposed actions, then exits 0.
-    - "models.py": Pydantic BaseModel classes for the stdin input and the proposed
-      action output.
+    - "main.py": reads ONE line of JSON from stdin, parses it as a generic dictionary
+      (do NOT validate it against a strict Pydantic model so it can handle any dynamic
+      test input), reasons over it, acts through the substrate's native tool-call channel
+      (see below), and prints a single line of JSON to stdout containing a terminal outcome
+      record (an "outcome" string and a "reason" string), then exits 0.
+    - "models.py": Pydantic BaseModel classes for the terminal outcome record ONLY.
 
     If the agent needs inference at runtime, it MUST call back through the substrate's
     InferenceBroker over the existing Unix domain socket, by reproducing this EXACT
@@ -232,13 +232,42 @@ defmodule AgentOS.Pipeline.Stage4 do
     #{@broker_call_reference}
     ```
 
+    The inference broker injects your granted capabilities as native tool declarations and
+    gates every tool call the model makes against the manifest — you neither see nor name any
+    connector, method, or recipient. Let the model act by emitting tool calls; the substrate
+    validates, performs, and records each one for you. Do NOT hand-author a list of proposed
+    effects, do NOT reproduce any tool call as a free-text JSON blob, and do NOT invent your
+    own action schema. After the model is done, terminate with a single-line outcome record.
+
+    ```python
+    model = os.environ.get("AGENT_MODEL", "")
+    response = call_inference_broker(model, messages)
+    # The substrate has already gated, performed, and recorded any tool calls the model made.
+    # Terminate with a single-line outcome record — never a list of proposed effects.
+    print(json.dumps({"outcome": "completed", "reason": "handled via tool channel"}))
+    ```
+
+
     Hard rules:
+    - You must terminate by writing exactly one line of JSON to stdout and exiting 0.
+    - If the input asks for something outside your purpose or grants, you MUST refuse: make no tool calls, print an outcome record with `"outcome"` set to `"refused"` and a short `"reason"`, then exit 0 (e.g. `{"outcome": "refused", "reason": "out of scope"}`). Do NOT crash.
+    - You MUST use `os.environ.get("AGENT_MODEL", "")` exactly for the fallback model. DO NOT change the default fallback string.
     - NEVER read, embed, or hard-code the manifest, any grant detail, a spend cap, a
       credential, or any environment variable other than INFERENCE_SOCKET and RUN_TOKEN.
       The capability description below is context describing the purpose's scope ONLY —
       it is not data to embed in the code.
+    - DO NOT use Literal[...] types for connectors or methods in your Pydantic models.
+      Use generic `str` fields, otherwise you will trigger a security violation for leaking capabilities.
+    - NEVER hardcode the value of the `method` string or `connector` string inside your Python logic
+      (e.g. do not write `method="send_email"` or `provider="gmail"`). You must dynamically extract these
+      strings from the inference response JSON so that your Python code remains completely agnostic to
+      the specific capabilities granted by the OS.
+    - You MUST instruct the inference broker (the LLM) in your system prompt to strictly use the exact `connector_id` and `methods` strings that are listed in its granted capabilities context.
     - NEVER perform a privileged effect directly; only ever PROPOSE actions in the
       stdout JSON for the substrate to validate and perform.
+    - If you encounter an unexpected exception (e.g. KeyError, JSONDecodeError), you MUST exit
+      with a non-zero status code (e.g., `sys.exit(1)`). Do NOT swallow exceptions with a silent
+      `sys.exit(0)`, as this breaks the OS testing harness.
     - Respond with JSON ONLY, of the exact form:
       {"files": [{"path": "main.py", "content": "..."}, {"path": "models.py", "content": "..."}]}
     """
@@ -246,10 +275,6 @@ defmodule AgentOS.Pipeline.Stage4 do
     user = """
     Agent: #{agent_name}
     Purpose: #{manifest.purpose}
-
-    Capability context (describes the scope of what this agent is for; do NOT embed
-    this text or any of these values into the generated code):
-    #{grants}
     """
 
     [
@@ -263,7 +288,14 @@ defmodule AgentOS.Pipeline.Stage4 do
   # Decodes the broker's `{"files": [...]}` completion into typed GeneratedFile structs,
   # rejecting (not raising on) any malformed shape — mirrors Stage3.parse_tests/1.
   defp parse_files(completion) when is_binary(completion) do
-    case Jason.decode(completion) do
+    sanitized =
+      completion
+      |> String.trim()
+      |> String.replace(~r/^```(?:json)?/i, "")
+      |> String.replace(~r/```$/, "")
+      |> String.trim()
+
+    case Jason.decode(sanitized) do
       {:ok, decoded} -> parse_files(decoded)
       {:error, _} -> {:error, :invalid_synthesis_output}
     end
@@ -296,6 +328,21 @@ defmodule AgentOS.Pipeline.Stage4 do
   # Every emitted path must be a bare relative filename ending in .py, with no
   # directory separator and no parent-directory traversal — prevents the synthesis
   # output from ever naming a path outside agents/<agent_name>/.
+  defp guard_tool_declarations(manifest) do
+    registry = AgentOS.Connector.registry()
+
+    Enum.reduce_while(manifest.grants, :ok, fn grant, acc ->
+      case Map.fetch(registry, grant.connector) do
+        {:ok, %{tool_declaration: declaration}} when not is_nil(declaration) ->
+          {:cont, acc}
+
+        _ ->
+          IO.warn("Missing tool_declaration for connector: #{grant.connector}")
+          {:halt, {:error, :missing_tool_declaration}}
+      end
+    end)
+  end
+
   defp guard_path_safety(files) do
     unsafe? =
       Enum.any?(files, fn %GeneratedFile{path: path} ->
@@ -343,14 +390,20 @@ defmodule AgentOS.Pipeline.Stage4 do
           [grant.connector] ++ (grant.recipients || []) ++ (grant.methods || [])
         end)
 
-    leaks_manifest_literal? =
-      Enum.any?(manifest_literals, fn literal ->
+    leaked_literal =
+      Enum.find(manifest_literals, fn literal ->
         literal != "" and String.contains?(joined, literal)
       end)
 
     leaks_credential? = Enum.any?(@credential_patterns, &(joined =~ &1))
 
-    if leaks_manifest_literal? or leaks_credential? do
+    if leaked_literal || leaks_credential? do
+      if leaked_literal do
+        IO.puts("\n\n=== MANIFEST LEAK DETECTED ===")
+        IO.puts("Leaked string: #{inspect(leaked_literal)}")
+        IO.puts("Generated code:\n#{joined}")
+        IO.puts("==============================\n\n")
+      end
       {:error, :manifest_leak_detected}
     else
       :ok

@@ -121,13 +121,17 @@ defmodule AgentOS.RunWorker do
             run_token = Base.encode16(:crypto.strong_rand_bytes(16))
 
             if GenServer.whereis(AgentOS.InferenceBroker) do
-              AgentOS.InferenceBroker.register(run_token, agent_name, manifest)
+              effective_model = Application.get_env(:agent_os, :agent_runtime_model)
+              AgentOS.InferenceBroker.register(run_token, agent_name, manifest, :live, effective_model)
             end
 
             original_run_token = System.get_env("RUN_TOKEN")
             original_inf_socket = System.get_env("INFERENCE_SOCKET")
+            original_agent_model = System.get_env("AGENT_MODEL")
 
             System.put_env("RUN_TOKEN", run_token)
+            effective_model = Application.get_env(:agent_os, :agent_runtime_model)
+            if effective_model, do: System.put_env("AGENT_MODEL", effective_model)
 
             System.put_env(
               "INFERENCE_SOCKET",
@@ -140,11 +144,12 @@ defmodule AgentOS.RunWorker do
               Keyword.update(
                 opts,
                 :env,
-                %{"RUN_TOKEN" => run_token, "INFERENCE_SOCKET" => "/tmp/inference.sock"},
+                %{"RUN_TOKEN" => run_token, "INFERENCE_SOCKET" => "/tmp/inference.sock"} |> (fn env -> if effective_model, do: Map.put(env, "AGENT_MODEL", effective_model), else: env end).(),
                 fn existing_env ->
                   existing_env
                   |> Map.put("RUN_TOKEN", run_token)
                   |> Map.put("INFERENCE_SOCKET", "/tmp/inference.sock")
+                  |> (fn env -> if effective_model, do: Map.put(env, "AGENT_MODEL", effective_model), else: env end).()
                 end
               )
 
@@ -200,6 +205,10 @@ defmodule AgentOS.RunWorker do
             if original_inf_socket,
               do: System.put_env("INFERENCE_SOCKET", original_inf_socket),
               else: System.delete_env("INFERENCE_SOCKET")
+
+            if original_agent_model,
+              do: System.put_env("AGENT_MODEL", original_agent_model),
+              else: System.delete_env("AGENT_MODEL")
 
             if GenServer.whereis(AgentOS.InferenceBroker) do
               AgentOS.InferenceBroker.unregister(run_token)

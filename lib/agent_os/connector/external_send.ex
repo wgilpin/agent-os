@@ -12,7 +12,24 @@ defmodule AgentOS.Connector.ExternalSend do
       requires_deploy_consent?: true,
       requires_runtime_approval?: true,
       credential: :outbound_token,
-      cost: 2000
+      cost: 2000,
+      tool_declaration: %{
+        "type" => "function",
+        "function" => %{
+          "name" => "external_send",
+          "description" => "Send a message out to external recipients.",
+          "parameters" => %{
+            "type" => "object",
+            "properties" => %{
+              "message" => %{
+                "type" => "string",
+                "description" => "The message to send."
+              }
+            },
+            "required" => ["message"]
+          }
+        }
+      }
     }
   end
 

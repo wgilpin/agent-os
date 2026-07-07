@@ -12,7 +12,22 @@ defmodule AgentOS.Connector.KvAppend do
       requires_deploy_consent?: false,
       requires_runtime_approval?: false,
       credential: nil,
-      cost: 0
+      cost: 0,
+      tool_declaration: %{
+        "type" => "function",
+        "function" => %{
+          "name" => "kv_append",
+          "description" => "Append an item to a list in the KV store.",
+          "parameters" => %{
+            "type" => "object",
+            "properties" => %{
+              "key" => %{"type" => "string"},
+              "value" => %{"type" => "string"}
+            },
+            "required" => ["key", "value"]
+          }
+        }
+      }
     }
   end
 

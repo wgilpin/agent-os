@@ -125,12 +125,21 @@ defmodule AgentOS.Pipeline.Orchestrator do
            run
          ) do
       {:ok, run, manifest} ->
-        # Register metered token with InferenceBroker
+        # Register metered token with InferenceBroker under the "orchestrator" agent
+        # so that code generation/testing costs do not drain the agent's runtime budget.
         run_token =
           opts[:run_token] ||
             "run_token_#{agent_name}_#{System.unique_integer([:positive])}"
 
-        :ok = AgentOS.InferenceBroker.register(run_token, agent_name, manifest)
+        orchestrator_manifest = %AgentOS.Manifest{
+          purpose: "Agent OS Pipeline Execution",
+          owner: "system",
+          supervision: "autonomous",
+          grants: [],
+          spend: %AgentOS.Manifest.Spend{cap: 1_000_000_000, window: :daily, on_breach: :kill}
+        }
+
+        :ok = AgentOS.InferenceBroker.register(run_token, "orchestrator", orchestrator_manifest)
 
         try do
           opts_with_token = Keyword.put(opts, :run_token, run_token)
@@ -179,7 +188,7 @@ defmodule AgentOS.Pipeline.Orchestrator do
                fn ->
                  case AgentOS.Pipeline.Stage3.generate(agent_name, manifest, opts) do
                    {:ok, _test_spec} ->
-                     case AgentOS.Pipeline.Stage3.run(agent_name, opts) do
+                     case AgentOS.Pipeline.Stage3.run(agent_name, manifest, opts) do
                        {:ok, verdict} ->
                          if verdict.status == :pass do
                            {:ok, verdict}

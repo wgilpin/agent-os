@@ -1,7 +1,7 @@
 defmodule AgentOS.Connector.GmailDraft do
   @behaviour AgentOS.Connector
 
-  alias AgentOS.ProposedAction
+
   alias AgentOS.Manifest.Grant
 
   @impl AgentOS.Connector
@@ -11,8 +11,24 @@ defmodule AgentOS.Connector.GmailDraft do
       mutating?: true,
       requires_deploy_consent?: false,
       requires_runtime_approval?: false,
-      credential: nil,
-      cost: 0
+      credential: :gmail_oauth_token,
+      cost: 1500,
+      tool_declaration: %{
+        "type" => "function",
+        "function" => %{
+          "name" => "gmail_draft",
+          "description" => "Draft an email using Gmail.",
+          "parameters" => %{
+            "type" => "object",
+            "properties" => %{
+              "to" => %{"type" => "string"},
+              "subject" => %{"type" => "string"},
+              "body" => %{"type" => "string"}
+            },
+            "required" => ["to", "subject", "body"]
+          }
+        }
+      }
     }
   end
 

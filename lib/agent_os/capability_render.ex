@@ -65,30 +65,34 @@ defmodule AgentOS.CapabilityRender do
   def format(entries) do
     lines =
       Enum.map(entries, fn entry ->
-        if String.contains?(entry.phrase, " (") or String.starts_with?(entry.phrase, "[") do
-          "  - #{entry.phrase}"
-        else
-          badge = if entry.danger == :external, do: "[EXTERNAL] ", else: ""
-          deploy_badge = if entry.requires_deploy_consent?, do: "[DEPLOY_CONSENT] ", else: ""
-          runtime_badge = if entry.requires_runtime_approval?, do: "[RUNTIME_APPROVAL] ", else: ""
+        base_line =
+          if String.contains?(entry.phrase, " (") or String.starts_with?(entry.phrase, "[") do
+            "#{entry.phrase}"
+          else
+            badge = if entry.danger == :external, do: "[EXTERNAL] ", else: ""
+            deploy_badge = if entry.requires_deploy_consent?, do: "[DEPLOY_CONSENT] ", else: ""
+            runtime_badge = if entry.requires_runtime_approval?, do: "[RUNTIME_APPROVAL] ", else: ""
 
-          scope_str =
-            cond do
-              entry.recipients && entry.methods ->
-                " (recipients: #{inspect(entry.recipients)}, methods: #{inspect(entry.methods)})"
+            scope_str =
+              cond do
+                entry.recipients && entry.methods ->
+                  " (recipients: #{inspect(entry.recipients)}, methods: #{inspect(entry.methods)})"
 
-              entry.recipients ->
-                " (recipients: #{inspect(entry.recipients)})"
+                entry.recipients ->
+                  " (recipients: #{inspect(entry.recipients)})"
 
-              entry.methods ->
-                " (methods: #{inspect(entry.methods)})"
+                entry.methods ->
+                  " (methods: #{inspect(entry.methods)})"
 
-              true ->
-                ""
-            end
+                true ->
+                  ""
+              end
 
-          "  - #{badge}#{deploy_badge}#{runtime_badge}#{entry.phrase}#{scope_str}"
-        end
+            "#{badge}#{deploy_badge}#{runtime_badge}#{entry.phrase}#{scope_str}"
+          end
+
+        methods_str = if entry.methods, do: inspect(entry.methods), else: "any"
+        "  - #{base_line}\n    -> exact connector_id to use: \"#{entry.connector}\"\n    -> exact methods allowed: #{methods_str}"
       end)
 
     "CAPABILITIES:\n" <> Enum.join(lines, "\n") <> "\n"
