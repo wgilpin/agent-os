@@ -143,7 +143,21 @@ defmodule AgentOS.Pipeline.Orchestrator do
 
         try do
           opts_with_token = Keyword.put(opts, :run_token, run_token)
-          do_pipeline_rest(run, manifest, review_mode, spec_dir, manifest_dir, opts_with_token)
+
+          # Classify the purpose ONCE, between manifest projection and synthesis, under
+          # the orchestrator's uncapped setup token. The typed mode is threaded to both
+          # Stage 4 (synthesis contract) and Stage 3 (judge) via opts, so judge and agent
+          # derive independently from manifest + purpose + one substrate-recorded bit —
+          # co-generation isolation holds (research D5).
+          {:ok, execution_mode} =
+            AgentOS.ExecutionMode.classify(agent_name, manifest, opts_with_token)
+
+          Logger.info(
+            "[Orchestrator] Classified '#{agent_name}' as #{execution_mode.mode} — #{execution_mode.rationale}"
+          )
+
+          opts_with_mode = Keyword.put(opts_with_token, :execution_mode, execution_mode)
+          do_pipeline_rest(run, manifest, review_mode, spec_dir, manifest_dir, opts_with_mode)
         after
           AgentOS.InferenceBroker.unregister(run_token)
         end

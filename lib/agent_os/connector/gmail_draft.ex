@@ -1,7 +1,6 @@
 defmodule AgentOS.Connector.GmailDraft do
   @behaviour AgentOS.Connector
 
-
   alias AgentOS.Manifest.Grant
 
   @impl AgentOS.Connector

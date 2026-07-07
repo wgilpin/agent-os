@@ -35,6 +35,7 @@ defmodule AgentOS.Connector.FileWrite do
       }
     }
   end
+
   @impl AgentOS.Connector
   def scope(boundaries) do
     path =
@@ -52,6 +53,7 @@ defmodule AgentOS.Connector.FileWrite do
       path: path
     }
   end
+
   @impl AgentOS.Connector
   def render(%Grant{path: path}) do
     "[EXTERNAL] WRITE DOCUMENT AT #{path}"

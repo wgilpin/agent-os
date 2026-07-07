@@ -73,7 +73,8 @@ defmodule AgentOS.ActionTranscript do
 
     if mode == :record and entry.kind == :granted do
       if entry.result != %{"status" => "recorded"} do
-        raise ArgumentError, "result for a :record-mode :granted entry MUST be the synthetic success shape"
+        raise ArgumentError,
+              "result for a :record-mode :granted entry MUST be the synthetic success shape"
       end
     end
 

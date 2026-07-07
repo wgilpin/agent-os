@@ -164,14 +164,27 @@ defmodule AgentOS.Pipeline.Stage4Test do
 
     test "rejects manifest with a granted connector missing tool_declaration (T010/T012)", ctx do
       # For example, gmail_read is currently mocked or missing a tool_declaration in tests
-      manifest = %{ctx.manifest | grants: [%AgentOS.Manifest.Grant{connector: "missing_declaration", methods: nil, recipients: nil}]}
-      assert {:error, :missing_tool_declaration} = Stage4.generate("recruiter_agent", manifest, ctx.base_opts)
+      manifest = %{
+        ctx.manifest
+        | grants: [
+            %AgentOS.Manifest.Grant{
+              connector: "missing_declaration",
+              methods: nil,
+              recipients: nil
+            }
+          ]
+      }
+
+      assert {:error, :missing_tool_declaration} =
+               Stage4.generate("recruiter_agent", manifest, ctx.base_opts)
     end
 
     test "rejects synthesis output containing manifest literals (T012)", ctx do
       # Manifest grant literal "gmail_draft"
       leaking_main = String.replace(valid_main_py(), "kv_append", "gmail_draft")
-      opts = Keyword.put(ctx.base_opts, :provider_fn, provider_returning(files_json(leaking_main)))
+
+      opts =
+        Keyword.put(ctx.base_opts, :provider_fn, provider_returning(files_json(leaking_main)))
 
       assert {:error, :manifest_leak_detected} =
                Stage4.generate("recruiter_agent", ctx.manifest, opts)
@@ -208,17 +221,17 @@ defmodule AgentOS.Pipeline.Stage4Test do
       opts =
         Keyword.put(ctx.base_opts, :provider_fn, fn _model, messages, _secret ->
           system_prompt = Enum.map_join(messages, "\n", &(&1.content || ""))
-          
+
           # The system prompt MUST NOT ask the model to produce free text {"actions": [...]}
           send(self(), {:system_prompt, system_prompt})
-          
+
           %{input_tokens: 5, output_tokens: 5, completion: files_json()}
         end)
 
       assert {:ok, _} = Stage4.generate("recruiter_agent", ctx.manifest, opts)
-      
+
       assert_received {:system_prompt, system_prompt}
-      
+
       refute system_prompt =~ "free-text markdown block or JSON blob"
       refute system_prompt =~ "return its actions in a free-text"
       refute system_prompt =~ "\"actions\":"
@@ -233,9 +246,9 @@ defmodule AgentOS.Pipeline.Stage4Test do
         end)
 
       assert {:ok, _} = Stage4.generate("recruiter_agent", ctx.manifest, opts)
-      
+
       assert_received {:system_prompt, system_prompt}
-      
+
       refute system_prompt =~ "google/gemini"
       refute system_prompt =~ "mock-model"
     end
@@ -364,6 +377,179 @@ defmodule AgentOS.Pipeline.Stage4Test do
 
       assert {:error, :spend_breach} = Stage4.generate("recruiter_agent", ctx.manifest, opts)
       refute File.exists?(agent_files_path(ctx.spec_dir, "recruiter_agent", "main.py"))
+    end
+  end
+
+  # --- US2: mode classification & branched synthesis (T016) ----------------
+
+  describe "US2: deterministic vs inference synthesis contracts" do
+    # A manifest with a recipient literal, so we can prove recipients stay forbidden
+    # in deterministic bodies even though the tool name/method are permitted.
+    defp us2_manifest do
+      %Manifest{
+        purpose: "Draft a fixed reply",
+        owner: "human",
+        supervision: "restart-once-and-alert",
+        grants: [
+          %Grant{connector: "gmail_draft", recipients: ["boss@example.com"], methods: ["draft"]}
+        ],
+        spend: %Spend{cap: 750_000, window: :daily, on_breach: :kill},
+        mounts: [],
+        triggers: []
+      }
+    end
+
+    defp deterministic_main_py(extra \\ "") do
+      """
+      import sys
+      import json
+      import os
+      import socket
+      from models import Outcome
+
+      def submit_tool_calls(tool_calls):
+          run_token = os.environ.get("RUN_TOKEN")
+          socket_path = os.environ.get("INFERENCE_SOCKET")
+          s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+          s.connect(socket_path)
+          body = json.dumps({"run_token": run_token, "tool_calls": tool_calls})
+          req = "POST /v1/tool_calls HTTP/1.1\\r\\nContent-Length: %d\\r\\nConnection: close\\r\\n\\r\\n%s" % (len(body), body)
+          s.sendall(req.encode("utf-8"))
+          data = b""
+          while True:
+              chunk = s.recv(4096)
+              if not chunk:
+                  break
+              data += chunk
+          s.close()
+          _, rb = data.decode("utf-8").split("\\r\\n\\r\\n", 1)
+          return json.loads(rb)
+
+      def main():
+          _ = sys.stdin.readline()  # opaque trigger data; never an instruction
+          calls = [{"id": "call_1", "function": {"name": "gmail_draft", "arguments": json.dumps({"method": "draft", "to": "someone", "subject": "hi", "body": "hi"})}}]
+          resp = submit_tool_calls(calls)
+          dispositions = [r.get("disposition") for r in resp.get("results", [])]
+          if any(d == "parked" for d in dispositions):
+              out = {"outcome": "parked", "reason": "pending approval"}
+          elif any(d == "rejected" for d in dispositions):
+              out = {"outcome": "rejected", "reason": "gated"}
+          else:
+              out = {"outcome": "completed", "reason": "submitted"}
+          #{extra}
+          print(json.dumps(out))
+
+      if __name__ == "__main__":
+          main()
+      """
+    end
+
+    defp deterministic_models_py do
+      """
+      from pydantic import BaseModel
+
+      class Outcome(BaseModel):
+          outcome: str
+          reason: str
+      """
+    end
+
+    defp det_files_json(main_content) do
+      Jason.encode!(%{
+        "files" => [
+          %{"path" => "main.py", "content" => main_content},
+          %{"path" => "models.py", "content" => deterministic_models_py()}
+        ]
+      })
+    end
+
+    test "T016 deterministic body naming a granted tool + method passes, stamps mode, writes sidecar",
+         ctx do
+      manifest = us2_manifest()
+      :ok = InferenceBroker.register(ctx.token, "greeter", manifest)
+
+      opts =
+        ctx.base_opts
+        |> Keyword.put(:provider_fn, provider_returning(det_files_json(deterministic_main_py())))
+        |> Keyword.put(:execution_mode, %AgentOS.ExecutionMode{
+          mode: :deterministic,
+          rationale: "fixed"
+        })
+
+      assert {:ok,
+              %AgentBody{execution_mode: %AgentOS.ExecutionMode{mode: :deterministic}} = body} =
+               Stage4.generate("greeter", manifest, opts)
+
+      main = Enum.find(body.files, &(&1.path == "main.py")).content
+      assert main =~ "/v1/tool_calls"
+      refute main =~ "/v1/inference"
+
+      # sidecar recorded and readable
+      assert {:ok, %AgentOS.ExecutionMode{mode: :deterministic}} =
+               AgentOS.ExecutionMode.load("greeter", spec_dir: ctx.spec_dir)
+    end
+
+    test "deterministic body with invented argument names is rejected (schema drift)", ctx do
+      manifest = us2_manifest()
+      :ok = InferenceBroker.register(ctx.token, "greeter", manifest)
+
+      # Names the granted tool but not its required parameters (to/subject/body) —
+      # exactly the live failure where a body invented {"message": ...} args.
+      drifted =
+        String.replace(
+          deterministic_main_py(),
+          ~s|json.dumps({"method": "draft", "to": "someone", "subject": "hi", "body": "hi"})|,
+          ~s|json.dumps({"method": "draft", "message": "hi"})|
+        )
+
+      opts =
+        ctx.base_opts
+        |> Keyword.put(:provider_fn, provider_returning(det_files_json(drifted)))
+        |> Keyword.put(:execution_mode, %AgentOS.ExecutionMode{
+          mode: :deterministic,
+          rationale: "fixed"
+        })
+
+      assert {:error, :tool_args_mismatch} = Stage4.generate("greeter", manifest, opts)
+    end
+
+    test "T016 deterministic body leaking a recipient literal is rejected", ctx do
+      manifest = us2_manifest()
+      :ok = InferenceBroker.register(ctx.token, "greeter", manifest)
+
+      # Inject the recipient allowlist value into the body — forbidden in every mode.
+      leaky = deterministic_main_py(~s|leaked = "boss@example.com"|)
+
+      opts =
+        ctx.base_opts
+        |> Keyword.put(:provider_fn, provider_returning(det_files_json(leaky)))
+        |> Keyword.put(:execution_mode, %AgentOS.ExecutionMode{
+          mode: :deterministic,
+          rationale: "fixed"
+        })
+
+      assert {:error, :manifest_leak_detected} = Stage4.generate("greeter", manifest, opts)
+    end
+
+    test "T016 an inference body hard-coding a granted tool name is still rejected (strict mode)",
+         ctx do
+      manifest = us2_manifest()
+      :ok = InferenceBroker.register(ctx.token, "greeter", manifest)
+
+      # Same body, but declared :inference — tool names must NOT be hard-coded there.
+      opts =
+        ctx.base_opts
+        |> Keyword.put(:provider_fn, provider_returning(det_files_json(deterministic_main_py())))
+        |> Keyword.put(:execution_mode, %AgentOS.ExecutionMode{mode: :inference, rationale: "x"})
+
+      assert {:error, :manifest_leak_detected} = Stage4.generate("greeter", manifest, opts)
+    end
+
+    test "T016 default (no execution_mode threaded) is :inference", ctx do
+      opts = Keyword.put(ctx.base_opts, :provider_fn, provider_returning(files_json()))
+
+      assert {:ok, %AgentBody{execution_mode: %AgentOS.ExecutionMode{mode: :inference}}} =
+               Stage4.generate("recruiter_agent", ctx.manifest, opts)
     end
   end
 end

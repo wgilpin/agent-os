@@ -49,8 +49,10 @@ defmodule AgentOS.InferenceBroker do
   @doc """
   Registers a per-run token to its corresponding agent name and manifest.
   """
-  @spec register(String.t(), String.t(), AgentOS.Manifest.t(), :live | :record, String.t() | nil) :: :ok
-  def register(token, agent_name, manifest, mode \\ :live, effective_model \\ nil) when is_binary(token) and is_binary(agent_name) do
+  @spec register(String.t(), String.t(), AgentOS.Manifest.t(), :live | :record, String.t() | nil) ::
+          :ok
+  def register(token, agent_name, manifest, mode \\ :live, effective_model \\ nil)
+      when is_binary(token) and is_binary(agent_name) do
     GenServer.call(__MODULE__, {:register, token, agent_name, manifest, mode, effective_model})
   end
 
@@ -139,7 +141,10 @@ defmodule AgentOS.InferenceBroker do
         {:error, :unknown_run_token}
 
       {:error, :unpriced_model} ->
-        Logger.error("Inference failed: unpriced model (requested: '#{inspect(requested_model)}')")
+        Logger.error(
+          "Inference failed: unpriced model (requested: '#{inspect(requested_model)}')"
+        )
+
         {:error, :unpriced_model}
 
       other ->
@@ -147,6 +152,120 @@ defmodule AgentOS.InferenceBroker do
         {:error, other}
     end
   end
+
+  @doc """
+  Direct tool-submission channel: runs an agent's submitted tool calls through the
+  SAME deterministic gate as the inference path (`CapabilityRail.evaluate_tool_calls/4`)
+  with **no model call anywhere**. Identical gating/parking/recording semantics; the
+  rail remains the sole transcript writer.
+
+  Resolves the run token → normalizes the spend window → pre-checks the cap →
+  evaluates the calls → persists accumulated connector cost to the spend ledger →
+  returns typed per-call results. Zero inference charges by construction.
+
+  Returns:
+    - `{:ok, %{results: [%{id, name, disposition, content}]}}` where
+      `disposition ∈ "executed" | "error" | "rejected" | "parked"`
+      ("error" = granted but the connector's execution failed)
+    - `{:breach, :spend}` when the cap is already reached or would be crossed
+    - `{:error, :bad_request}` for a malformed submission
+    - `{:error, :unknown_run_token}` for an unregistered token
+  """
+  @spec submit_tool_calls(map(), keyword()) ::
+          {:ok, %{results: [map()]}}
+          | {:breach, :spend}
+          | {:error, :bad_request | :unknown_run_token}
+  def submit_tool_calls(request, opts \\ []) do
+    with {:ok, submission} <- AgentOS.ToolSubmission.from_map(request),
+         {:ok, resolved} <- resolve(submission.run_token) do
+      do_submit_tool_calls(submission, resolved, opts)
+    else
+      {:error, :bad_request} ->
+        Logger.error("Tool submission rejected: malformed request (not a valid tool submission)")
+        {:error, :bad_request}
+
+      {:error, :unknown_run_token} ->
+        Logger.error("Tool submission rejected: unknown run token")
+        {:error, :unknown_run_token}
+    end
+  end
+
+  defp do_submit_tool_calls(submission, resolved, opts) do
+    %AgentOS.ToolSubmission{run_token: run_token, tool_calls: tool_calls} = submission
+    agent_name = resolved.agent_name
+    manifest = resolved.manifest
+    now = Keyword.get(opts, :now) || DateTime.utc_now()
+
+    # Normalise the spend window exactly as the inference path does, then pre-check
+    # the cap so an already-exhausted agent never reaches the rail.
+    spend_ledger = StateStore.snapshot("spend_ledger")
+    raw_entry = Map.get(spend_ledger, agent_name, %{spent: 0, window_start: now})
+    agent_entry = AgentOS.SpendLedger.current_entry(raw_entry, now, manifest.spend.window)
+
+    if agent_entry != raw_entry do
+      StateStore.apply_action("spend_ledger", {:put, agent_name, agent_entry})
+    end
+
+    if agent_entry.spent >= manifest.spend.cap do
+      Logger.warning(
+        "Tool submission blocked: agent '#{agent_name}' spent (#{to_dollars(agent_entry.spent)}) >= cap (#{to_dollars(manifest.spend.cap)})"
+      )
+
+      {:breach, :spend}
+    else
+      # Snapshot the transcript length so we can read exactly the dispositions this
+      # submission produced (the rail appends one entry per call, in order).
+      entries_before = length(AgentOS.ActionTranscript.read(run_token).entries)
+
+      case AgentOS.CapabilityRail.evaluate_tool_calls(tool_calls, agent_name, manifest, run_token) do
+        {:ok, tool_messages, tool_cost} ->
+          persist_tool_cost(agent_name, agent_entry.spent, tool_cost, now)
+
+          new_entries =
+            Enum.drop(AgentOS.ActionTranscript.read(run_token).entries, entries_before)
+
+          {:ok, %{results: build_results(tool_messages, new_entries)}}
+
+        {:breach, :spend} ->
+          {:breach, :spend}
+      end
+    end
+  end
+
+  # Persists accumulated connector cost through the same {:put, agent_name, entry}
+  # action the inference path uses — connector costs are real spend (FR-012).
+  defp persist_tool_cost(_agent_name, _spent, 0, _now), do: :ok
+
+  defp persist_tool_cost(agent_name, spent, tool_cost, now) do
+    StateStore.apply_action(
+      "spend_ledger",
+      {:put, agent_name, %{spent: spent + tool_cost, window_start: now}}
+    )
+  end
+
+  # Zips the rail's per-call tool messages (id/name/content — the SAME feedback string
+  # the inference path returns) with the transcript entries the rail just appended
+  # (disposition kind), producing the typed channel response. No new transcript writer.
+  defp build_results(tool_messages, entries) do
+    tool_messages
+    |> Enum.zip(entries)
+    |> Enum.map(fn {msg, entry} ->
+      %{
+        id: Map.get(msg, "tool_call_id"),
+        name: Map.get(msg, "name"),
+        disposition: disposition_of(entry),
+        content: Map.get(msg, "content")
+      }
+    end)
+  end
+
+  # A granted call whose connector raised/failed is recorded :granted with an error
+  # result — surface it as "error" so a deterministic body can report honestly
+  # instead of mistaking a failed effect for success.
+  defp disposition_of(%{kind: :granted, result: %{"error" => _}}), do: "error"
+  defp disposition_of(%{kind: :granted}), do: "executed"
+  defp disposition_of(%{kind: :rejected}), do: "rejected"
+  defp disposition_of(%{kind: :parked}), do: "parked"
 
   # Helper to recursively call completions and execute tool requests
   defp do_complete_loop(
@@ -234,7 +353,12 @@ defmodule AgentOS.InferenceBroker do
               updated_messages = messages ++ [assistant_msg]
 
               # Execute all requested tool calls in order
-              case AgentOS.CapabilityRail.evaluate_tool_calls(tool_calls, agent_name, manifest, run_token) do
+              case AgentOS.CapabilityRail.evaluate_tool_calls(
+                     tool_calls,
+                     agent_name,
+                     manifest,
+                     run_token
+                   ) do
                 {:ok, tool_messages, tool_cost} ->
                   final_spent = new_spent + tool_cost
 
@@ -304,16 +428,17 @@ defmodule AgentOS.InferenceBroker do
 
         {:ok, _cap} ->
           raise ArgumentError,
-            "Granted connector '#{grant.connector}' is missing a tool_declaration."
+                "Granted connector '#{grant.connector}' is missing a tool_declaration."
 
         :error ->
           # If the connector is entirely missing from registry, just skip or raise. 
           # For defense in depth against bad manifests, raise.
           raise ArgumentError,
-            "Granted connector '#{grant.connector}' is unknown."
+                "Granted connector '#{grant.connector}' is unknown."
       end
     end)
   end
+
   defp real_provider_fn(model, messages, secret) do
     real_provider_fn(model, messages, [], secret)
   end
@@ -507,35 +632,64 @@ defmodule AgentOS.InferenceBroker do
 
   defp handle_connection(socket) do
     case read_http_request(socket, "") do
-      {:ok, body} ->
-        case Jason.decode(body) do
-          {:ok, request_map} ->
-            case complete(request_map) do
-              {:ok, %{completion: comp}} ->
-                send_json_response(socket, 200, %{completion: comp})
-
-              {:breach, :spend} ->
-                send_json_response(socket, 402, %{error: :spend_breach})
-
-              {:error, :unpriced_model} ->
-                send_json_response(socket, 400, %{error: :unpriced_model})
-
-              {:error, :unknown_run_token} ->
-                send_json_response(socket, 401, %{error: :unknown_run_token})
-
-              {:error, other} ->
-                send_json_response(socket, 400, %{error: inspect(other)})
-            end
-
-          _ ->
-            send_json_response(socket, 400, %{error: :bad_request})
-        end
+      {:ok, path, body} ->
+        route_request(socket, path, body)
 
       _ ->
         :ok
     end
 
     :gen_tcp.close(socket)
+  end
+
+  # Routes by request path. `/v1/tool_calls` runs the direct tool-submission channel
+  # (no model); ANY other path (including `/v1/inference` and legacy pathless requests)
+  # keeps today's inference behaviour, so deployed agents are untouched.
+  defp route_request(socket, "/v1/tool_calls", body) do
+    case Jason.decode(body) do
+      {:ok, request_map} ->
+        case submit_tool_calls(request_map) do
+          {:ok, %{results: results}} ->
+            send_json_response(socket, 200, %{results: results})
+
+          {:breach, :spend} ->
+            send_json_response(socket, 402, %{error: :spend_breach})
+
+          {:error, :unknown_run_token} ->
+            send_json_response(socket, 401, %{error: :unknown_run_token})
+
+          {:error, :bad_request} ->
+            send_json_response(socket, 400, %{error: :bad_request})
+        end
+
+      _ ->
+        send_json_response(socket, 400, %{error: :bad_request})
+    end
+  end
+
+  defp route_request(socket, _path, body) do
+    case Jason.decode(body) do
+      {:ok, request_map} ->
+        case complete(request_map) do
+          {:ok, %{completion: comp}} ->
+            send_json_response(socket, 200, %{completion: comp})
+
+          {:breach, :spend} ->
+            send_json_response(socket, 402, %{error: :spend_breach})
+
+          {:error, :unpriced_model} ->
+            send_json_response(socket, 400, %{error: :unpriced_model})
+
+          {:error, :unknown_run_token} ->
+            send_json_response(socket, 401, %{error: :unknown_run_token})
+
+          {:error, other} ->
+            send_json_response(socket, 400, %{error: inspect(other)})
+        end
+
+      _ ->
+        send_json_response(socket, 400, %{error: :bad_request})
+    end
   end
 
   defp read_http_request(socket, buffer) do
@@ -545,13 +699,15 @@ defmodule AgentOS.InferenceBroker do
 
         case String.split(new_buffer, "\r\n\r\n", parts: 2) do
           [headers, body] ->
+            path = parse_request_path(headers)
+
             case Regex.run(~r/[Cc]ontent-[Ll]ength:\s*(\d+)/, headers) do
               [_, length_str] ->
                 content_length = String.to_integer(length_str)
-                read_body(socket, body, content_length)
+                read_body(socket, path, body, content_length)
 
               _ ->
-                {:ok, body}
+                {:ok, path, body}
             end
 
           _ ->
@@ -563,14 +719,27 @@ defmodule AgentOS.InferenceBroker do
     end
   end
 
-  defp read_body(_socket, body, content_length) when byte_size(body) >= content_length do
-    {:ok, binary_part(body, 0, content_length)}
+  # Extracts the request-target path from the HTTP request line ("METHOD path VERSION").
+  # Returns nil when the request line is absent/unparseable, in which case routing
+  # falls through to the default inference behaviour.
+  defp parse_request_path(headers) do
+    with request_line <- headers |> String.split("\r\n") |> List.first(),
+         true <- is_binary(request_line),
+         [_method, path | _] <- String.split(request_line, " ") do
+      path
+    else
+      _ -> nil
+    end
   end
 
-  defp read_body(socket, body, content_length) do
+  defp read_body(_socket, path, body, content_length) when byte_size(body) >= content_length do
+    {:ok, path, binary_part(body, 0, content_length)}
+  end
+
+  defp read_body(socket, path, body, content_length) do
     case :gen_tcp.recv(socket, 0, 5000) do
       {:ok, data} ->
-        read_body(socket, body <> data, content_length)
+        read_body(socket, path, body <> data, content_length)
 
       {:error, reason} ->
         {:error, reason}
@@ -626,6 +795,7 @@ defmodule AgentOS.InferenceBroker do
       mode: mode,
       effective_model: effective_model
     }
+
     new_tokens = Map.put(state.tokens, token, entry)
     {:reply, :ok, Map.put(state, :tokens, new_tokens)}
   end

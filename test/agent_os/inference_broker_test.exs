@@ -20,8 +20,8 @@ defmodule AgentOS.InferenceBrokerTest do
         "action_transcript_broker_test_#{System.unique_integer([:positive])}.db"
       )
 
-    on_exit(fn -> 
-      File.rm(tmp_spend) 
+    on_exit(fn ->
+      File.rm(tmp_spend)
       File.rm(tmp_transcript)
     end)
 
@@ -599,7 +599,8 @@ defmodule AgentOS.InferenceBrokerTest do
              )
   end
 
-  test "T008 (b) granted-connector + ungranted-method rejected the same way with :ungranted_method", context do
+  test "T008 (b) granted-connector + ungranted-method rejected the same way with :ungranted_method",
+       context do
     # Granted, but only for "search" method
     manifest = %{
       context.manifest
@@ -607,6 +608,7 @@ defmodule AgentOS.InferenceBrokerTest do
           %Manifest.Grant{connector: "web_search", methods: ["search"], recipients: nil}
         ]
     }
+
     :ok = InferenceBroker.register(context.run_token, context.agent_name, manifest)
 
     req = %{
@@ -657,7 +659,8 @@ defmodule AgentOS.InferenceBrokerTest do
              )
   end
 
-  test "T008 (c) a 2-grant manifest injects one declaration per grant and rejects per-call", context do
+  test "T008 (c) a 2-grant manifest injects one declaration per grant and rejects per-call",
+       context do
     manifest = %{
       context.manifest
       | grants: [
@@ -666,6 +669,7 @@ defmodule AgentOS.InferenceBrokerTest do
         ],
         spend: %AgentOS.Manifest.Spend{cap: 10_000, window: :daily, on_breach: :kill}
     }
+
     :ok = InferenceBroker.register(context.run_token, context.agent_name, manifest)
 
     req = %{
@@ -714,7 +718,7 @@ defmodule AgentOS.InferenceBrokerTest do
           [_, _, _, ok_tool_msg, bad_tool_msg] = messages
           assert ok_tool_msg["content"] =~ "Search results for 'test'"
           assert bad_tool_msg["content"] =~ "unauthorized tool 'unknown_tool'"
-          
+
           %{
             input_tokens: 0,
             output_tokens: 0,
@@ -731,11 +735,13 @@ defmodule AgentOS.InferenceBrokerTest do
              )
   end
 
-  test "T008 (d) build_tools_list raises when a granted connector has missing tool_declaration", context do
+  test "T008 (d) build_tools_list raises when a granted connector has missing tool_declaration",
+       context do
     manifest = %{
       context.manifest
       | grants: [%Manifest.Grant{connector: "missing_declaration", methods: nil, recipients: nil}]
     }
+
     :ok = InferenceBroker.register(context.run_token, context.agent_name, manifest)
 
     req = %{
@@ -753,7 +759,8 @@ defmodule AgentOS.InferenceBrokerTest do
     end
   end
 
-  test "T018 [US3] in :record mode a granted call is not executed, returns synthetic tool message, appends to transcript, and charges no connector cost", context do
+  test "T018 [US3] in :record mode a granted call is not executed, returns synthetic tool message, appends to transcript, and charges no connector cost",
+       context do
     manifest = %{
       context.manifest
       | grants: [%Manifest.Grant{connector: "web_search", methods: nil, recipients: nil}],
@@ -798,6 +805,7 @@ defmodule AgentOS.InferenceBrokerTest do
       else
         [_, _, _, tool_msg] = messages
         assert tool_msg["content"] == "{\"status\":\"recorded\"}"
+
         %{
           input_tokens: 10,
           output_tokens: 10,
@@ -836,7 +844,14 @@ defmodule AgentOS.InferenceBrokerTest do
   describe "US4: Model Identity is Substrate Policy" do
     test "T023 with effective_model set, bogus request model is ignored (SC-006)", context do
       # Register with an effective_model
-      :ok = InferenceBroker.register(context.run_token, context.agent_name, context.manifest, :live, "mock-model")
+      :ok =
+        InferenceBroker.register(
+          context.run_token,
+          context.agent_name,
+          context.manifest,
+          :live,
+          "mock-model"
+        )
 
       req = %{
         run_token: context.run_token,

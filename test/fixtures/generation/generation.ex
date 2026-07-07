@@ -93,7 +93,8 @@ defmodule AgentOS.Fixtures.Generation do
               return
           data = json.loads(line)
           input_obj = InputModel(**data)
-          output = OutputModel(actions=[])
+          # Act only via the broker tool-call channel; print a terminal outcome record.
+          output = OutcomeRecord(outcome="completed", reason="handled via tool channel")
           print(json.dumps(output.model_dump()))
 
       if __name__ == "__main__":
@@ -106,13 +107,9 @@ defmodule AgentOS.Fixtures.Generation do
           items: list
           state: dict
 
-      class ActionEntry(BaseModel):
-          type: str
-          method: str
-          payload: dict = {}
-
-      class OutputModel(BaseModel):
-          actions: list[ActionEntry]
+      class OutcomeRecord(BaseModel):
+          outcome: str
+          reason: str
       """
     }
   end

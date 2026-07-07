@@ -1,0 +1,4 @@
+{
+  "mode": "deterministic",
+  "rationale": "The agent sends a statically defined 'Hello, World!' message to a pre-configured webhook upon receiving a trigger, requiring no processing or reasoning over the incoming trigger payload."
+}

@@ -25,9 +25,14 @@ defmodule AgentOS.RunSupervisorTest do
 
   # --- Task 2: RunWorker Tests ---
 
-  test "RunWorker.run_once/1 happy path runs python agent, validates and executes actions", %{
+  test "RunWorker.run_once/1 happy path runs python agent via the tool channel", %{
     log_path: log_path
   } do
+    # Stand up the broker UDS + deterministic model stub so the python agent drives the
+    # tool-call channel end to end (no live model). The rail executes kv_append and
+    # records to the transcript; run_worker sources the tally from it.
+    AgentOS.TestHelper.start_broker_uds!(AgentOS.TestHelper.discovery_provider_fn())
+
     # Seed the roster store so the agent has input
     :ok =
       StateStore.apply_action(
@@ -43,8 +48,7 @@ defmodule AgentOS.RunSupervisorTest do
                run_log_path: log_path
              )
 
-    # Check that state was mutated (the python agent emits actions based on roster input)
-    # The effector creates an append_digest action that gets recorded as a digest record at v0
+    # The kv_append tool call executed by the rail appended a digest to roster_trust.
     snapshot = StateStore.snapshot("roster_trust")
     assert length(snapshot.records) == 2
 
@@ -52,7 +56,7 @@ defmodule AgentOS.RunSupervisorTest do
              Map.has_key?(r, "digest") and r["digest"] =~ "valid news"
            end)
 
-    # Verify run-log entry
+    # Verify run-log entry (tally sourced from the action transcript)
     assert File.exists?(log_path)
     log_content = File.read!(log_path)
     assert log_content =~ "status=ok"
@@ -135,10 +139,13 @@ defmodule AgentOS.RunSupervisorTest do
     ---
     """)
 
+    AgentOS.TestHelper.start_broker_uds!(AgentOS.TestHelper.discovery_provider_fn())
+
     # Seed roster
     :ok = StateStore.apply_action("roster_trust", {:append, :records, %{"text" => "news"}})
 
-    # Run worker with the empty manifest
+    # Run worker with the empty manifest: the model's kv_append tool call is ungranted,
+    # so the rail rejects it (records :rejected) and nothing is executed.
     assert :ok =
              RunWorker.run_once(
                agent_cmd: ".venv/bin/python",
@@ -147,11 +154,11 @@ defmodule AgentOS.RunSupervisorTest do
                run_log_path: log_path
              )
 
-    # Verify no new record was created (it was dropped before effector)
+    # Verify no new record was created (the tool call was rejected by the rail)
     snapshot = StateStore.snapshot("roster_trust")
     assert length(snapshot.records) == 1
 
-    # Verify log says actions=0 (since 1 proposed action was dropped)
+    # Verify log says actions=0 (the proposed tool call was rejected, not granted)
     log_content = File.read!(log_path)
     assert log_content =~ "status=ok"
     assert log_content =~ "actions=0"
@@ -229,173 +236,11 @@ defmodule AgentOS.RunSupervisorTest do
     assert log_content =~ ":persistent_failure"
   end
 
-  describe "windowed spend cap (User Story 1)" do
-    setup do
-      agent_name = "spend_agent_#{System.unique_integer([:positive])}"
-      tmp_manifest = Path.join(System.tmp_dir!(), "#{agent_name}.md")
-
-      File.write!(tmp_manifest, """
-      ---
-      purpose: "Spend test manifest"
-      owner: human
-      supervision: restart-once-and-alert
-      grants:
-        - connector: kv_append
-          recipients: ["http://example.com"]
-          methods: ["POST"]
-      spend:
-        cap: 5000
-        window: daily
-        on_breach: kill
-      ---
-      """)
-
-      original_registry = AgentOS.Connector.registry()
-
-      Application.put_env(:agent_os, :connector_registry, %{
-        "kv_append" => %{
-          name: "kv_append",
-          mutating?: true,
-          requires_deploy_consent?: false,
-          requires_runtime_approval?: false,
-          credential: nil,
-          cost: 1000
-        }
-      })
-
-      on_exit(fn ->
-        File.rm(tmp_manifest)
-        Application.put_env(:agent_os, :connector_registry, original_registry)
-      end)
-
-      now = ~U[2026-06-29 12:00:00Z]
-
-      {:ok, manifest_path: tmp_manifest, agent_name: agent_name, now: now}
-    end
-
-    test "(a) actions summing to exactly the cap execute and spend_ledger is updated", %{
-      manifest_path: manifest_path,
-      agent_name: agent_name,
-      log_path: log_path,
-      now: now
-    } do
-      # 5 actions of cost 1000 = 5000 (exactly cap)
-      actions_json =
-        Jason.encode!(%{
-          "actions" =>
-            List.duplicate(
-              %{
-                "type" => "kv_append",
-                "recipient" => "http://example.com",
-                "method" => "POST"
-              },
-              5
-            )
-        })
-
-      # Run worker
-      RunWorker.run_once(
-        agent_cmd: "echo",
-        agent_args: [actions_json],
-        manifest_path: manifest_path,
-        run_log_path: log_path,
-        now: now
-      )
-
-      # Assert that ledger entry is updated to exactly the cap
-      ledger = StateStore.snapshot("spend_ledger")
-      entry = Map.get(ledger, agent_name)
-      assert entry != nil
-      assert entry.spent == 5000
-      assert DateTime.compare(entry.window_start, now) == :eq
-    end
-
-    test "(b) pre-seed spent=cap 25h ago, action permitted and window reset", %{
-      manifest_path: manifest_path,
-      agent_name: agent_name,
-      log_path: log_path,
-      now: now
-    } do
-      # Seed ledger with cap spent 25 hours ago
-      past_time = DateTime.add(now, -25 * 3600, :second)
-
-      StateStore.apply_action(
-        "spend_ledger",
-        {:put, agent_name, %{spent: 5000, window_start: past_time}}
-      )
-
-      # 1 action of cost 1000
-      action_json =
-        Jason.encode!(%{
-          "actions" => [
-            %{
-              "type" => "kv_append",
-              "recipient" => "http://example.com",
-              "method" => "POST"
-            }
-          ]
-        })
-
-      # Run worker
-      RunWorker.run_once(
-        agent_cmd: "echo",
-        agent_args: [action_json],
-        manifest_path: manifest_path,
-        run_log_path: log_path,
-        now: now
-      )
-
-      # Assert that ledger entry has reset (spent is now only 1000, the new run's cost)
-      ledger = StateStore.snapshot("spend_ledger")
-      entry = Map.get(ledger, agent_name)
-      assert entry != nil
-      assert entry.spent == 1000
-      assert DateTime.compare(entry.window_start, now) == :eq
-    end
-
-    test "(c) within window spend accumulates against existing window with no reset", %{
-      manifest_path: manifest_path,
-      agent_name: agent_name,
-      log_path: log_path,
-      now: now
-    } do
-      # Seed ledger with spent=2000, 1 hour ago
-      past_time = DateTime.add(now, -3600, :second)
-
-      StateStore.apply_action(
-        "spend_ledger",
-        {:put, agent_name, %{spent: 2000, window_start: past_time}}
-      )
-
-      # 1 action of cost 1000
-      action_json =
-        Jason.encode!(%{
-          "actions" => [
-            %{
-              "type" => "kv_append",
-              "recipient" => "http://example.com",
-              "method" => "POST"
-            }
-          ]
-        })
-
-      # Run worker
-      RunWorker.run_once(
-        agent_cmd: "echo",
-        agent_args: [action_json],
-        manifest_path: manifest_path,
-        run_log_path: log_path,
-        now: now
-      )
-
-      # Assert that ledger entry accumulated (spent is now 3000, window_start is still past_time)
-      ledger = StateStore.snapshot("spend_ledger")
-      entry = Map.get(ledger, agent_name)
-      assert entry != nil
-      assert entry.spent == 3000
-      assert DateTime.compare(entry.window_start, past_time) == :eq
-    end
-  end
+  # NOTE: Spend *charging* and window rollover moved off run_worker onto the broker
+  # under the tool-channel cutover. That behaviour is covered at its new home:
+  # windowing in spend_ledger_test.exs (current_entry/3) and metering/breach in
+  # inference_broker_test.exs (T006 a/d/e, T014). run_worker only reads the ledger to
+  # decide a breach — exercised below and in run_worker_transcript_test.exs (US3).
 
   describe "breach and supervision (User Story 2)" do
     setup do
@@ -441,41 +286,29 @@ defmodule AgentOS.RunSupervisorTest do
       {:ok, manifest_path: tmp_manifest, agent_name: agent_name, now: now}
     end
 
-    test "(a) over-cap run returns {:killed, :spend_breach}, drops batch, logs status=killed", %{
+    test "(a) pre-run ledger at/over cap returns {:killed, :spend_breach}, logs status=killed", %{
       manifest_path: manifest_path,
       agent_name: agent_name,
       log_path: log_path,
       now: now
     } do
-      # Pre-seed ledger with 5000 spent (already at cap)
+      # Pre-seed ledger at cap (as the broker would have charged in a prior/this run).
+      # run_worker's pre-check breach fires before the agent is even spawned.
       StateStore.apply_action(
         "spend_ledger",
         {:put, agent_name, %{spent: 5000, window_start: now}}
       )
 
-      # 1 action of cost 1000
-      action_json =
-        Jason.encode!(%{
-          "actions" => [
-            %{
-              "type" => "kv_append",
-              "recipient" => "http://example.com",
-              "method" => "POST"
-            }
-          ]
-        })
-
-      # Run worker - returns {:killed, :spend_breach}
       assert {:killed, :spend_breach} =
                RunWorker.run_once(
                  agent_cmd: "echo",
-                 agent_args: [action_json],
+                 agent_args: [~s({"outcome":"completed","reason":"x"})],
                  manifest_path: manifest_path,
                  run_log_path: log_path,
                  now: now
                )
 
-      # Ledger spent remains at 5000
+      # Ledger spent is untouched by run_worker (it only reads).
       ledger = StateStore.snapshot("spend_ledger")
       entry = Map.get(ledger, agent_name)
       assert entry.spent == 5000
@@ -507,122 +340,6 @@ defmodule AgentOS.RunSupervisorTest do
 
       # Assert no alert is logged
       refute File.exists?(log_path) and File.read!(log_path) =~ "status=alert"
-    end
-  end
-
-  describe "combined dollar budget (User Story 3)" do
-    setup do
-      agent_name = "spend_agent_#{System.unique_integer([:positive])}"
-      tmp_manifest = Path.join(System.tmp_dir!(), "#{agent_name}.md")
-
-      File.write!(tmp_manifest, """
-      ---
-      purpose: "Spend test manifest"
-      owner: human
-      supervision: restart-once-and-alert
-      grants:
-        - connector: kv_append
-          recipients: ["http://example.com"]
-          methods: ["POST"]
-      spend:
-        cap: 5000
-        window: daily
-        on_breach: kill
-      ---
-      """)
-
-      # Override connector registry to make kv_append cost 2000 for these tests
-      original_registry = AgentOS.Connector.registry()
-
-      Application.put_env(:agent_os, :connector_registry, %{
-        "kv_append" => %{
-          name: "kv_append",
-          mutating?: true,
-          requires_deploy_consent?: false,
-          requires_runtime_approval?: false,
-          credential: nil,
-          cost: 2000
-        }
-      })
-
-      on_exit(fn ->
-        File.rm(tmp_manifest)
-        Application.put_env(:agent_os, :connector_registry, original_registry)
-      end)
-
-      now = ~U[2026-06-29 12:00:00Z]
-
-      {:ok, manifest_path: tmp_manifest, agent_name: agent_name, now: now}
-    end
-
-    test "(a) seed spent below cap, action pushes combined spent over cap => killed", %{
-      manifest_path: manifest_path,
-      agent_name: agent_name,
-      log_path: log_path,
-      now: now
-    } do
-      # Seed spent at 4000 (inference cost, below 5000 cap)
-      StateStore.apply_action(
-        "spend_ledger",
-        {:put, agent_name, %{spent: 4000, window_start: now}}
-      )
-
-      # 1 action of cost 2000 -> 4000 + 2000 = 6000 > 5000 (breach)
-      action_json =
-        Jason.encode!(%{
-          "actions" => [
-            %{"type" => "kv_append", "recipient" => "http://example.com", "method" => "POST"}
-          ]
-        })
-
-      assert {:killed, :spend_breach} =
-               RunWorker.run_once(
-                 agent_cmd: "echo",
-                 agent_args: [action_json],
-                 manifest_path: manifest_path,
-                 run_log_path: log_path,
-                 now: now
-               )
-
-      # Ledger spent remains at 4000
-      ledger = StateStore.snapshot("spend_ledger")
-      entry = Map.get(ledger, agent_name)
-      assert entry.spent == 4000
-    end
-
-    test "(b) combined run within budget executes and increments the same ledger entry", %{
-      manifest_path: manifest_path,
-      agent_name: agent_name,
-      log_path: log_path,
-      now: now
-    } do
-      # Seed spent at 2000 (below 5000 cap)
-      StateStore.apply_action(
-        "spend_ledger",
-        {:put, agent_name, %{spent: 2000, window_start: now}}
-      )
-
-      # 1 action of cost 2000 -> 2000 + 2000 = 4000 <= 5000 (within budget)
-      action_json =
-        Jason.encode!(%{
-          "actions" => [
-            %{"type" => "kv_append", "recipient" => "http://example.com", "method" => "POST"}
-          ]
-        })
-
-      assert :ok =
-               RunWorker.run_once(
-                 agent_cmd: "echo",
-                 agent_args: [action_json],
-                 manifest_path: manifest_path,
-                 run_log_path: log_path,
-                 now: now
-               )
-
-      # Ledger spent increases to 4000
-      ledger = StateStore.snapshot("spend_ledger")
-      entry = Map.get(ledger, agent_name)
-      assert entry.spent == 4000
     end
   end
 end

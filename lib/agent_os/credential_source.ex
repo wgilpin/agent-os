@@ -12,8 +12,12 @@ defmodule AgentOS.CredentialSource do
   """
   @spec resolve_credentials() :: %{optional(atom()) => String.t()}
   def resolve_credentials do
-    # Load .env file at startup to populate System environment, except in tests
-    if Application.get_env(:agent_os, :autostart, true) do
+    # Load .env file at startup to populate System environment. Gated by
+    # :load_dotenv (false in the test env) rather than :autostart alone: tests
+    # legitimately flip :autostart for the UDS broker harness, and that must not
+    # leak real secrets into the test VM's System env (Constitution IV).
+    if Application.get_env(:agent_os, :autostart, true) and
+         Application.get_env(:agent_os, :load_dotenv, true) do
       load_env_file()
     end
 

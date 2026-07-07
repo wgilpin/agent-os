@@ -59,9 +59,22 @@ defmodule AgentOS.Pipeline.OrchestratorTest do
 
   # A dynamic provider function that handles all pipeline stages using stubs
   defp mock_provider(_model, messages, _secret, overrides \\ %{}) do
-    joined_messages = Enum.map_join(messages, "\n", fn msg -> Map.get(msg, :content) || Map.get(msg, "content") || "" end)
+    joined_messages =
+      Enum.map_join(messages, "\n", fn msg ->
+        Map.get(msg, :content) || Map.get(msg, "content") || ""
+      end)
 
     cond do
+      joined_messages =~ "does fulfilling this purpose require reasoning" ->
+        # ExecutionMode classification step (between Stage 2 and Stage 4).
+        mode = Map.get(overrides, :execution_mode, "inference")
+
+        %{
+          input_tokens: 5,
+          output_tokens: 5,
+          completion: Jason.encode!(%{"mode" => mode, "rationale" => "stubbed classification"})
+        }
+
       joined_messages =~ "code-synthesis" or joined_messages =~ "Output exactly two files" ->
         # Stage 4 code gen
         body = Generation.stub_agent_body()
@@ -152,15 +165,22 @@ defmodule AgentOS.Pipeline.OrchestratorTest do
       # Check triggers
       assert Enum.any?(manifest.triggers, fn t -> t.type == :message end)
       assert Enum.any?(manifest.triggers, fn t -> t.type == :time and t.at == "08:00" end)
-      
+
       # Check spend cap
       assert manifest.spend.cap == 100_000
 
       # Check grants
-      assert Enum.any?(manifest.grants, fn g -> g.connector == "file_read" and not is_nil(g.path) end)
-      assert Enum.any?(manifest.grants, fn g -> g.connector == "file_write" and not is_nil(g.path) end)
+      assert Enum.any?(manifest.grants, fn g ->
+               g.connector == "file_read" and not is_nil(g.path)
+             end)
+
+      assert Enum.any?(manifest.grants, fn g ->
+               g.connector == "file_write" and not is_nil(g.path)
+             end)
+
       assert Enum.any?(manifest.grants, fn g -> g.connector == "discord_notify" end)
     end
+
     test "T005 Green-path execution with always_review", ctx do
       spec = Generation.recruiter_confirmed_spec()
       provider_fn = fn model, msgs, secret -> mock_provider(model, msgs, secret) end
@@ -331,6 +351,40 @@ defmodule AgentOS.Pipeline.OrchestratorTest do
       assert rendered =~ "DEPLOY PROVENANCE: dangerously-skipped"
       assert rendered =~ "JUDGE: pass"
       assert rendered =~ "SECURITY REVIEW: pass"
+    end
+  end
+
+  describe "US2: execution-mode classification threaded end-to-end (T018)" do
+    test "classification runs and the mode is recorded to the sidecar", ctx do
+      spec = Generation.recruiter_confirmed_spec()
+      provider_fn = fn model, msgs, secret -> mock_provider(model, msgs, secret) end
+      opts = Keyword.put(ctx.base_opts, :provider_fn, provider_fn)
+
+      {:ok, _run} = Orchestrator.run(spec, :dangerously_skip_review, opts)
+
+      # The orchestrator classified the purpose and Stage 4 persisted the typed sidecar.
+      assert {:ok, %AgentOS.ExecutionMode{mode: :inference}} =
+               AgentOS.ExecutionMode.load("recruiter", spec_dir: ctx.dirs.spec_dir)
+
+      assert File.exists?(Path.join([ctx.dirs.spec_dir, "recruiter", "execution_mode.json"]))
+    end
+
+    test "a deterministic classification threads through to the recorded mode", ctx do
+      spec = Generation.recruiter_confirmed_spec()
+
+      # Override only the classification completion → deterministic; the mode must be
+      # threaded to Stage 4 and recorded (co-generation isolation: judge/agent both
+      # derive from manifest+purpose+this one bit).
+      provider_fn = fn model, msgs, secret ->
+        mock_provider(model, msgs, secret, %{execution_mode: "deterministic"})
+      end
+
+      opts = Keyword.put(ctx.base_opts, :provider_fn, provider_fn)
+
+      {:ok, _run} = Orchestrator.run(spec, :dangerously_skip_review, opts)
+
+      assert {:ok, %AgentOS.ExecutionMode{mode: :deterministic}} =
+               AgentOS.ExecutionMode.load("recruiter", spec_dir: ctx.dirs.spec_dir)
     end
   end
 end

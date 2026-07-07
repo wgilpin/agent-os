@@ -59,7 +59,7 @@ defmodule AgentOS.SchedulerTest do
     AgentOS.Scheduler.run_now(:manual,
       run_log_path: log_path,
       agent_cmd: "bash",
-      agent_args: ["-c", "echo '{\"actions\": []}'"]
+      agent_args: ["-c", "echo '{\"outcome\":\"completed\",\"reason\":\"ok\"}'"]
     )
 
     # Sleep to allow supervisor's async run worker task to complete
@@ -85,7 +85,7 @@ defmodule AgentOS.SchedulerTest do
       AgentOS.RunSupervisor.start_run(
         run_log_path: log_path,
         agent_cmd: "bash",
-        agent_args: ["-c", "echo '{\"actions\": []}'"]
+        agent_args: ["-c", "echo '{\"outcome\":\"completed\",\"reason\":\"ok\"}'"]
       )
     end
 

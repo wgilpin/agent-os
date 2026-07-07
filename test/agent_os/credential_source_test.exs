@@ -80,13 +80,15 @@ defmodule AgentOS.CredentialSourceTest do
     export OUTBOUND_TOKEN="file_outbound_token_value"
     """)
 
-    # Enable autostart temporarily so the resolver loads the file
+    # Enable autostart + dotenv loading temporarily so the resolver loads the file
     Application.put_env(:agent_os, :autostart, true)
+    Application.put_env(:agent_os, :load_dotenv, true)
 
     resolved = CredentialSource.resolve_credentials()
 
-    # Restore autostart
+    # Restore autostart and the test-env dotenv guard
     Application.put_env(:agent_os, :autostart, false)
+    Application.put_env(:agent_os, :load_dotenv, false)
 
     assert resolved == %{
              model_key: "file_model_key_value",

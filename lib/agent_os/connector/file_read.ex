@@ -30,6 +30,7 @@ defmodule AgentOS.Connector.FileRead do
       }
     }
   end
+
   @impl AgentOS.Connector
   def scope(boundaries) do
     path =
@@ -47,6 +48,7 @@ defmodule AgentOS.Connector.FileRead do
       path: path
     }
   end
+
   @impl AgentOS.Connector
   def render(%Grant{path: path}) do
     "[EXTERNAL] READ DOCUMENT AT #{path}"

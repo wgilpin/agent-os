@@ -14,9 +14,7 @@ defmodule AgentOS.ActionTranscriptTest do
         "action_transcript_#{:erlang.unique_integer([:positive])}.db"
       )
 
-    start_supervised!(
-      {StateStore, name: "action_transcript", path: tmp_file, initial: %{}}
-    )
+    start_supervised!({StateStore, name: "action_transcript", path: tmp_file, initial: %{}})
 
     start_supervised!(AgentOS.InferenceBroker)
 
@@ -26,7 +24,8 @@ defmodule AgentOS.ActionTranscriptTest do
 
   test "clear/1 then read/1 returns empty transcript", %{run_token: run_token} do
     # Read should return an empty struct
-    assert %ActionTranscript{run_token: ^run_token, entries: []} = ActionTranscript.read(run_token)
+    assert %ActionTranscript{run_token: ^run_token, entries: []} =
+             ActionTranscript.read(run_token)
 
     # Append something to make it non-empty
     entry =
@@ -130,9 +129,11 @@ defmodule AgentOS.ActionTranscriptTest do
         reason_code: nil
       })
 
-    assert_raise ArgumentError, "result for a :record-mode :granted entry MUST be the synthetic success shape", fn ->
-      ActionTranscript.append(run_token, entry)
-    end
+    assert_raise ArgumentError,
+                 "result for a :record-mode :granted entry MUST be the synthetic success shape",
+                 fn ->
+                   ActionTranscript.append(run_token, entry)
+                 end
 
     valid_entry =
       Entry.new(%{
