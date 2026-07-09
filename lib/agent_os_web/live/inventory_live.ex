@@ -252,27 +252,15 @@ defmodule AgentOSWeb.InventoryLive do
   end
 
   defp assign_agents_data(socket) do
-    # Scan manifests/*.md for all agents
-    manifest_paths = Path.wildcard("manifests/*.md")
-
+    # Inventory.all/1 enumerates manifests/*.md and returns one data map per agent,
+    # skipping any manifest that fails to load.
     agents_data =
-      Enum.reduce(manifest_paths, [], fn path, acc ->
-        # Load inventory data using structured accessor
-        case Inventory.data(manifest_path: path) do
-          {:ok, data} ->
-            # Get run records for this agent
-            # Since RunLog.read_records parses the global run log file, read them here
-            recent_runs = RunLog.read_records("data/run_log.md", window: 5)
-
-            # Build final map
-            agent_map = Map.put(data, :recent_runs, recent_runs)
-            [agent_map | acc]
-
-          {:error, _reason} ->
-            acc
-        end
+      Inventory.all()
+      |> Enum.map(fn data ->
+        # RunLog.read_records parses the global run log file; attach the recent window.
+        recent_runs = RunLog.read_records("data/run_log.md", window: 5)
+        Map.put(data, :recent_runs, recent_runs)
       end)
-      |> Enum.sort_by(& &1.agent_name)
 
     assign(socket, agents_data: agents_data)
   end

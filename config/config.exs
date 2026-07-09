@@ -1,10 +1,12 @@
 import Config
 
-# Hard-wired v0 provisioning surface. At v0 the substrate is configured by hand and the
-# manifest is kept in sync manually; later phases provision from the manifest itself.
+# Substrate configuration. The agent inventory is manifest-driven: the kernel enumerates
+# manifests/*.md rather than reading a hard-wired agent name from config. There is no
+# global `:manifest_path` and no `:agent` block in prod/dev — the app boots with zero
+# configured agents. The hard-wired "discovery" agent survives only as a test fixture
+# (see the `config_env() == :test` block below).
 # Secrets/tokens for capabilities are sourced from OS env, never committed directly.
 config :agent_os,
-  manifest_path: "manifests/discovery.md",
   roster_path: "data/roster.db",
   spend_ledger_path: "data/spend_ledger.db",
   pending_approvals_path: "data/pending_approvals.db",
@@ -30,19 +32,6 @@ config :agent_os,
   credentials: %{},
   inference_prices: %{}
 
-# Hard-wired agent configuration (manifest path, command, timezone, schedule, and capabilities)
-config :agent_os, :agent,
-  manifest_path: "manifests/discovery.md",
-  agent_cmd: "docker",
-  agent_args: [],
-  tz: "Etc/UTC",
-  run_hour: 7,
-  grants: [
-    %{connector: "kv_append", recipients: nil, methods: ["append"]},
-    %{connector: "external_send", recipients: ["owner-inbox"], methods: ["send"]}
-  ],
-  spend: %{cap: 500_000, window: :daily, on_breach: :kill}
-
 # Phoenix/LiveView web interface configuration
 config :agent_os, AgentOSWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4000],
@@ -60,7 +49,24 @@ config :phoenix, :json_library, Jason
 # In tests, the supervision tree does not auto-start the singleton state process — each
 # test starts its own StateStore against an isolated temp term-file (never live state).
 if config_env() == :test do
+  # The "discovery" agent is a test-only fixture. The suites (run_supervisor, port_runner,
+  # deterministic_e2e, world_b, scheduler, provisioner) exercise the port boundary and the
+  # legacy hard-wired provisioning surface against manifests/discovery.md, so the `:agent`
+  # block and the global `:manifest_path` default live here — never in prod/dev.
+  config :agent_os, :agent,
+    manifest_path: "manifests/discovery.md",
+    agent_cmd: "docker",
+    agent_args: [],
+    tz: "Etc/UTC",
+    run_hour: 7,
+    grants: [
+      %{connector: "kv_append", recipients: nil, methods: ["append"]},
+      %{connector: "external_send", recipients: ["owner-inbox"], methods: ["send"]}
+    ],
+    spend: %{cap: 500_000, window: :daily, on_breach: :kill}
+
   config :agent_os,
+    manifest_path: "manifests/discovery.md",
     autostart: false,
     # Never load real secrets from .env into the test VM (Constitution IV): tests
     # that flip :autostart (e.g. the UDS broker harness) must not pull the live
