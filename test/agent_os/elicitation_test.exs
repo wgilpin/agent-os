@@ -67,6 +67,61 @@ defmodule AgentOS.ElicitationTest do
     File.rm_rf!(temp_dir)
   end
 
+  test "startup trigger intent survives elicitation into the written spec" do
+    # Purpose phrased with startup intent, as in
+    # "send a Discord message containing the local machine's time upon loading"
+    assert {:ok, pid} =
+             ElicitationSession.start_link("reply to recruiter emails upon loading")
+
+    assert {:ok, _, _, _, _} = ElicitationSession.submit_message(pid, "Gmail")
+    assert {:ok, _, _, _, _} = ElicitationSession.submit_message(pid, "save drafts")
+    assert {:ok, session, _, _, _} = ElicitationSession.submit_message(pid, "yes")
+
+    assert session.status == :confirmed
+    assert session.spec_draft.triggers == [%{type: :startup}]
+
+    temp_dir = Path.join(["data", "test_elicitation_triggers"])
+    File.mkdir_p!(temp_dir)
+    on_exit(fn -> File.rm_rf!(temp_dir) end)
+
+    assert :ok = ElicitationSession.write_spec(pid, temp_dir)
+
+    {:ok, spec_body} = File.read(Path.join(temp_dir, "elicited_spec.json"))
+    assert {:ok, spec_data} = Jason.decode(spec_body)
+    assert spec_data["triggers"] == [%{"type" => "startup"}]
+
+    # The persisted spec round-trips into an ElicitedSpec with the trigger intact
+    spec = AgentOS.ElicitedSpec.from_map(spec_data)
+    assert spec.triggers == [%{type: :startup}]
+  end
+
+  test "from_map normalises triggers and drops malformed shapes at the boundary" do
+    map = %{
+      "purpose" => "p",
+      "triggers" => [
+        %{"type" => "startup", "at" => nil, "name" => nil},
+        %{"type" => "time", "at" => "07:00"},
+        # malformed: time without an at, event without a name, unknown type
+        %{"type" => "time"},
+        %{"type" => "time", "at" => nil},
+        %{"type" => "event", "name" => ""},
+        %{"type" => "webhook"},
+        # atom-keyed maps (internal round-trip) survive unchanged
+        %{type: :event, name: "approval_received"},
+        %{type: :message}
+      ]
+    }
+
+    spec = AgentOS.ElicitedSpec.from_map(map)
+
+    assert spec.triggers == [
+             %{type: :startup},
+             %{type: :time, at: "07:00"},
+             %{type: :event, name: "approval_received"},
+             %{type: :message}
+           ]
+  end
+
   test "scope creep detection flow" do
     assert {:ok, pid} = ElicitationSession.start_link("reply to recruiter emails")
 

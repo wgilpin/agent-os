@@ -6,9 +6,10 @@ defmodule AgentOS.PortRunnerTest do
   @tag :integration
   test "happy path runs python discovery agent" do
     input = ~s({"roster": []})
+    python = System.get_env("PYTHON_BIN") || ".venv/bin/python"
 
     assert {:ok, output} =
-             PortRunner.run(input, ".venv/bin/python", ["agents/discovery/main.py"], [])
+             PortRunner.run(input, python, ["agents/discovery/main.py"], [])
 
     # With no broker env available here, discovery refuses cleanly and prints a
     # terminal outcome record (no longer the retired actions list).

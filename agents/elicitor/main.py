@@ -56,6 +56,7 @@ def run_live(session_data: Dict[str, Any]) -> ElicitorResponse:
     5. Formulate a single, concise next clarifying question to ask the user. When the spec is KISS-clear and all boundaries/spends are decided, ask the user to confirm the spec.
     6. When the user confirms the spec (e.g., says "yes", "confirm", "looks good"), set confirmed to true.
     7. NEVER ask the user about raw token limits or token counts. Instead, estimate a reasonable default token limit (e.g. 50,000 to 200,000 tokens based on the complexity and scope of the purpose) and fill it in automatically in the background.
+    8. Capture trigger intent in the triggers list. Phrases like "upon loading", "on load", "when the agent starts", or "at startup" mean {"type": "startup"}. A schedule ("every day at 7am", "each morning") means {"type": "time", "at": "07:00"}. Reacting to a named event means {"type": "event", "name": ...}. Responding to incoming messages means {"type": "message"}. Only include triggers the purpose actually implies; if none is stated, leave triggers empty and ask when the agent should run.
     """
 
     # Format transcript messages for the prompt

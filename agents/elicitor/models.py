@@ -1,5 +1,18 @@
-from typing import List, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
+
+class TriggerModel(BaseModel):
+    type: Literal["startup", "time", "event", "message"] = Field(
+        description="When the agent runs: 'startup' (on load), 'time' (schedule), 'event' (named event), 'message' (incoming message)"
+    )
+    at: Optional[str] = Field(
+        default=None,
+        description="For 'time' triggers only: the UTC time of day, e.g. '07:00'"
+    )
+    name: Optional[str] = Field(
+        default=None,
+        description="For 'event' triggers only: the event name, e.g. 'approval_received'"
+    )
 
 class BoundaryModel(BaseModel):
     egress_domains: List[str] = Field(
@@ -34,6 +47,10 @@ class ElicitedSpecModel(BaseModel):
     )
     spend_limits: SpendLimitsModel = Field(
         default_factory=SpendLimitsModel
+    )
+    triggers: List[TriggerModel] = Field(
+        default_factory=list,
+        description="When the agent should run, derived from the stated purpose (e.g. 'upon loading' -> startup)"
     )
     confirmed: bool = Field(
         default=False,
