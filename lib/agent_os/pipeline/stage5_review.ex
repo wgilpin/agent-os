@@ -22,6 +22,7 @@ defmodule AgentOS.Pipeline.Stage5 do
   Probabilistic code checking against manifest capabilities and purpose, routing via InferenceBroker.
   """
 
+  alias AgentOS.Pipeline.LlmJson
   alias AgentOS.Pipeline.Stage5.Verdict
   alias AgentOS.Manifest
   alias AgentOS.CapabilityRender
@@ -97,7 +98,7 @@ defmodule AgentOS.Pipeline.Stage5 do
   """
   @spec decode_verdict(String.t(), DateTime.t()) :: {:ok, Verdict.t()} | {:error, any()}
   def decode_verdict(json_str, now) do
-    case Jason.decode(json_str) do
+    case LlmJson.decode(json_str) do
       {:ok, %{"status" => status_str, "reasoning" => reasoning}}
       when is_binary(status_str) and is_binary(reasoning) ->
         case parse_status(status_str) do

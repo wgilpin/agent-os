@@ -73,6 +73,7 @@ defmodule AgentOS.Pipeline.Stage3 do
   to an `:error` verdict so deploy never proceeds on green by default (Constitution X).
   """
 
+  alias AgentOS.Pipeline.LlmJson
   alias AgentOS.Pipeline.Stage3.TestCase
   alias AgentOS.Pipeline.Stage3.TestSpec
   alias AgentOS.Pipeline.Stage3.Verdict
@@ -299,14 +300,7 @@ defmodule AgentOS.Pipeline.Stage3 do
   end
 
   defp parse_tests(completion) when is_binary(completion) do
-    sanitized =
-      completion
-      |> String.trim()
-      |> String.replace(~r/^```(?:json)?/i, "")
-      |> String.replace(~r/```$/, "")
-      |> String.trim()
-
-    case Jason.decode(sanitized) do
+    case LlmJson.decode(completion) do
       {:ok, decoded} -> parse_tests(decoded)
       {:error, _} -> {:error, :invalid_synthesis_output}
     end
@@ -455,7 +449,7 @@ defmodule AgentOS.Pipeline.Stage3 do
   end
 
   defp parse_verdict(completion) when is_binary(completion) do
-    case Jason.decode(completion) do
+    case LlmJson.decode(completion) do
       {:ok, %{"verdict" => v, "reasoning" => reasoning}}
       when v in ["pass", "fail"] and is_binary(reasoning) ->
         %Verdict{
