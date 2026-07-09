@@ -5,7 +5,11 @@ defmodule AgentOS.Inventory do
   the RosterStore without communicating with the agent process.
   """
 
+  require Logger
+
   alias AgentOS.ConformanceAuditor.Verdict
+
+  @default_manifests_glob "manifests/*.md"
 
   @judge_disclaimer "Scope: CODE-MATCHES-MANIFEST. This does not verify human intent correctness."
   @security_review_disclaimer "Scope: PROBABILISTIC CODE REVIEW. Disclaimer: Security review is a probabilistic LLM smoke detector."
@@ -21,15 +25,53 @@ defmodule AgentOS.Inventory do
   """
   @spec data(keyword()) :: {:ok, map()} | {:error, any()}
   def data(opts \\ []) do
-    agent_config =
-      try do
-        AgentOS.Provisioner.agent_config()
-      rescue
-        _ -> %{manifest_path: "manifests/discovery.md"}
+    case resolve_manifest_path(opts) do
+      nil -> {:error, :no_manifest_path}
+      manifest_path -> load_agent(manifest_path, opts)
+    end
+  end
+
+  @doc """
+  Enumerates every agent manifest under `manifests/*.md` and returns structured
+  inventory data for each. The agent inventory is manifest-driven: there is no
+  hard-wired agent name. Manifests that fail to load are skipped with a logged
+  warning rather than silently substituting a default.
+
+  ## Parameters
+    - `opts`: forwarded to `data/1` (e.g. `:now`, `:run_log_path`). `:manifests_glob`
+      overrides the manifest directory glob (used by hermetic tests).
+
+  ## Returns
+    - A list of inventory data maps, sorted by `:agent_name`.
+  """
+  @spec all(keyword()) :: [map()]
+  def all(opts \\ []) do
+    glob = Keyword.get(opts, :manifests_glob, @default_manifests_glob)
+    per_agent_opts = Keyword.drop(opts, [:manifest_path, :manifests_glob])
+
+    glob
+    |> Path.wildcard()
+    |> Enum.flat_map(fn path ->
+      case data(Keyword.put(per_agent_opts, :manifest_path, path)) do
+        {:ok, data} ->
+          [data]
+
+        {:error, reason} ->
+          Logger.warning("inventory: skipping manifest #{path}: #{inspect(reason)}")
+          []
       end
+    end)
+    |> Enum.sort_by(& &1.agent_name)
+  end
 
-    manifest_path = Keyword.get(opts, :manifest_path, agent_config.manifest_path)
+  # Resolves the manifest path from opts, falling back to the global (test-only)
+  # :manifest_path config. Returns nil when nothing is configured — the caller
+  # surfaces that as an error rather than defaulting to the discovery fixture.
+  defp resolve_manifest_path(opts) do
+    Keyword.get(opts, :manifest_path) || Application.get_env(:agent_os, :manifest_path)
+  end
 
+  defp load_agent(manifest_path, opts) do
     case AgentOS.Manifest.load(manifest_path) do
       {:ok, manifest} ->
         agent_name = Path.basename(manifest_path, ".md")
@@ -261,14 +303,7 @@ defmodule AgentOS.Inventory do
         |> Kernel.<>("\n")
 
       {:error, reason} ->
-        agent_config =
-          try do
-            AgentOS.Provisioner.agent_config()
-          rescue
-            _ -> %{manifest_path: "manifests/discovery.md"}
-          end
-
-        manifest_path = Keyword.get(opts, :manifest_path, agent_config.manifest_path)
+        manifest_path = resolve_manifest_path(opts) || "(no manifest configured)"
         "ERROR: Could not load manifest at #{manifest_path}: #{inspect(reason)}"
     end
   end

@@ -409,6 +409,92 @@ defmodule AgentOS.InventoryTest do
     end
   end
 
+  describe "all/1 manifest enumeration" do
+    setup do
+      tmp_manifests =
+        Path.join(
+          System.tmp_dir!(),
+          "inventory_manifests_#{System.unique_integer([:positive])}"
+        )
+
+      File.mkdir_p!(tmp_manifests)
+      on_exit(fn -> File.rm_rf!(tmp_manifests) end)
+      {:ok, tmp_manifests: tmp_manifests}
+    end
+
+    defp write_manifest!(dir, name, purpose) do
+      path = Path.join(dir, "#{name}.md")
+
+      File.write!(path, """
+      ---
+      purpose: "#{purpose}"
+      triggers:
+        - type: message
+      grants:
+        - connector: kv_append
+      mounts: []
+      spend:
+        cap: 200000
+        window: daily
+        on_breach: kill
+      owner: human
+      supervision: restart-once-and-alert
+      ---
+      """)
+
+      path
+    end
+
+    test "returns one data map per manifest, sorted by agent name", %{
+      tmp_manifests: dir
+    } do
+      write_manifest!(dir, "zeta_agent", "Zeta purpose")
+      write_manifest!(dir, "alpha_agent", "Alpha purpose")
+
+      glob = Path.join(dir, "*.md")
+      results = Inventory.all(manifests_glob: glob)
+
+      assert Enum.map(results, & &1.agent_name) == ["alpha_agent", "zeta_agent"]
+      assert Enum.find(results, &(&1.agent_name == "alpha_agent")).purpose == "Alpha purpose"
+      assert Enum.find(results, &(&1.agent_name == "zeta_agent")).purpose == "Zeta purpose"
+    end
+
+    test "skips unparseable manifests instead of substituting a default", %{
+      tmp_manifests: dir
+    } do
+      write_manifest!(dir, "good_agent", "Good purpose")
+      # A manifest with no frontmatter fails to load.
+      File.write!(Path.join(dir, "broken_agent.md"), "not a manifest")
+
+      glob = Path.join(dir, "*.md")
+
+      results =
+        ExUnit.CaptureLog.capture_log(fn ->
+          send(self(), {:results, Inventory.all(manifests_glob: glob)})
+        end)
+
+      assert_received {:results, agents}
+      assert Enum.map(agents, & &1.agent_name) == ["good_agent"]
+      # discovery must never appear as a silent fallback
+      refute Enum.any?(agents, &(&1.agent_name == "discovery"))
+      assert results =~ "skipping manifest"
+    end
+
+    test "empty manifest directory yields an empty inventory", %{tmp_manifests: dir} do
+      assert Inventory.all(manifests_glob: Path.join(dir, "*.md")) == []
+    end
+  end
+
+  describe "data/1 no manifest configured" do
+    test "returns error when no manifest path is given or configured" do
+      original = Application.get_env(:agent_os, :manifest_path)
+      Application.delete_env(:agent_os, :manifest_path)
+      on_exit(fn -> if original, do: Application.put_env(:agent_os, :manifest_path, original) end)
+
+      assert Inventory.data([]) == {:error, :no_manifest_path}
+    end
+  end
+
   describe "data/1 structured accessor" do
     test "returns raw data map that matches render/1 formatted output" do
       :ok =

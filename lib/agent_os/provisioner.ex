@@ -39,6 +39,18 @@ defmodule AgentOS.Provisioner do
   """
   @spec check_drift() :: :ok | {:drift, [atom()]}
   def check_drift do
+    # The agent inventory is manifest-driven; the hard-wired :agent block is a test-only
+    # fixture. When no agent is configured (prod/dev boot), there is nothing to drift-check.
+    case Application.fetch_env(:agent_os, :agent) do
+      :error ->
+        :ok
+
+      {:ok, _} ->
+        check_drift_against_manifest()
+    end
+  end
+
+  defp check_drift_against_manifest do
     # Fetch the current runtime config map
     config = agent_config()
 
