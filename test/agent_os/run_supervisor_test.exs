@@ -43,7 +43,7 @@ defmodule AgentOS.RunSupervisorTest do
     # Run the worker with the real python agent path
     assert :ok =
              RunWorker.run_once(
-               agent_cmd: ".venv/bin/python",
+               agent_cmd: System.get_env("PYTHON_BIN") || ".venv/bin/python",
                agent_args: ["agents/discovery/main.py"],
                run_log_path: log_path
              )
@@ -148,7 +148,7 @@ defmodule AgentOS.RunSupervisorTest do
     # so the rail rejects it (records :rejected) and nothing is executed.
     assert :ok =
              RunWorker.run_once(
-               agent_cmd: ".venv/bin/python",
+               agent_cmd: System.get_env("PYTHON_BIN") || ".venv/bin/python",
                agent_args: ["agents/discovery/main.py"],
                manifest_path: tmp_manifest,
                run_log_path: log_path
