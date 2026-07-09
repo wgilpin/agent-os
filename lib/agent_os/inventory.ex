@@ -35,10 +35,13 @@ defmodule AgentOS.Inventory do
         agent_name = Path.basename(manifest_path, ".md")
 
         snapshot = AgentOS.StateStore.snapshot("roster_trust")
-        records_count = length(snapshot.records)
+        # Fresh stores key this list with the atom :records; a store hydrated
+        # from a legacy on-disk DB may key it with the string "records".
+        records = Map.get(snapshot, :records) || Map.get(snapshot, "records") || []
+        records_count = length(records)
 
         last_digest =
-          snapshot.records
+          records
           |> Enum.reverse()
           |> Enum.find_value("none", fn
             %{"digest" => text} -> text

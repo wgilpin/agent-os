@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Dict, List
 from pydantic import BaseModel, Field
 
 class BoundaryModel(BaseModel):
@@ -12,8 +12,10 @@ class BoundaryModel(BaseModel):
     )
 
 class SpendLimitsModel(BaseModel):
+    # Default matches the documented placeholder (the OS UI collects the real
+    # value); 0.0 would project to an inert cap-0 manifest if it ever leaked.
     dollar_cap: float = Field(
-        default=0.0,
+        default=0.1,
         description="Maximum dollar-denominated spend cap, e.g. 0.50"
     )
     token_limit: int = Field(
@@ -34,6 +36,17 @@ class ElicitedSpecModel(BaseModel):
     )
     spend_limits: SpendLimitsModel = Field(
         default_factory=SpendLimitsModel
+    )
+    triggers: List[Dict[str, str]] = Field(
+        default_factory=list,
+        description=(
+            "What causes the agent to run. Each item is one of: "
+            '{"type": "startup"} (run when the agent is deployed / the OS starts — '
+            'use for "on start", "when it starts", "on load", "on deploy"); '
+            '{"type": "time", "at": "HH:MM"} (daily at a wall-clock time); '
+            '{"type": "event", "name": "..."}; or {"type": "message"} '
+            "(run when an inbound message arrives)."
+        ),
     )
     confirmed: bool = Field(
         default=False,

@@ -42,6 +42,7 @@ defmodule AgentOS.ElicitedSpec do
           "time" -> %{type: :time, at: Map.get(t, "at")}
           "event" -> %{type: :event, name: Map.get(t, "name")}
           "message" -> %{type: :message}
+          "startup" -> %{type: :startup}
           type when is_atom(type) -> t
           _ -> t
         end

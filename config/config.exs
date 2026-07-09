@@ -57,6 +57,12 @@ config :agent_os, AgentOSWeb.Endpoint,
 
 config :phoenix, :json_library, Jason
 
+# Dev-only code reloading: a browser refresh recompiles changed Elixir modules
+# (LiveView websocket events don't; see endpoint.ex). Never enabled in test/prod.
+if config_env() == :dev do
+  config :agent_os, AgentOSWeb.Endpoint, code_reloader: true
+end
+
 # In tests, the supervision tree does not auto-start the singleton state process — each
 # test starts its own StateStore against an isolated temp term-file (never live state).
 if config_env() == :test do

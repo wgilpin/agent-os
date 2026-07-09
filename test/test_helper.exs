@@ -86,6 +86,15 @@ defmodule AgentOS.TestHelper do
       {AgentOS.StateStore, name: "action_transcript", path: action_transcript_path, initial: %{}}
     )
 
+    # Durable deployment registry mount — written by AgentOS.DeploymentRegistry on
+    # deploy completion (both direct and approval-resumed paths).
+    deployments_path = Path.join(tmp_dir, "deployments_#{uniq}.db")
+    ExUnit.Callbacks.on_exit(fn -> File.rm(deployments_path) end)
+
+    ExUnit.Callbacks.start_supervised!(
+      {AgentOS.StateStore, name: "deployments", path: deployments_path, initial: %{}}
+    )
+
     default_pass = %{status: :pass, code_hash: ""}
 
     default_review_pass = %AgentOS.Pipeline.Stage5.Verdict{
@@ -135,7 +144,8 @@ defmodule AgentOS.TestHelper do
       conformance_path: conformance_path,
       provenance_path: provenance_path,
       judge_path: judge_path,
-      review_path: review_path
+      review_path: review_path,
+      deployments_path: deployments_path
     }
   end
 

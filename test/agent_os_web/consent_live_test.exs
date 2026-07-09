@@ -34,6 +34,13 @@ defmodule AgentOSWeb.ConsentLiveTest do
       {AgentOS.StateStore, name: "security_review_results", path: tmp_security, initial: %{}}
     )
 
+    # Approval-resume for deploy-shaped actions writes the deployment registry (041).
+    tmp_deployments = Path.join(tmp_dir, "deployments.db")
+
+    start_supervised!(
+      {AgentOS.StateStore, name: "deployments", path: tmp_deployments, initial: %{}}
+    )
+
     start_supervised!({Phoenix.PubSub, name: AgentOS.PubSub})
     start_supervised!(AgentOS.TriggerGateway)
     start_supervised!({AgentOS.RunSupervisor, [worker_fn: fn _opts -> :ok end]})
@@ -78,9 +85,9 @@ defmodule AgentOSWeb.ConsentLiveTest do
     assert html =~ "verify deterministic consent display"
 
     # Assert exact phrases
-    assert html =~ "WRITE TO YOUR LOCAL STATE STORE"
-    assert html =~ "SEND MESSAGES OUT TO EXTERNAL RECIPIENTS"
-    assert html =~ "READ INCOMING EMAILS FROM GMAIL"
+    assert html =~ "Write to your local state store"
+    assert html =~ "Send messages out to external recipients"
+    assert html =~ "Read incoming emails from Gmail"
 
     # Assert scoping values
     assert html =~ "append"

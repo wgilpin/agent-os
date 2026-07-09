@@ -11,9 +11,16 @@ defmodule AgentOS.TriggerGatewayTest do
         "pending_approvals_#{System.unique_integer([:positive])}.db"
       )
 
+    tmp_deployments =
+      Path.join(
+        System.tmp_dir!(),
+        "deployments_#{System.unique_integer([:positive])}.db"
+      )
+
     on_exit(fn ->
       try do
         File.rm(tmp_approvals)
+        File.rm(tmp_deployments)
       rescue
         _ -> :ok
       end
@@ -24,6 +31,24 @@ defmodule AgentOS.TriggerGatewayTest do
     start_supervised!(
       {StateStore, name: "pending_approvals", path: tmp_approvals, initial: %{approvals: %{}}}
     )
+
+    # Dispatch is registry-gated since 041: seed the agents these tests fire as
+    # deployed-active so the pre-existing fan-out assertions keep their intent.
+    start_supervised!({StateStore, name: "deployments", path: tmp_deployments, initial: %{}})
+
+    :ok =
+      AgentOS.DeploymentRegistry.record_deployment(
+        "discovery",
+        "manifests/discovery.md",
+        :reviewed_human
+      )
+
+    :ok =
+      AgentOS.DeploymentRegistry.record_deployment(
+        "no_msg",
+        "manifests/no_msg.md",
+        :reviewed_human
+      )
 
     {:ok, tmp_approvals: tmp_approvals}
   end

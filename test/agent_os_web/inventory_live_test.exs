@@ -61,7 +61,7 @@ defmodule AgentOSWeb.InventoryLiveTest do
     assert {:ok, _lv, html} = live(conn, "/inventory")
 
     # Assert discovery agent (which exists under manifests/discovery.md) is shown
-    assert html =~ "Roster:"
+    assert html =~ "agent-card-discovery"
     assert html =~ "discovery"
     assert html =~ "Surface high-signal"
     assert html =~ "daily"

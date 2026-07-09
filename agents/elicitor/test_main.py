@@ -2,13 +2,11 @@ import json
 import os
 import subprocess
 import sys
-import pytest
 
 # Ensure project root is in sys.path for robust module resolution
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from agents.elicitor.main import run_mock
-from agents.elicitor.models import ElicitorResponse
+from agents.elicitor.mock_main import run_mock
 
 def test_run_mock_initial():
     session = {
@@ -75,9 +73,11 @@ def test_subprocess_execution_mocked():
     }
     env = os.environ.copy()
     env["MOCK_ELICITOR"] = "true"
-    
+
+    # The substrate (elicitation_session.ex) selects mock_main.py when
+    # MOCK_ELICITOR=true; exercise that entrypoint directly.
     proc = subprocess.run(
-        [sys.executable, "agents/elicitor/main.py"],
+        [sys.executable, "agents/elicitor/mock_main.py"],
         input=json.dumps(session).encode("utf-8"),
         capture_output=True,
         env=env,

@@ -96,6 +96,20 @@ main, [data-phx-main], .workspace-wrapper {
   margin-bottom: 32px;
 }
 
+.landing-inventory-link {
+  display: inline-block;
+  margin-top: 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.landing-inventory-link:hover {
+  color: var(--color-text-dark);
+}
+
 .landing-form textarea {
   width: 100%;
   height: 120px;
@@ -560,6 +574,20 @@ main, [data-phx-main], .workspace-wrapper {
   animation: fadeIn 0.5s ease-out;
 }
 
+.consent-back-link {
+  display: inline-block;
+  margin-bottom: 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.consent-back-link:hover {
+  color: var(--color-text-dark);
+}
+
 .consent-card-header {
   border-bottom: 2px solid rgba(0, 0, 0, 0.06);
   padding-bottom: 20px;
@@ -571,6 +599,14 @@ main, [data-phx-main], .workspace-wrapper {
   font-weight: 700;
   color: var(--color-text-dark);
   margin-bottom: 6px;
+}
+
+.consent-card-header .agent-name-sub {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin-bottom: 10px;
+  overflow-wrap: anywhere;
 }
 
 .consent-card-header .purpose-text {
@@ -646,6 +682,7 @@ main, [data-phx-main], .workspace-wrapper {
   font-size: 14px;
   font-weight: 600;
   color: var(--color-text-dark);
+  overflow-wrap: anywhere;
 }
 
 /* Danger Tier Badges */
@@ -680,8 +717,7 @@ main, [data-phx-main], .workspace-wrapper {
   background-color: #F8F9FA;
   border-radius: 8px;
   padding: 10px 14px;
-  font-family: monospace;
-  font-size: 12px;
+  font-size: 13px;
   color: #4A5568;
   display: flex;
   flex-direction: column;
@@ -892,10 +928,12 @@ main, [data-phx-main], .workspace-wrapper {
 }
 
 .agent-name-highlight {
+  display: inline-block;
   color: var(--color-bg-main);
   background-color: rgba(52, 54, 122, 0.08);
   padding: 2px 10px;
   border-radius: 8px;
+  overflow-wrap: anywhere;
 }
 
 .metadata-content {

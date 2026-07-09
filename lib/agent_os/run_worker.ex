@@ -290,7 +290,7 @@ defmodule AgentOS.RunWorker do
              (if cmd == "docker" do
                 Jason.encode!(build_payload(snapshot, items, Keyword.get(opts, :trigger_input)))
               else
-                Jason.encode!(%{"roster" => snapshot.records || []})
+                Jason.encode!(%{"roster" => roster_records(snapshot)})
               end),
            {:ok, stdout} <- PortRunner.run(input_json, cmd, args, timeout_ms: timeout_ms),
            {:ok, _outcome} <- OutcomeRecord.parse(stdout) do
@@ -437,7 +437,7 @@ defmodule AgentOS.RunWorker do
   @spec build_payload(map(), list(), term()) :: map()
   def build_payload(snapshot, items, trigger_input) do
     payload = %{
-      "state" => %{"records" => snapshot.records || []},
+      "state" => %{"records" => roster_records(snapshot)},
       "items" => items
     }
 
@@ -446,6 +446,12 @@ defmodule AgentOS.RunWorker do
     else
       Map.put(payload, "trigger_input", trigger_input)
     end
+  end
+
+  # Reads the roster list tolerantly: fresh stores key it with the atom
+  # :records, while a store hydrated from a legacy on-disk DB uses "records".
+  defp roster_records(snapshot) do
+    Map.get(snapshot, :records) || Map.get(snapshot, "records") || []
   end
 
   # Logs a spend-breach run and returns the killed sentinel. Effect counts come from the

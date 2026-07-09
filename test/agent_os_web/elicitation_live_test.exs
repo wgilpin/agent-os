@@ -108,8 +108,14 @@ defmodule AgentOSWeb.ElicitationLiveTest do
 
     try do
       assert html_success = lv |> element(".btn-confirm") |> render_click()
-      assert html_success =~ "Specification Confirmed!"
-      assert html_success =~ "written successfully"
+      assert html_success =~ "Specification Confirmed"
+      assert html_success =~ "Elicited specification written"
+
+      # 041: the confirmed screen offers the pipeline start with the
+      # consent-gated mode preselected and the dangerous mode NOT preselected.
+      assert html_success =~ "Start Pipeline"
+      assert html_success =~ ~s(<option value="review_if_risky" selected)
+      refute html_success =~ ~s(<option value="dangerously_skip_review" selected)
 
       # Verify file was written
       assert File.exists?(real_path)

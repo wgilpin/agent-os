@@ -67,6 +67,56 @@ defmodule AgentOS.ElicitationTest do
     File.rm_rf!(temp_dir)
   end
 
+  test "confirmed flag with non-empty closing prose still confirms the session" do
+    # Regression: live models set confirmed=true but close with prose ("Spec
+    # confirmed. No further questions."). The session must key on the structured
+    # flag, never on the next_question being empty.
+    assert {:ok, pid} = ElicitationSession.start_link("reply to recruiter emails")
+
+    assert {:ok, session, next_q, _creep, _pb} =
+             ElicitationSession.submit_message(pid, "confirm")
+
+    assert next_q == "Spec confirmed. No further questions."
+    assert session.spec_draft.confirmed
+    assert session.status == :confirmed
+
+    # write_spec is unlocked by the confirmed status
+    temp_dir = Path.join(["data", "test_elicitation_prose"])
+    File.mkdir_p!(temp_dir)
+    assert :ok = ElicitationSession.write_spec(pid, temp_dir)
+    File.rm_rf!(temp_dir)
+  end
+
+  test "UI dollar cap overrides the elicited draft and lands in the written spec" do
+    # The cap is a UI control (default $0.10), never an elicitation question —
+    # the UI value is authoritative over whatever the elicitor drafted (0.05 here).
+    assert {:ok, pid} = ElicitationSession.start_link("reply to recruiter emails")
+    assert {:ok, session, _, _, _} = ElicitationSession.submit_message(pid, "yes")
+    assert session.status == :confirmed
+    assert session.spec_draft.spend_limits.dollar_cap == 0.05
+
+    assert :ok = ElicitationSession.set_dollar_cap(pid, 0.10)
+
+    temp_dir = Path.join(["data", "test_elicitation_cap"])
+    File.mkdir_p!(temp_dir)
+    assert :ok = ElicitationSession.write_spec(pid, temp_dir)
+
+    {:ok, body} = File.read(Path.join(temp_dir, "elicited_spec.json"))
+    assert {:ok, %{"spend_limits" => %{"dollar_cap" => 0.1}}} = Jason.decode(body)
+    File.rm_rf!(temp_dir)
+  end
+
+  test "capability vocabulary exposes exactly the registry's ids" do
+    # The elicitor receives this list so it can never invent capability ids
+    # (observed live: 'Discord.send_message' → rejected at manifest projection).
+    vocabulary = ElicitationSession.capability_vocabulary()
+    ids = Enum.map(vocabulary, & &1["id"])
+
+    assert Enum.sort(ids) == Enum.sort(Map.keys(AgentOS.Connector.registry()))
+    assert "discord_notify" in ids
+    assert Enum.all?(vocabulary, fn %{"description" => d} -> is_binary(d) and d != "" end)
+  end
+
   test "scope creep detection flow" do
     assert {:ok, pid} = ElicitationSession.start_link("reply to recruiter emails")
 

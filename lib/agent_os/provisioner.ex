@@ -163,6 +163,13 @@ defmodule AgentOS.Provisioner do
         case get_recorded_provenance(agent_name) do
           %{status: status, hash: ^hash}
           when status in [:reviewed_human, :skipped_in_envelope, :dangerously_skipped] ->
+            # Heal pre-registry deployments: ensure the durable registry knows about
+            # an agent whose provenance already says deployed (idempotent, only if absent).
+            if is_nil(AgentOS.DeploymentRegistry.get(agent_name)) do
+              :ok =
+                AgentOS.DeploymentRegistry.record_deployment(agent_name, manifest_path, status)
+            end
+
             {:ok, status}
 
           _ ->
@@ -219,6 +226,21 @@ defmodule AgentOS.Provisioner do
                     end
 
                   :ok = record_provenance(agent_name, provenance, hash)
+
+                  # Deploy completed directly — land the durable registry record
+                  # (FR-005). The approval-resume branch writes its own record in
+                  # TriggerGateway; these are the only two write sites.
+                  :ok =
+                    AgentOS.DeploymentRegistry.record_deployment(
+                      agent_name,
+                      manifest_path,
+                      provenance
+                    )
+
+                  # "when the agent starts": a startup-triggered agent runs once on
+                  # deploy completion (no-op for other trigger types).
+                  :ok = AgentOS.TriggerArming.fire_startup(agent_name, manifest_path)
+
                   {:ok, provenance}
                 end
 

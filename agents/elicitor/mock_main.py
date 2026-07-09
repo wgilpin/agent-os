@@ -33,6 +33,23 @@ def run_mock(session_data: Dict[str, Any]) -> ElicitorResponse:
             scope_creep_detected=True,
             pushback_message="Warning: Deleting emails was requested, but is not needed to reply. We have excluded delete capability to keep permissions minimal."
         )
+    elif "confirm" in last_user_message.lower():
+        # Confirmation WITH closing prose — mirrors observed live behavior: models
+        # often set confirmed=True but answer "Spec confirmed. No further
+        # questions." The structured flag, not an empty next_question, must be the
+        # confirmation signal.
+        return ElicitorResponse(
+            spec_draft=ElicitedSpecModel(
+                purpose="reply to recruiter emails and save drafts",
+                capabilities=["gmail_read", "gmail_draft"],
+                boundaries=BoundaryModel(egress_domains=["gmail.googleapis.com"], target_locations=[]),
+                spend_limits=SpendLimitsModel(dollar_cap=0.05, token_limit=100000),
+                confirmed=True
+            ),
+            next_question="Spec confirmed. No further questions.",
+            scope_creep_detected=False,
+            pushback_message=""
+        )
     elif "yes" in last_user_message.lower():
         # User confirmed the spec
         return ElicitorResponse(

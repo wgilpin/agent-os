@@ -78,6 +78,7 @@ defmodule AgentOSWeb.ConsentLive do
     ~H"""
     <div class="consent-container">
       <div class="consent-card">
+        <a href="/inventory" class="consent-back-link">← Back to agents</a>
         <%= if @status == :error do %>
           <div class="error-banner">
             <h2>Capability Loading Error</h2>
@@ -86,7 +87,8 @@ defmodule AgentOSWeb.ConsentLive do
           </div>
         <% else %>
           <div class="consent-card-header">
-            <h1>Consent Required: <%= @agent_name %></h1>
+            <h1>Consent Required</h1>
+            <p class="agent-name-sub" title={@agent_name}><%= humanize_name(@agent_name) %></p>
             <p class="purpose-text"><strong>Purpose:</strong> <%= @manifest.purpose %></p>
           </div>
 
@@ -100,21 +102,21 @@ defmodule AgentOSWeb.ConsentLive do
             <%= for entry <- @entries do %>
               <div class="capability-item">
                 <div class="capability-item-header">
-                  <span class="capability-phrase"><%= entry.phrase %></span>
+                  <span class="capability-phrase"><%= display_phrase(entry.phrase) %></span>
                   <span class={"danger-badge danger-badge-#{entry.danger}"}><%= entry.danger %></span>
                 </div>
                 <%= if entry.recipients || entry.methods do %>
                   <div class="capability-details">
                     <%= if entry.recipients do %>
                       <div class="capability-detail-row">
-                        <span class="capability-detail-label">Recipients:</span>
-                        <span><%= inspect(entry.recipients) %></span>
+                        <span class="capability-detail-label">Sends to</span>
+                        <span><%= humanize_terms(entry.recipients) %></span>
                       </div>
                     <% end %>
                     <%= if entry.methods do %>
                       <div class="capability-detail-row">
-                        <span class="capability-detail-label">Methods:</span>
-                        <span><%= inspect(entry.methods) %></span>
+                        <span class="capability-detail-label">Can</span>
+                        <span><%= humanize_terms(entry.methods) %></span>
                       </div>
                     <% end %>
                   </div>
@@ -185,6 +187,11 @@ defmodule AgentOSWeb.ConsentLive do
       {:noreply, socket}
     end
   end
+
+  # Human-readable text helpers shared with the inventory dashboard.
+  defdelegate humanize_name(name), to: AgentOSWeb.HumanText
+  defdelegate display_phrase(phrase), to: AgentOSWeb.HumanText
+  defdelegate humanize_terms(terms), to: AgentOSWeb.HumanText
 
   # Helper to assign weight to danger levels for ordering
   defp danger_weight(entry) do
