@@ -183,9 +183,15 @@ defmodule AgentOSWeb.ConsentLive do
       :ok =
         AgentOS.Provisioner.record_provenance(socket.assigns.agent_name, :reviewed_human, hash)
 
-      # 3. Resume the deploy execution via TriggerGateway approval if ref exists
+      # 3. Resume the deploy execution via TriggerGateway approval if ref exists.
+      #    With no pending deploy action to resume (the pipeline never queued one),
+      #    the human approval IS the deploy decision: Provisioner.deploy's healing
+      #    path lands the registry record for the just-recorded approved provenance,
+      #    then startup fires and time triggers arm exactly as on a normal deploy.
       if socket.assigns.ref do
         AgentOS.TriggerGateway.submit_sync({:approval, :approve, socket.assigns.ref})
+      else
+        complete_deploy(socket.assigns.agent_name, socket.assigns.manifest_path)
       end
 
       {:noreply, assign(socket, status: :approved)}
@@ -235,24 +241,19 @@ defmodule AgentOSWeb.ConsentLive do
     end)
   end
 
-  # Every non-system agent still awaiting the owner's consent: undeployed, with either a
-  # pending deploy approval or no provenance yet (the inventory's "waiting for your
-  # approval" state). Store lookups tolerate absent stores (minimal test trees).
+  # Every non-system agent that is not deployed: reviewing and approving it here is
+  # always the path to deployment (including agents approved earlier whose deploy never
+  # completed). Store lookups tolerate absent stores (minimal test trees).
   defp awaiting_agents do
     "manifests/*.md"
     |> Path.wildcard()
     |> Enum.reject(&AgentOS.AgentLifecycle.system_agent?(Path.basename(&1, ".md")))
-    |> Enum.filter(&awaiting_approval?/1)
+    |> Enum.filter(fn path ->
+      agent_name = Path.basename(path, ".md")
+      is_nil(safe_lookup(fn -> AgentOS.DeploymentRegistry.get(agent_name) end))
+    end)
     |> Enum.map(fn path -> %{path: path, agent_name: Path.basename(path, ".md")} end)
     |> Enum.sort_by(& &1.agent_name)
-  end
-
-  defp awaiting_approval?(manifest_path) do
-    agent_name = Path.basename(manifest_path, ".md")
-
-    is_nil(safe_lookup(fn -> AgentOS.DeploymentRegistry.get(agent_name) end)) and
-      (not is_nil(safe_lookup(fn -> find_pending_approval_ref(manifest_path) end)) or
-         is_nil(safe_lookup(fn -> AgentOS.StateStore.snapshot("provenance")[agent_name] end)))
   end
 
   defp safe_lookup(fun) do
@@ -261,5 +262,36 @@ defmodule AgentOSWeb.ConsentLive do
     _ -> nil
   catch
     :exit, _ -> nil
+  end
+
+  # Completes a consent-approved deploy that has no pending action to resume. Tolerant of
+  # absent processes (minimal test trees) — in production the failure is logged loudly.
+  defp complete_deploy(agent_name, manifest_path) do
+    case AgentOS.Provisioner.deploy(manifest_path, :always_review) do
+      {:ok, _provenance} ->
+        :ok = AgentOS.TriggerArming.fire_startup(agent_name, manifest_path)
+        AgentOS.TriggerArming.rearm(agent_name)
+        :ok
+
+      other ->
+        require Logger
+
+        Logger.error(
+          "ConsentLive: approve for #{inspect(agent_name)} could not complete deploy: " <>
+            "#{inspect(other)}"
+        )
+
+        :ok
+    end
+  rescue
+    error ->
+      require Logger
+      Logger.error("ConsentLive: deploy completion failed: #{inspect(error)}")
+      :ok
+  catch
+    :exit, reason ->
+      require Logger
+      Logger.error("ConsentLive: deploy completion unavailable: #{inspect(reason)}")
+      :ok
   end
 end

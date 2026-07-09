@@ -88,8 +88,29 @@ defmodule AgentOS.RunWorker do
           }
       end
 
-    manifest_path = Keyword.get(opts, :manifest_path, cfg.manifest_path)
+    # Dispatchers (TriggerGateway, TriggerArming, AgentLifecycle.run_now) identify the
+    # target by :agent; direct callers may pass :manifest_path. With neither, the legacy
+    # config agent runs.
+    manifest_path =
+      Keyword.get(opts, :manifest_path) ||
+        agent_manifest_path(Keyword.get(opts, :agent)) ||
+        cfg.manifest_path
+
     agent_name = Path.basename(manifest_path, ".md")
+    config_agent = Path.basename(cfg.manifest_path, ".md")
+
+    # Generated agents run their generated entrypoint directly — their only side-effect
+    # path is the broker UDS tool channel, and the docker sandbox image exists only for
+    # the config agent. An explicit :agent_cmd (tests, config overrides) always wins.
+    opts =
+      if agent_name != config_agent and not Keyword.has_key?(opts, :agent_cmd) do
+        Keyword.merge(opts,
+          agent_cmd: "python",
+          agent_args: [Path.join(["agents", agent_name, "main.py"])]
+        )
+      else
+        opts
+      end
 
     review_mode =
       Keyword.get(opts, :review_mode) ||
@@ -239,6 +260,21 @@ defmodule AgentOS.RunWorker do
     end
   end
 
+  # The manifest for a dispatched :agent — the deployment record's path when registered,
+  # else the conventional location. Tolerates an absent registry (minimal test trees).
+  defp agent_manifest_path(nil), do: nil
+
+  defp agent_manifest_path(agent) when is_binary(agent) do
+    case AgentOS.DeploymentRegistry.get(agent) do
+      %{manifest_path: path} when is_binary(path) -> path
+      _ -> Path.join("manifests", agent <> ".md")
+    end
+  rescue
+    _ -> Path.join("manifests", agent <> ".md")
+  catch
+    :exit, _ -> Path.join("manifests", agent <> ".md")
+  end
+
   defp execute_run(cmd, args, manifest, agent_name, run_token, opts) do
     run_log_path = Keyword.get(opts, :run_log_path, Path.join(["data", "run_log.md"]))
     timeout_ms = Keyword.get(opts, :timeout_ms, 30_000)
@@ -290,7 +326,14 @@ defmodule AgentOS.RunWorker do
              (if cmd == "docker" do
                 Jason.encode!(build_payload(snapshot, items, Keyword.get(opts, :trigger_input)))
               else
-                Jason.encode!(%{"roster" => roster_records(snapshot)})
+                # Non-docker (generated-agent / test) runs still receive their trigger
+                # payload — a message-triggered agent is useless without its message.
+                base = %{"roster" => roster_records(snapshot)}
+
+                case Keyword.get(opts, :trigger_input) do
+                  nil -> Jason.encode!(base)
+                  trigger_input -> Jason.encode!(Map.put(base, "trigger_input", trigger_input))
+                end
               end),
            {:ok, stdout} <- PortRunner.run(input_json, cmd, args, timeout_ms: timeout_ms),
            {:ok, _outcome} <- OutcomeRecord.parse(stdout) do

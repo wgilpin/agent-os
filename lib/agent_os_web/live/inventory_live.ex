@@ -663,12 +663,9 @@ defmodule AgentOSWeb.InventoryLive do
   defp paused?(%AgentOS.DeploymentRecord{active: false}), do: true
   defp paused?(_), do: false
 
-  # Undeployed and still awaiting the owner's consent — mirrors the Approval badge's
-  # "waiting for your approval" state (nil provenance) plus any explicit pending approval.
-  defp awaiting_approval?(agent) do
-    is_nil(agent.deployment) and
-      (is_nil(agent.provenance) or not Enum.empty?(agent.pending_approvals))
-  end
+  # Any undeployed agent: the consent page is always the path to deploying it (approve
+  # completes the deploy even when no pending action exists).
+  defp awaiting_approval?(agent), do: is_nil(agent.deployment)
 
   # The agent's spend cap rendered in dollars for the edit form (micro-dollars / 1_000_000).
   defp cap_dollars(micro_dollars) when is_number(micro_dollars) do

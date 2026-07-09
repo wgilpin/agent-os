@@ -97,6 +97,33 @@ defmodule AgentOS.RunWorkerTranscriptTest do
     )
   end
 
+  # --- 042: dispatch by :agent (Run now / trigger paths) ---
+
+  describe "dispatch by :agent" do
+    test "resolves the registered manifest for :agent and runs it", ctx do
+      # Dispatchers pass only agent:/trigger: — run_once must find the manifest via
+      # the deployment registry, not fall back to the config (discovery) agent.
+      :ok =
+        AgentOS.DeploymentRegistry.record_deployment(
+          ctx.agent_name,
+          ctx.manifest_path,
+          :reviewed_human
+        )
+
+      assert :ok =
+               RunWorker.run_once(
+                 agent: ctx.agent_name,
+                 agent_cmd: "echo",
+                 agent_args: [outcome_json()],
+                 run_log_path: ctx.log_path,
+                 run_token: ctx.run_token
+               )
+
+      log = File.read!(ctx.log_path)
+      assert log =~ "status=ok"
+    end
+  end
+
   # --- US1: generated run recorded correctly ---
 
   describe "US1 — outcome record + transcript tally" do
