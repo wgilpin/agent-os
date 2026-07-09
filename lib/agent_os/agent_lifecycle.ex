@@ -108,7 +108,8 @@ defmodule AgentOS.AgentLifecycle do
   cannot be run. The run is asynchronous (ephemeral subprocess via `RunSupervisor`);
   `:ok` means it was started, not that it finished.
   """
-  @spec run_now(String.t(), keyword()) :: :ok | {:error, :system_agent | :not_active | :code_missing}
+  @spec run_now(String.t(), keyword()) ::
+          :ok | {:error, :system_agent | :not_active | :code_missing}
   def run_now(agent_name, opts \\ []) when is_binary(agent_name) do
     start_run_fn = Keyword.get(opts, :start_run_fn, &AgentOS.RunSupervisor.start_run/1)
     agents_dir = Keyword.get(opts, :agents_dir, "agents")

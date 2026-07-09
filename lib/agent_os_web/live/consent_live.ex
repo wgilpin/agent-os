@@ -47,6 +47,7 @@ defmodule AgentOSWeb.ConsentLive do
                ref: ref,
                status: :pending,
                code_missing: not File.exists?(Path.join(["agents", agent_name, "main.py"])),
+               gate_error: nil,
                error_message: nil
              )}
 
@@ -153,8 +154,14 @@ defmodule AgentOSWeb.ConsentLive do
           <%= if @status == :pending and Map.get(assigns, :code_missing, false) do %>
             <div class="code-missing-warning" role="alert">
               <strong>This agent has no generated code.</strong>
-              Approving will deploy it, but it cannot run until it is created again
+              It cannot run or be approved until it is created again
               from the Create agent page. Consider deleting it from the inventory instead.
+            </div>
+          <% end %>
+
+          <%= if @status == :pending and Map.get(assigns, :gate_error) do %>
+            <div class="gate-error-banner" role="alert">
+              <strong>Not approved:</strong> <%= @gate_error %>
             </div>
           <% end %>
 
@@ -187,25 +194,15 @@ defmodule AgentOSWeb.ConsentLive do
   @impl true
   def handle_event("approve", _params, socket) do
     if socket.assigns.status == :pending do
-      # 1. Compute manifest hash
-      hash = AgentOS.Provisioner.manifest_hash(socket.assigns.manifest_path)
+      review_mode = Application.get_env(:agent_os, :review_mode, :always_review)
 
-      # 2. Record approved provenance state
-      :ok =
-        AgentOS.Provisioner.record_provenance(socket.assigns.agent_name, :reviewed_human, hash)
-
-      # 3. Resume the deploy execution via TriggerGateway approval if ref exists.
-      #    With no pending deploy action to resume (the pipeline never queued one),
-      #    the human approval IS the deploy decision: Provisioner.deploy's healing
-      #    path lands the registry record for the just-recorded approved provenance,
-      #    then startup fires and time triggers arm exactly as on a normal deploy.
-      if socket.assigns.ref do
-        AgentOS.TriggerGateway.submit_sync({:approval, :approve, socket.assigns.ref})
-      else
-        complete_deploy(socket.assigns.agent_name, socket.assigns.manifest_path)
+      # Fail closed BEFORE recording :reviewed_human provenance: recorded approval
+      # routes Provisioner.deploy into its idempotent re-deploy path, so the gate
+      # must be checked here, not after.
+      case AgentOS.Provisioner.deploy_gate(socket.assigns.agent_name, review_mode) do
+        :ok -> do_approve(socket)
+        {:error, reason} -> {:noreply, assign(socket, gate_error: gate_error_text(reason))}
       end
-
-      {:noreply, assign(socket, status: :approved)}
     else
       {:noreply, socket}
     end
@@ -226,6 +223,49 @@ defmodule AgentOSWeb.ConsentLive do
       {:noreply, socket}
     end
   end
+
+  defp do_approve(socket) do
+    # 1. Compute manifest hash
+    hash = AgentOS.Provisioner.manifest_hash(socket.assigns.manifest_path)
+
+    # 2. Record approved provenance state
+    :ok =
+      AgentOS.Provisioner.record_provenance(socket.assigns.agent_name, :reviewed_human, hash)
+
+    # 3. Resume the deploy execution via TriggerGateway approval if ref exists.
+    #    With no pending deploy action to resume (the pipeline never queued one),
+    #    the human approval IS the deploy decision: Provisioner.deploy's healing
+    #    path lands the registry record for the just-recorded approved provenance,
+    #    then startup fires and time triggers arm exactly as on a normal deploy.
+    if socket.assigns.ref do
+      AgentOS.TriggerGateway.submit_sync({:approval, :approve, socket.assigns.ref})
+    else
+      complete_deploy(socket.assigns.agent_name, socket.assigns.manifest_path)
+    end
+
+    {:noreply, assign(socket, status: :approved)}
+  end
+
+  # Human-readable copy for a deploy-gate refusal on the approve button.
+  defp gate_error_text(:missing_verdict),
+    do:
+      "this agent's safety checks (code check and security review) haven't completed, " <>
+        "so it can't be approved. Re-create it from the Create agent page to re-run them."
+
+  defp gate_error_text(:stale_verdict),
+    do:
+      "this agent's code doesn't match the code its safety checks reviewed " <>
+        "(it may have been changed, regenerated, or never generated). " <>
+        "Re-create it from the Create agent page to re-run the checks."
+
+  defp gate_error_text(:security_review_failed),
+    do: "this agent's security review did not pass, so it can't be approved."
+
+  defp gate_error_text(:judge_failed),
+    do: "this agent's code check (blind compliance test) did not pass, so it can't be approved."
+
+  defp gate_error_text(:both_failed),
+    do: "this agent failed both its code check and its security review, so it can't be approved."
 
   # Human-readable text helpers shared with the inventory dashboard.
   defdelegate humanize_name(name), to: AgentOSWeb.HumanText

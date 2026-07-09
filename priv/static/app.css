@@ -223,6 +223,16 @@ main, [data-phx-main], .workspace-wrapper {
   text-decoration: underline;
 }
 
+.gate-error-banner {
+  margin: 16px 0;
+  padding: 12px 16px;
+  border: 1px solid #f5c6c2;
+  border-radius: 10px;
+  background-color: #fdecea;
+  color: #a12b21;
+  font-size: 14px;
+}
+
 .code-missing-warning {
   margin: 16px 0;
   padding: 12px 16px;

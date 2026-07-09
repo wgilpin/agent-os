@@ -160,6 +160,70 @@ defmodule AgentOSWeb.ConsentLiveTest do
     refute Map.has_key?(approvals, ref)
   end
 
+  test "approve is refused by the deploy gate when machine verdicts are not green", %{
+    tmp_dir: tmp_dir,
+    conn: conn
+  } do
+    # The test env runs :dangerously_skip_review; force the real gate for this test.
+    original_mode = Application.get_env(:agent_os, :review_mode)
+    Application.put_env(:agent_os, :review_mode, :always_review)
+
+    on_exit(fn ->
+      if original_mode,
+        do: Application.put_env(:agent_os, :review_mode, original_mode),
+        else: Application.delete_env(:agent_os, :review_mode)
+    end)
+
+    manifest_path = Path.join(tmp_dir, "ungated_agent.md")
+
+    File.write!(manifest_path, """
+    ---
+    purpose: "testing approval gate"
+    grants:
+      - connector: kv_append
+        methods: ["append"]
+    spend:
+      cap: 100000
+      window: daily
+      on_breach: kill
+    owner: human
+    supervision: restart-once-and-alert
+    ---
+    """)
+
+    ref = "ref_deploy_ungated_agent_1"
+
+    action = %AgentOS.ProposedAction{
+      type: "deploy",
+      recipient: "ungated_agent",
+      method: manifest_path,
+      payload: %{"hash" => "HASH123"}
+    }
+
+    grant = %AgentOS.Manifest.Grant{connector: "deploy"}
+
+    :ok =
+      AgentOS.StateStore.apply_action(
+        "pending_approvals",
+        {:put, :approvals, %{ref => %{ref: ref, action: action, grant: grant}}}
+      )
+
+    assert {:ok, lv, _html} = live(conn, "/consent?manifest=#{manifest_path}")
+
+    # No judge/security verdicts exist for this agent: approval must be refused.
+    html = lv |> element(".btn-approve") |> render_click()
+    refute html =~ "Deployment Approved!"
+    assert html =~ "Not approved:"
+
+    # Provenance must NOT say a human review happened.
+    provenance = AgentOS.StateStore.snapshot("provenance")
+    refute match?(%{status: :reviewed_human}, Map.get(provenance, "ungated_agent"))
+
+    # The pending ref survives so the decision can be made after a re-run.
+    pending = AgentOS.StateStore.snapshot("pending_approvals")
+    assert Map.has_key?(Map.get(pending, :approvals, %{}), ref)
+  end
+
   test "reject blocks deploy, cancels pending approval ref, and leaves agent code unexecuted", %{
     tmp_dir: tmp_dir,
     conn: conn
