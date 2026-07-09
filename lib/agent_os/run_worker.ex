@@ -82,7 +82,7 @@ defmodule AgentOS.RunWorker do
       rescue
         _ ->
           %{
-            agent_cmd: "python",
+            agent_cmd: python_bin(),
             agent_args: ["agents/discovery/main.py"],
             manifest_path: "test/fixtures/manifests/discovery.md"
           }
@@ -105,7 +105,7 @@ defmodule AgentOS.RunWorker do
     opts =
       if agent_name != config_agent and not Keyword.has_key?(opts, :agent_cmd) do
         Keyword.merge(opts,
-          agent_cmd: "python",
+          agent_cmd: python_bin(),
           agent_args: [Path.join(["agents", agent_name, "main.py"])]
         )
       else
@@ -263,6 +263,11 @@ defmodule AgentOS.RunWorker do
 
   # The manifest for a dispatched :agent — the deployment record's path when registered,
   # else the conventional location. Tolerates an absent registry (minimal test trees).
+  # Generated agents import venv-installed packages (e.g. pydantic), so they run
+  # under the project venv interpreter, not whatever bare `python` is on PATH —
+  # the same resolution the elicitor and the judge harness use.
+  defp python_bin, do: System.get_env("PYTHON_BIN") || ".venv/bin/python"
+
   defp agent_manifest_path(nil), do: nil
 
   defp agent_manifest_path(agent) when is_binary(agent) do
