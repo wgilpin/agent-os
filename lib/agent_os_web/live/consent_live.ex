@@ -10,6 +10,8 @@ defmodule AgentOSWeb.ConsentLive do
     manifest_path = params["manifest"] || params["manifest_path"]
 
     if is_nil(manifest_path) || String.trim(manifest_path) == "" do
+      # Bare /consent (e.g. from the site nav): show the approval queue — every
+      # non-system agent still waiting for the owner's consent, linking to its view.
       {:ok,
        assign(socket,
          manifest_path: nil,
@@ -17,8 +19,9 @@ defmodule AgentOSWeb.ConsentLive do
          manifest: nil,
          entries: [],
          ref: nil,
-         status: :error,
-         error_message: "No manifest file path specified."
+         status: :index,
+         awaiting: awaiting_agents(),
+         error_message: nil
        )}
     else
       try do
@@ -79,13 +82,32 @@ defmodule AgentOSWeb.ConsentLive do
     <div class="consent-container">
       <div class="consent-card">
         <a href="/inventory" class="consent-back-link">← Back to agents</a>
+        <%= if @status == :index do %>
+          <div class="consent-card-header">
+            <h1>Approvals</h1>
+            <p class="purpose-text">Agents waiting for your consent before they can deploy and run.</p>
+          </div>
+          <%= if Enum.empty?(@awaiting) do %>
+            <p class="approval-queue-empty">Nothing is waiting for your approval right now.</p>
+          <% else %>
+            <div class="approval-queue">
+              <%= for item <- @awaiting do %>
+                <a href={"/consent?" <> URI.encode_query(manifest: item.path)} class="approval-queue-item">
+                  <span class="approval-queue-name"><%= humanize_name(item.agent_name) %></span>
+                  <span class="approval-queue-cta">Review →</span>
+                </a>
+              <% end %>
+            </div>
+          <% end %>
+        <% end %>
         <%= if @status == :error do %>
           <div class="error-banner">
             <h2>Capability Loading Error</h2>
             <p>The manifest could not be loaded or parsed due to the following failure:</p>
             <pre><%= @error_message %></pre>
           </div>
-        <% else %>
+        <% end %>
+        <%= if @manifest do %>
           <div class="consent-card-header">
             <h1>Consent Required</h1>
             <p class="agent-name-sub" title={@agent_name}><%= humanize_name(@agent_name) %></p>
@@ -211,5 +233,33 @@ defmodule AgentOSWeb.ConsentLive do
     Enum.find_value(approvals, nil, fn {ref, %{action: action}} ->
       if action.method == manifest_path, do: ref, else: nil
     end)
+  end
+
+  # Every non-system agent still awaiting the owner's consent: undeployed, with either a
+  # pending deploy approval or no provenance yet (the inventory's "waiting for your
+  # approval" state). Store lookups tolerate absent stores (minimal test trees).
+  defp awaiting_agents do
+    "manifests/*.md"
+    |> Path.wildcard()
+    |> Enum.reject(&AgentOS.AgentLifecycle.system_agent?(Path.basename(&1, ".md")))
+    |> Enum.filter(&awaiting_approval?/1)
+    |> Enum.map(fn path -> %{path: path, agent_name: Path.basename(path, ".md")} end)
+    |> Enum.sort_by(& &1.agent_name)
+  end
+
+  defp awaiting_approval?(manifest_path) do
+    agent_name = Path.basename(manifest_path, ".md")
+
+    is_nil(safe_lookup(fn -> AgentOS.DeploymentRegistry.get(agent_name) end)) and
+      (not is_nil(safe_lookup(fn -> find_pending_approval_ref(manifest_path) end)) or
+         is_nil(safe_lookup(fn -> AgentOS.StateStore.snapshot("provenance")[agent_name] end)))
+  end
+
+  defp safe_lookup(fun) do
+    fun.()
+  rescue
+    _ -> nil
+  catch
+    :exit, _ -> nil
   end
 end

@@ -246,6 +246,169 @@ defmodule AgentOS.TriggerArmingTest do
     refute_receive {:scheduled, _, _}
   end
 
+  test "disarm cancels every armed timer for an agent and forgets it" do
+    agent = "disarm_#{System.unique_integer([:positive])}"
+    manifest_path = write_time_manifest(agent, "08:30")
+    :ok = DeploymentRegistry.record_deployment(agent, manifest_path, :reviewed_human)
+
+    parent = self()
+    schedule_fn = fn message, ms -> send(parent, {:scheduled, message, ms}) && make_ref() end
+    start_run_fn = fn opts -> send(parent, {:start_run, opts}) && :ok end
+    cancel_fn = fn ref -> send(parent, {:cancelled, ref}) && false end
+
+    pid =
+      start_supervised!(
+        {TriggerArming,
+         name: nil, schedule_fn: schedule_fn, start_run_fn: start_run_fn, cancel_fn: cancel_fn}
+      )
+
+    assert_receive {:scheduled, {:fire, ^agent, "08:30"}, _ms}
+
+    assert :ok = TriggerArming.disarm(agent, pid)
+    # The armed timer ref was cancelled.
+    assert_receive {:cancelled, ref} when is_reference(ref)
+
+    # A stale fire delivered after disarm neither re-arms nor is otherwise scheduled.
+    send(pid, {:fire, agent, "08:30"})
+    _ = :sys.get_state(pid)
+    refute_receive {:scheduled, {:fire, ^agent, "08:30"}, _}
+  end
+
+  test "rearm cancels the old timer and arms the CURRENT manifest time" do
+    agent = "rearm_#{System.unique_integer([:positive])}"
+    manifest_path = write_time_manifest(agent, "08:30")
+    :ok = DeploymentRegistry.record_deployment(agent, manifest_path, :reviewed_human)
+
+    parent = self()
+    schedule_fn = fn message, ms -> send(parent, {:scheduled, message, ms}) && make_ref() end
+    start_run_fn = fn opts -> send(parent, {:start_run, opts}) && :ok end
+    cancel_fn = fn ref -> send(parent, {:cancelled, ref}) && false end
+
+    pid =
+      start_supervised!(
+        {TriggerArming,
+         name: nil, schedule_fn: schedule_fn, start_run_fn: start_run_fn, cancel_fn: cancel_fn}
+      )
+
+    assert_receive {:scheduled, {:fire, ^agent, "08:30"}, _ms}
+
+    # Simulate a schedule edit: rewrite the manifest to a new time, then rearm.
+    File.write!(manifest_path, """
+    ---
+    purpose: "arming test agent"
+    triggers:
+      - type: time
+        at: "10:00"
+    grants: []
+    spend:
+      cap: 1000
+      window: "daily"
+      on_breach: "kill"
+    owner: "human"
+    supervision: "none"
+    ---
+    # Arming test agent
+    """)
+
+    assert :ok = TriggerArming.rearm(agent, pid)
+
+    # Old 08:30 timer cancelled; new 10:00 timer armed; old time never re-scheduled.
+    assert_receive {:cancelled, _ref}
+    assert_receive {:scheduled, {:fire, ^agent, "10:00"}, _ms}
+    refute_receive {:scheduled, {:fire, ^agent, "08:30"}, _}
+  end
+
+  test "rearm after a time trigger is retyped away cancels the timer and arms nothing" do
+    agent = "rearm_retype_#{System.unique_integer([:positive])}"
+    manifest_path = write_time_manifest(agent, "08:30")
+    :ok = DeploymentRegistry.record_deployment(agent, manifest_path, :reviewed_human)
+
+    parent = self()
+    schedule_fn = fn message, ms -> send(parent, {:scheduled, message, ms}) && make_ref() end
+    start_run_fn = fn opts -> send(parent, {:start_run, opts}) && :ok end
+    cancel_fn = fn ref -> send(parent, {:cancelled, ref}) && false end
+
+    pid =
+      start_supervised!(
+        {TriggerArming,
+         name: nil, schedule_fn: schedule_fn, start_run_fn: start_run_fn, cancel_fn: cancel_fn}
+      )
+
+    assert_receive {:scheduled, {:fire, ^agent, "08:30"}, _ms}
+
+    # The user converts the daily trigger to message-only (trigger editing, spec 042).
+    File.write!(manifest_path, """
+    ---
+    purpose: "arming test agent"
+    triggers:
+      - type: message
+    grants: []
+    spend:
+      cap: 1000
+      window: "daily"
+      on_breach: "kill"
+    owner: "human"
+    supervision: "none"
+    ---
+    # Arming test agent
+    """)
+
+    assert :ok = TriggerArming.rearm(agent, pid)
+
+    # Old timer cancelled; no time trigger remains, so nothing is armed.
+    assert_receive {:cancelled, _ref}
+    refute_receive {:scheduled, _, _}
+  end
+
+  test "rearm on a paused (inactive) agent arms nothing" do
+    agent = "rearm_paused_#{System.unique_integer([:positive])}"
+    manifest_path = write_time_manifest(agent, "08:30")
+    :ok = DeploymentRegistry.record_deployment(agent, manifest_path, :reviewed_human)
+
+    parent = self()
+    schedule_fn = fn message, ms -> send(parent, {:scheduled, message, ms}) && make_ref() end
+    start_run_fn = fn opts -> send(parent, {:start_run, opts}) && :ok end
+    cancel_fn = fn _ref -> false end
+
+    pid =
+      start_supervised!(
+        {TriggerArming,
+         name: nil, schedule_fn: schedule_fn, start_run_fn: start_run_fn, cancel_fn: cancel_fn}
+      )
+
+    assert_receive {:scheduled, {:fire, ^agent, "08:30"}, _ms}
+
+    :ok = DeploymentRegistry.mark_inactive(agent)
+    assert :ok = TriggerArming.rearm(agent, pid)
+
+    refute_receive {:scheduled, _, _}
+  end
+
+  test "a stale fire delivered after disarm does not re-arm the schedule" do
+    agent = "stale_#{System.unique_integer([:positive])}"
+    manifest_path = write_time_manifest(agent, "09:00")
+    :ok = DeploymentRegistry.record_deployment(agent, manifest_path, :reviewed_human)
+
+    parent = self()
+    schedule_fn = fn message, ms -> send(parent, {:scheduled, message, ms}) && make_ref() end
+    start_run_fn = fn opts -> send(parent, {:start_run, opts}) && :ok end
+    cancel_fn = fn _ref -> false end
+
+    pid =
+      start_supervised!(
+        {TriggerArming,
+         name: nil, schedule_fn: schedule_fn, start_run_fn: start_run_fn, cancel_fn: cancel_fn}
+      )
+
+    assert_receive {:scheduled, {:fire, ^agent, "09:00"}, _ms}
+    :ok = TriggerArming.disarm(agent, pid)
+
+    # A fire message that raced the cancel and arrived after disarm must be dropped, not re-armed.
+    send(pid, {:fire, agent, "09:00"})
+    _ = :sys.get_state(pid)
+    refute_receive {:scheduled, {:fire, ^agent, "09:00"}, _}
+  end
+
   test "no catch-up: ms_until_next_time always schedules the NEXT occurrence, strictly in the future" do
     # Window already passed today -> tomorrow.
     now = ~U[2026-07-08 12:00:00Z]

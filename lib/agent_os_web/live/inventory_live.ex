@@ -25,7 +25,20 @@ defmodule AgentOSWeb.InventoryLive do
     socket =
       socket
       |> assign_agents_data()
-      |> assign(last_updated: DateTime.utc_now(), fire_result: nil)
+      |> assign(
+        last_updated: DateTime.utc_now(),
+        fire_result: nil,
+        # agent_name whose edit panel is expanded (nil = all collapsed).
+        editing: nil,
+        # Draft state for the open edit panel: trigger rows (string-keyed form shape) and
+        # the cap field, kept in sync via phx-change so re-renders don't lose typed input.
+        trigger_draft: [],
+        cap_draft: nil,
+        # last lifecycle-action error, rendered as an inline banner (no flash layout exists).
+        action_error: nil,
+        # agent whose manual run was just started (inline confirmation note).
+        run_started: nil
+      )
 
     {:ok, socket}
   end
@@ -42,6 +55,12 @@ defmodule AgentOSWeb.InventoryLive do
           </span>
         </div>
       </header>
+
+      <%= if @action_error do %>
+        <div class="action-error-banner" role="alert">
+          <strong>Couldn't do that:</strong> <%= @action_error %>
+        </div>
+      <% end %>
 
       <div class="agent-grid">
         <%= if Enum.empty?(@agents_data) do %>
@@ -110,6 +129,140 @@ defmodule AgentOSWeb.InventoryLive do
                       </span>
                     </div>
                   </div>
+
+                  <!-- Lifecycle controls (spec 042): pause/resume/delete + edit panel.
+                       All mutations route through AgentOS.AgentLifecycle; the view stays thin. -->
+                  <div class="meta-row lifecycle-row">
+                    <strong>Controls:</strong>
+                    <div class="lifecycle-buttons">
+                      <%= if deployed_active?(agent.deployment) do %>
+                        <button
+                          type="button"
+                          class="btn-secondary btn-run-now"
+                          phx-click="run_now"
+                          phx-value-agent={agent.agent_name}
+                        >
+                          Run now
+                        </button>
+                        <button
+                          type="button"
+                          class="btn-secondary btn-pause"
+                          phx-click="pause"
+                          phx-value-agent={agent.agent_name}
+                        >
+                          Pause
+                        </button>
+                      <% end %>
+                      <%= if paused?(agent.deployment) do %>
+                        <button
+                          type="button"
+                          class="btn-secondary btn-resume"
+                          phx-click="resume"
+                          phx-value-agent={agent.agent_name}
+                        >
+                          Resume
+                        </button>
+                      <% end %>
+                      <button
+                        type="button"
+                        class="btn-secondary btn-edit"
+                        phx-click="toggle_edit"
+                        phx-value-agent={agent.agent_name}
+                      >
+                        <%= if @editing == agent.agent_name, do: "Close", else: "Edit" %>
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-danger btn-delete"
+                        phx-click="delete"
+                        phx-value-agent={agent.agent_name}
+                        data-confirm={"Permanently delete \"#{AgentOSWeb.HumanText.humanize_name(agent.agent_name)}\"? This removes its code, its manifest, and all of its runtime state. This cannot be undone."}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    <%= if @run_started == agent.agent_name do %>
+                      <span class="run-started-note">
+                        Run started — it will show under recent executions shortly.
+                      </span>
+                    <% end %>
+                    <%= if awaiting_approval?(agent) do %>
+                      <span class="deploy-hint">
+                        To deploy and run this agent,
+                        <.link navigate="/consent" class="deploy-hint-link">approve it on the consent page</.link>.
+                      </span>
+                    <% end %>
+                  </div>
+
+                  <%= if @editing == agent.agent_name do %>
+                    <!-- Draft-based editor (no JS): phx-change keeps @trigger_draft in sync so
+                         add/remove/retype re-renders preserve what the user has typed. -->
+                    <form class="edit-settings-panel" phx-submit="update_settings" phx-change="draft_change">
+                      <input type="hidden" name="agent" value={agent.agent_name} />
+                      <div class="edit-field">
+                        <label for={"cap-#{agent.agent_name}"}>Daily spend cap (US$)</label>
+                        <input
+                          type="number"
+                          id={"cap-#{agent.agent_name}"}
+                          name="spend_cap"
+                          min="0"
+                          step="0.000001"
+                          value={@cap_draft}
+                        />
+                      </div>
+
+                      <div class="edit-triggers">
+                        <span class="edit-triggers-title">Runs when…</span>
+                        <%= if Enum.empty?(@trigger_draft) do %>
+                          <p class="edit-triggers-empty">
+                            No triggers — this agent will never run until you add one.
+                          </p>
+                        <% end %>
+                        <%= for {row, idx} <- Enum.with_index(@trigger_draft) do %>
+                          <div class="trigger-edit-row">
+                            <select name={"triggers[#{idx}][type]"} id={"trigger-type-#{agent.agent_name}-#{idx}"}>
+                              <option value="time" selected={row["type"] == "time"}>Daily at a time</option>
+                              <option value="startup" selected={row["type"] == "startup"}>On startup</option>
+                              <option value="event" selected={row["type"] == "event"}>On an event</option>
+                              <option value="message" selected={row["type"] == "message"}>On a message</option>
+                            </select>
+                            <%= if row["type"] == "time" do %>
+                              <input
+                                type="text"
+                                name={"triggers[#{idx}][at]"}
+                                value={row["at"]}
+                                pattern="[0-2]?[0-9]:[0-5][0-9]"
+                                placeholder="HH:MM"
+                                class="trigger-param-input"
+                              />
+                            <% end %>
+                            <%= if row["type"] == "event" do %>
+                              <input
+                                type="text"
+                                name={"triggers[#{idx}][name]"}
+                                value={row["name"]}
+                                placeholder="event name"
+                                class="trigger-param-input"
+                              />
+                            <% end %>
+                            <button
+                              type="button"
+                              class="btn-secondary btn-remove-trigger"
+                              phx-click="remove_trigger"
+                              phx-value-index={idx}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        <% end %>
+                        <button type="button" class="btn-secondary btn-add-trigger" phx-click="add_trigger">
+                          Add trigger
+                        </button>
+                      </div>
+
+                      <button type="submit" class="btn-primary">Save settings</button>
+                    </form>
+                  <% end %>
                 </div>
               </section>
 
@@ -341,7 +494,222 @@ defmodule AgentOSWeb.InventoryLive do
     {:noreply, socket}
   end
 
+  @impl true
+  def handle_event("run_now", %{"agent" => agent}, socket) do
+    case AgentOS.AgentLifecycle.run_now(agent) do
+      :ok ->
+        socket =
+          socket
+          |> assign(action_error: nil, run_started: agent)
+          |> refresh_after_action(agent)
+
+        {:noreply, socket}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, action_error: error_text(reason))}
+    end
+  end
+
+  @impl true
+  def handle_event("pause", %{"agent" => agent}, socket) do
+    {:noreply, apply_lifecycle(socket, agent, fn -> AgentOS.AgentLifecycle.pause(agent) end)}
+  end
+
+  @impl true
+  def handle_event("resume", %{"agent" => agent}, socket) do
+    {:noreply, apply_lifecycle(socket, agent, fn -> AgentOS.AgentLifecycle.resume(agent) end)}
+  end
+
+  @impl true
+  def handle_event("delete", %{"agent" => agent}, socket) do
+    # delete/1 always returns :ok (idempotent, tolerant of partial state).
+    socket = apply_lifecycle(socket, agent, fn -> AgentOS.AgentLifecycle.delete(agent) end)
+    # Collapse the edit panel if it was open for the now-gone agent.
+    {:noreply, assign(socket, editing: nil)}
+  end
+
+  @impl true
+  def handle_event("toggle_edit", %{"agent" => agent}, socket) do
+    # Pure UI toggle (no JS): open this agent's panel, or close it if already open.
+    # Opening seeds the draft (trigger rows + cap) from the agent's current data so the
+    # form edits a copy; nothing persists until "Save settings".
+    if socket.assigns.editing == agent do
+      {:noreply, assign(socket, editing: nil, action_error: nil)}
+    else
+      agent_data = Enum.find(socket.assigns.agents_data, &(&1.agent_name == agent))
+
+      {:noreply,
+       assign(socket,
+         editing: agent,
+         action_error: nil,
+         trigger_draft: draft_rows(agent_data && agent_data.triggers),
+         cap_draft: cap_dollars(agent_data && agent_data.spend_cap)
+       )}
+    end
+  end
+
+  @impl true
+  def handle_event("draft_change", params, socket) do
+    # Keep the draft in sync with every keystroke/select change so add/remove re-renders
+    # never lose what the user has typed (the form is fully server-driven, no JS).
+    {:noreply,
+     assign(socket,
+       trigger_draft: draft_from_params(params),
+       cap_draft: Map.get(params, "spend_cap", socket.assigns.cap_draft)
+     )}
+  end
+
+  @impl true
+  def handle_event("add_trigger", _params, socket) do
+    # Append a fresh row; "time" is the most common intent so it is the default type.
+    draft = socket.assigns.trigger_draft ++ [%{"type" => "time", "at" => "", "name" => ""}]
+    {:noreply, assign(socket, trigger_draft: draft)}
+  end
+
+  @impl true
+  def handle_event("remove_trigger", %{"index" => index}, socket) do
+    draft = List.delete_at(socket.assigns.trigger_draft, String.to_integer(index))
+    {:noreply, assign(socket, trigger_draft: draft)}
+  end
+
+  @impl true
+  def handle_event("update_settings", params, socket) do
+    %{"agent" => agent} = params
+
+    # Untouched rows (added but never filled in) are dropped rather than failing the save;
+    # partially-filled rows still validate so typos surface instead of vanishing.
+    triggers = params |> draft_from_params() |> Enum.reject(&blank_trigger_row?/1)
+
+    with :ok <- apply_cap(agent, Map.get(params, "spend_cap")),
+         :ok <- AgentOS.AgentLifecycle.update_triggers(agent, triggers) do
+      socket =
+        socket
+        |> assign(editing: nil, action_error: nil, trigger_draft: [], cap_draft: nil)
+        |> refresh_after_action(agent)
+
+      {:noreply, socket}
+    else
+      {:error, reason} ->
+        {:noreply, assign(socket, action_error: error_text(reason))}
+    end
+  end
+
   # --- Helper functions ---
+
+  # Runs a lifecycle action, then either records the error or refreshes + broadcasts on success.
+  defp apply_lifecycle(socket, agent, fun) do
+    case fun.() do
+      :ok ->
+        socket
+        |> assign(action_error: nil, run_started: nil)
+        |> refresh_after_action(agent)
+
+      {:error, reason} ->
+        assign(socket, action_error: error_text(reason))
+    end
+  end
+
+  # Refreshes this session's data and broadcasts so other open inventory sessions converge
+  # (FR-012). Reuses the pipeline firehose the view already subscribes to.
+  defp refresh_after_action(socket, agent) do
+    ProgressEvent.new("lifecycle:#{agent}", agent, :deploy, :finished, :lifecycle)
+    |> ProgressEvent.broadcast()
+
+    socket
+    |> assign_agents_data()
+    |> assign(last_updated: DateTime.utc_now())
+  end
+
+  # Parses the dollar cap from the form and applies it; a blank field skips the cap update.
+  defp apply_cap(_agent, nil), do: :ok
+  defp apply_cap(_agent, ""), do: :ok
+
+  defp apply_cap(agent, dollars_str) do
+    case Float.parse(dollars_str) do
+      {dollars, _rest} -> AgentOS.AgentLifecycle.update_spend_cap(agent, dollars)
+      :error -> {:error, :invalid_cap}
+    end
+  end
+
+  # Human-readable copy for lifecycle-action failures.
+  defp error_text(:not_deployed),
+    do: "that agent isn't deployed, so it can't be paused or resumed."
+
+  defp error_text(:system_agent),
+    do: "that agent belongs to the substrate — it can't be changed from here."
+
+  defp error_text(:not_active),
+    do: "the agent must be deployed and active to run — resume or deploy it first."
+
+  defp error_text(:manifest_missing),
+    do: "the agent's manifest file is missing — it can't be resumed."
+
+  defp error_text(:invalid_cap), do: "the spend cap must be a number greater than zero."
+
+  defp error_text({:invalid_time, at}),
+    do: "\"#{at}\" isn't a valid time — use HH:MM (00:00–23:59)."
+
+  defp error_text(:invalid_event_name), do: "event triggers need a (non-empty) event name."
+
+  defp error_text(:duplicate_triggers),
+    do: "two of the triggers are identical — remove one of them."
+
+  defp error_text({:unknown_trigger_type, type}),
+    do: "\"#{inspect(type)}\" isn't a recognised trigger type."
+
+  defp error_text(other), do: "something went wrong (#{inspect(other)})."
+
+  # Deployment-state predicates for the lifecycle controls.
+  defp paused?(%AgentOS.DeploymentRecord{active: false}), do: true
+  defp paused?(_), do: false
+
+  # Undeployed and still awaiting the owner's consent — mirrors the Approval badge's
+  # "waiting for your approval" state (nil provenance) plus any explicit pending approval.
+  defp awaiting_approval?(agent) do
+    is_nil(agent.deployment) and
+      (is_nil(agent.provenance) or not Enum.empty?(agent.pending_approvals))
+  end
+
+  # The agent's spend cap rendered in dollars for the edit form (micro-dollars / 1_000_000).
+  defp cap_dollars(micro_dollars) when is_number(micro_dollars) do
+    :erlang.float_to_binary(micro_dollars / 1_000_000, [:compact, decimals: 6])
+  end
+
+  defp cap_dollars(_), do: "0"
+
+  # Converts manifest triggers (atom or string keys) into string-keyed draft rows for the
+  # edit form.
+  defp draft_rows(triggers) when is_list(triggers) do
+    Enum.map(triggers, fn t ->
+      type = Map.get(t, :type) || Map.get(t, "type")
+
+      %{
+        "type" => to_string(type),
+        "at" => Map.get(t, :at) || Map.get(t, "at") || "",
+        "name" => Map.get(t, :name) || Map.get(t, "name") || ""
+      }
+    end)
+  end
+
+  defp draft_rows(_), do: []
+
+  # A row whose required field was never filled in: an empty shell, not user intent.
+  # Startup/message rows have no fields, so they are always complete.
+  defp blank_trigger_row?(%{"type" => "time"} = row),
+    do: String.trim(row["at"] || "") == ""
+
+  defp blank_trigger_row?(%{"type" => "event"} = row),
+    do: String.trim(row["name"] || "") == ""
+
+  defp blank_trigger_row?(_row), do: false
+
+  # Rebuilds the ordered draft rows from indexed form params ("triggers" => %{"0" => row, …}).
+  defp draft_from_params(params) do
+    params
+    |> Map.get("triggers", %{})
+    |> Enum.sort_by(fn {idx, _row} -> String.to_integer(idx) end)
+    |> Enum.map(fn {_idx, row} -> row end)
+  end
 
   defp schedule_tick do
     Process.send_after(self(), :tick, 5000)
@@ -385,8 +753,12 @@ defmodule AgentOSWeb.InventoryLive do
   defp has_message_trigger?(_), do: false
 
   defp assign_agents_data(socket) do
-    # Scan manifests/*.md for all agents
-    manifest_paths = Path.wildcard("manifests/*.md")
+    # Scan manifests/*.md for all agents. Substrate-owned agents (e.g. discovery) are
+    # hidden: they are not the user's to manage, and AgentLifecycle refuses them anyway.
+    manifest_paths =
+      "manifests/*.md"
+      |> Path.wildcard()
+      |> Enum.reject(&AgentOS.AgentLifecycle.system_agent?(Path.basename(&1, ".md")))
 
     agents_data =
       Enum.reduce(manifest_paths, [], fn path, acc ->

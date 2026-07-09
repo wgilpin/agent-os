@@ -25,6 +25,9 @@ config :agent_os,
   agent_codegen_model: "google/gemini-3.5-flash",
   agent_runtime_model: "google/gemini-3-flash-preview",
   judge_model: "google/gemini-3.5-flash",
+  # Substrate-owned agents: hidden from the inventory UI and refused by every
+  # AgentLifecycle mutation (they are managed by config/code, not the dashboard).
+  system_agents: ["discovery"],
   autostart: true,
   load_dotenv: true,
   credentials: %{},
@@ -68,6 +71,9 @@ end
 if config_env() == :test do
   config :agent_os,
     autostart: false,
+    # Legacy tests use the discovery manifest as their render/inventory fixture;
+    # tests exercising the system-agent guard override this per-test.
+    system_agents: [],
     # Never load real secrets from .env into the test VM (Constitution IV): tests
     # that flip :autostart (e.g. the UDS broker harness) must not pull the live
     # webhook/model keys into System env for the rest of the suite.

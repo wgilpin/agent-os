@@ -119,4 +119,52 @@ defmodule AgentOS.DeploymentRegistryTest do
     assert log =~ "ghost"
     assert DeploymentRegistry.get("ghost") == nil
   end
+
+  test "mark_active flips active back to true, preserving the rest of the record" do
+    :ok = DeploymentRegistry.record_deployment("alpha", "manifests/alpha.md", :reviewed_human)
+    original = DeploymentRegistry.get("alpha")
+
+    :ok = DeploymentRegistry.mark_inactive("alpha")
+    refute DeploymentRegistry.deployed_and_active?("alpha")
+
+    :ok = DeploymentRegistry.mark_active("alpha")
+    updated = DeploymentRegistry.get("alpha")
+
+    assert updated.active == true
+    assert updated.manifest_path == original.manifest_path
+    assert updated.provenance == original.provenance
+    # Resume is not a redeploy: the original deployment timestamp is preserved.
+    assert updated.deployed_at == original.deployed_at
+  end
+
+  test "mark_active on an absent agent warns and no-ops" do
+    log =
+      capture_log(fn ->
+        assert :ok = DeploymentRegistry.mark_active("ghost")
+      end)
+
+    assert log =~ "ghost"
+    assert DeploymentRegistry.get("ghost") == nil
+  end
+
+  test "delete removes the record entirely — agent reverts to never-deployed" do
+    :ok = DeploymentRegistry.record_deployment("alpha", "manifests/alpha.md", :reviewed_human)
+    assert DeploymentRegistry.deployed_and_active?("alpha")
+
+    :ok = DeploymentRegistry.delete("alpha")
+
+    assert DeploymentRegistry.get("alpha") == nil
+    refute DeploymentRegistry.deployed_and_active?("alpha")
+    assert StateStore.snapshot("deployments") == %{}
+  end
+
+  test "delete on an absent agent warns and no-ops" do
+    log =
+      capture_log(fn ->
+        assert :ok = DeploymentRegistry.delete("ghost")
+      end)
+
+    assert log =~ "ghost"
+    assert DeploymentRegistry.get("ghost") == nil
+  end
 end

@@ -7,9 +7,12 @@ defmodule AgentOS.DeploymentRegistry do
   `deployed_and_active?/1`; boot re-arming reads `list_active/0`. Registry
   membership gates dispatch only — it grants no capability (Constitution X/XI).
 
-  Production write sites (the ONLY two):
+  Production write sites (the ONLY ones):
     1. `AgentOS.Provisioner.deploy/3` — direct, non-blocking deploy success.
     2. `AgentOS.TriggerGateway` — approval-resume completing a deploy-shaped action.
+    3. `AgentOS.AgentLifecycle` — inventory lifecycle controls (pause/resume/delete)
+       call `mark_inactive/1`, `mark_active/1`, and `delete/1` here so the registry
+       stays the single writer to the store (Constitution IX).
   """
 
   require Logger
@@ -83,6 +86,47 @@ defmodule AgentOS.DeploymentRegistry do
       nil ->
         Logger.warning(
           "DeploymentRegistry: mark_inactive for unknown agent #{inspect(agent_name)} — no-op"
+        )
+
+        :ok
+    end
+  end
+
+  @doc """
+  Flips `active` back to true, preserving `deployed_at`/`provenance`/`manifest_path` — the
+  resume counterpart to `mark_inactive/1`. Deliberately NOT `record_deployment/3`, which
+  would reset `deployed_at` and demand a fresh provenance: resume restores a prior
+  deployment, it is not a redeploy. Warns and no-ops if the agent was never deployed.
+  """
+  @spec mark_active(String.t()) :: :ok
+  def mark_active(agent_name) when is_binary(agent_name) do
+    case get(agent_name) do
+      %DeploymentRecord{} = record ->
+        StateStore.apply_action(@store, {:put, agent_name, %{record | active: true}})
+
+      nil ->
+        Logger.warning(
+          "DeploymentRegistry: mark_active for unknown agent #{inspect(agent_name)} — no-op"
+        )
+
+        :ok
+    end
+  end
+
+  @doc """
+  Removes the deployment record entirely, so the agent reverts to never-deployed and every
+  dispatch path is gated off immediately. Used by `AgentOS.AgentLifecycle.delete/1`. Warns
+  and no-ops if the agent was never deployed (idempotent).
+  """
+  @spec delete(String.t()) :: :ok
+  def delete(agent_name) when is_binary(agent_name) do
+    case get(agent_name) do
+      %DeploymentRecord{} ->
+        StateStore.apply_action(@store, {:delete_in, [agent_name]})
+
+      nil ->
+        Logger.warning(
+          "DeploymentRegistry: delete for unknown agent #{inspect(agent_name)} — no-op"
         )
 
         :ok

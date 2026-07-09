@@ -33,6 +33,8 @@ defmodule AgentOS.TriggerArming do
     * `:manifest_load_fn` — manifest loader (default `AgentOS.Manifest.load/1`).
     * `:start_run_fn` — run starter (default `AgentOS.RunSupervisor.start_run/1`).
     * `:schedule_fn` — timer scheduler (default `Process.send_after(self(), msg, ms)`).
+    * `:cancel_fn` — timer canceller (default `Process.cancel_timer/1`).
+    * `:get_record_fn` — single-record lookup for re-arming (default `DeploymentRegistry.get/1`).
     * `:now_fn` — clock (default `DateTime.utc_now/0`).
   """
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -44,6 +46,26 @@ defmodule AgentOS.TriggerArming do
       opts_without_name,
       [name: name] |> Enum.reject(fn {_, v} -> is_nil(v) end)
     )
+  end
+
+  @doc """
+  Cancels every armed timer for `agent_name` and forgets it — used when an agent is
+  deleted so a stale daily timer can never fire again. Synchronous. Safe (no-op) for an
+  agent that has nothing armed.
+  """
+  @spec disarm(String.t(), GenServer.server()) :: :ok
+  def disarm(agent_name, server \\ __MODULE__) when is_binary(agent_name) do
+    GenServer.call(server, {:disarm, agent_name})
+  end
+
+  @doc """
+  Cancels the agent's currently-armed timers and re-arms from its CURRENT manifest — used
+  after a schedule edit (new `at`) or on resume. Only arms if the deployment record exists
+  and is active; a paused/deleted agent ends up with no armed timers. Synchronous.
+  """
+  @spec rearm(String.t(), GenServer.server()) :: :ok
+  def rearm(agent_name, server \\ __MODULE__) when is_binary(agent_name) do
+    GenServer.call(server, {:rearm, agent_name})
   end
 
   @doc """
@@ -114,12 +136,27 @@ defmodule AgentOS.TriggerArming do
         Keyword.get(opts, :schedule_fn, fn message, ms ->
           Process.send_after(self(), message, ms)
         end),
+      cancel_fn: Keyword.get(opts, :cancel_fn, &Process.cancel_timer/1),
+      get_record_fn: Keyword.get(opts, :get_record_fn, &AgentOS.DeploymentRegistry.get/1),
       now_fn: Keyword.get(opts, :now_fn, &DateTime.utc_now/0),
-      # agent_name => manifest time-trigger strings, kept for re-arming.
+      # agent_name => %{at => timer_ref}, kept so timers can be cancelled and re-armed.
       armed: %{}
     }
 
     {:ok, arm_all(state)}
+  end
+
+  @impl true
+  def handle_call({:disarm, agent_name}, _from, state) do
+    {:reply, :ok, disarm_agent(state, agent_name)}
+  end
+
+  @impl true
+  def handle_call({:rearm, agent_name}, _from, state) do
+    # Cancel whatever is armed, then arm the CURRENT manifest triggers so a schedule edit
+    # or a resume takes effect without a reboot.
+    disarmed = disarm_agent(state, agent_name)
+    {:reply, :ok, rearm_agent(disarmed, agent_name)}
   end
 
   @impl true
@@ -136,9 +173,19 @@ defmodule AgentOS.TriggerArming do
       )
     end
 
-    # Always re-arm the next daily occurrence, keeping the schedule alive even
-    # across a temporary inactive period (the fire-time check gates execution).
-    {:noreply, arm_one(state, agent_name, at)}
+    # Re-arm the next daily occurrence ONLY if this (agent, at) is still armed. A
+    # `{:fire, …}` message already queued when a disarm/rearm cancelled its timer
+    # (the classic cancel_timer race) must not resurrect a schedule we just tore down —
+    # otherwise a deleted agent or an edited-away time would keep firing forever.
+    if get_in(state.armed, [agent_name, at]) do
+      {:noreply, arm_one(state, agent_name, at)}
+    else
+      Logger.info(
+        "TriggerArming: dropping stale fire for #{inspect(agent_name)} at #{at} — no longer armed"
+      )
+
+      {:noreply, state}
+    end
   end
 
   @impl true
@@ -180,13 +227,15 @@ defmodule AgentOS.TriggerArming do
     end)
   end
 
-  # Schedules the next daily occurrence of one agent's "HH:MM" trigger.
+  # Schedules the next daily occurrence of one agent's "HH:MM" trigger, keeping the timer
+  # ref so it can be cancelled on disarm/rearm.
   defp arm_one(state, agent_name, at) do
     case parse_time(at) do
       {:ok, time} ->
         ms = ms_until_next_time(state.now_fn.(), time)
-        state.schedule_fn.({:fire, agent_name, at}, ms)
-        %{state | armed: Map.update(state.armed, agent_name, [at], &Enum.uniq([at | &1]))}
+        ref = state.schedule_fn.({:fire, agent_name, at}, ms)
+        agent_timers = state.armed |> Map.get(agent_name, %{}) |> Map.put(at, ref)
+        %{state | armed: Map.put(state.armed, agent_name, agent_timers)}
 
       :error ->
         Logger.error(
@@ -195,6 +244,54 @@ defmodule AgentOS.TriggerArming do
         )
 
         state
+    end
+  end
+
+  # Arms the agent's CURRENT manifest time triggers — only if its record exists and is active.
+  # A paused/deleted agent (no record or inactive) is left with nothing armed.
+  defp rearm_agent(state, agent_name) do
+    with %{active: true, manifest_path: manifest_path} <- state.get_record_fn.(agent_name),
+         {:ok, manifest} <- state.manifest_load_fn.(manifest_path) do
+      manifest.triggers
+      |> Enum.filter(&match?(%{type: :time}, &1))
+      |> Enum.reduce(state, fn %{at: at}, acc -> arm_one(acc, agent_name, at) end)
+    else
+      {:error, reason} ->
+        Logger.error(
+          "TriggerArming: rearm could not load manifest for #{inspect(agent_name)}: " <>
+            "#{inspect(reason)} — left disarmed"
+        )
+
+        state
+
+      _ ->
+        # No record or inactive: nothing to arm (paused/deleted agent).
+        state
+    end
+  end
+
+  # Cancels every armed timer for one agent and forgets it. Also flushes any already-queued
+  # `{:fire, …}` message for a cancelled timer so it cannot trigger a duplicate run — the
+  # handle_info guard covers late-delivered stale fires, this covers ones already in the box.
+  defp disarm_agent(state, agent_name) do
+    case Map.get(state.armed, agent_name) do
+      nil ->
+        state
+
+      timers ->
+        Enum.each(timers, fn {at, ref} -> cancel_and_flush(state, agent_name, at, ref) end)
+        %{state | armed: Map.delete(state.armed, agent_name)}
+    end
+  end
+
+  # Cancels one timer and drains its stale fire message if it already landed in the mailbox.
+  defp cancel_and_flush(state, agent_name, at, ref) do
+    state.cancel_fn.(ref)
+
+    receive do
+      {:fire, ^agent_name, ^at} -> :ok
+    after
+      0 -> :ok
     end
   end
 
