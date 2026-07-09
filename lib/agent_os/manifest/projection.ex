@@ -110,6 +110,12 @@ defmodule AgentOS.Manifest.Projection do
           (manifest.triggers
            |> Enum.map(fn t ->
              case Map.get(t, :type) || Map.get(t, "type") do
+               :startup ->
+                 "  - type: startup"
+
+               "startup" ->
+                 "  - type: startup"
+
                :time ->
                  "  - type: time\n    at: \"#{t.at}\""
 
@@ -127,6 +133,9 @@ defmodule AgentOS.Manifest.Projection do
 
                "message" ->
                  "  - type: message"
+
+               other ->
+                 raise "Unsupported trigger type: #{inspect(other)}"
              end
            end)
            |> Enum.join("\n"))

@@ -67,6 +67,59 @@ defmodule AgentOS.Manifest.ProjectionTest do
     assert length(loaded_manifest.grants) == 2
   end
 
+  test "projects and round-trips all trigger types including startup" do
+    triggers = [
+      %{type: :startup},
+      %{type: :time, at: "07:00"},
+      %{type: :event, name: "approval_received"},
+      %{type: :message}
+    ]
+
+    spec = %ElicitedSpec{
+      purpose: "send a Discord message containing the local machine's time upon loading",
+      capabilities: ["kv_append"],
+      spend_limits: %{dollar_cap: 0.10, token_limit: 0},
+      triggers: triggers,
+      confirmed: true
+    }
+
+    assert {:ok, %Manifest{} = manifest} = Projection.project(spec)
+    assert manifest.triggers == triggers
+
+    markdown = Projection.serialize(manifest)
+    assert markdown =~ "- type: startup"
+    assert markdown =~ "- type: time"
+    assert markdown =~ "at: \"07:00\""
+    assert markdown =~ "- type: event"
+    assert markdown =~ "name: \"approval_received\""
+    assert markdown =~ "- type: message"
+
+    tmp_path =
+      Path.join(System.tmp_dir!(), "projected_triggers_#{System.unique_integer([:positive])}.md")
+
+    assert :ok = Projection.write(manifest, tmp_path)
+    on_exit(fn -> File.rm(tmp_path) end)
+
+    assert {:ok, %Manifest{} = loaded} = Manifest.load(tmp_path)
+    assert loaded.triggers == triggers
+  end
+
+  test "serialize raises descriptively on an unsupported trigger type" do
+    spec = %ElicitedSpec{
+      purpose: "p",
+      capabilities: ["kv_append"],
+      spend_limits: %{dollar_cap: 0.10, token_limit: 0},
+      triggers: [%{type: :webhook}],
+      confirmed: true
+    }
+
+    assert {:ok, manifest} = Projection.project(spec)
+
+    assert_raise RuntimeError, ~r/Unsupported trigger type/, fn ->
+      Projection.serialize(manifest)
+    end
+  end
+
   test "rejects an unconfirmed spec" do
     spec = %ElicitedSpec{
       purpose: "Surface content from recruiter emails",

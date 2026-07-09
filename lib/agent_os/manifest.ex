@@ -17,7 +17,8 @@ defmodule AgentOS.Manifest do
   defstruct [:purpose, :triggers, :grants, :mounts, :spend, :owner, :supervision]
 
   @type trigger ::
-          %{type: :time, at: String.t()}
+          %{type: :startup}
+          | %{type: :time, at: String.t()}
           | %{type: :event, name: String.t()}
           | %{type: :message}
 
@@ -167,6 +168,9 @@ defmodule AgentOS.Manifest do
     type = Map.get(raw_trigger, "type") || raise "Trigger is missing 'type' field"
 
     case type do
+      "startup" ->
+        %{type: :startup}
+
       "time" ->
         at = Map.get(raw_trigger, "at") || raise "Time trigger is missing 'at' field"
         %{type: :time, at: at}

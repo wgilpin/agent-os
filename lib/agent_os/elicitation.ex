@@ -14,7 +14,7 @@ defmodule AgentOS.ElicitedSpec do
             dollar_cap: float(),
             token_limit: integer()
           },
-          triggers: [map()],
+          triggers: [AgentOS.Manifest.trigger()],
           confirmed: boolean()
         }
 
@@ -35,15 +35,21 @@ defmodule AgentOS.ElicitedSpec do
     boundaries = Map.get(map, "boundaries", %{})
     spend_limits = Map.get(map, "spend_limits", %{})
 
+    # Normalise triggers crossing the port boundary to canonical atom-keyed maps.
+    # Malformed or unknown shapes from the (untrusted) elicitor are dropped, matching
+    # Manifest.parse_trigger!/1 which rejects the same shapes on the load path.
     triggers =
       Map.get(map, "triggers", [])
-      |> Enum.map(fn t ->
-        case Map.get(t, "type") do
-          "time" -> %{type: :time, at: Map.get(t, "at")}
-          "event" -> %{type: :event, name: Map.get(t, "name")}
-          "message" -> %{type: :message}
-          type when is_atom(type) -> t
-          _ -> t
+      |> Enum.flat_map(fn t ->
+        at = Map.get(t, "at") || Map.get(t, :at)
+        name = Map.get(t, "name") || Map.get(t, :name)
+
+        case Map.get(t, "type") || Map.get(t, :type) do
+          type when type in ["startup", :startup] -> [%{type: :startup}]
+          type when type in ["time", :time] and is_binary(at) and at != "" -> [%{type: :time, at: at}]
+          type when type in ["event", :event] and is_binary(name) and name != "" -> [%{type: :event, name: name}]
+          type when type in ["message", :message] -> [%{type: :message}]
+          _ -> []
         end
       end)
 

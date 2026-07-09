@@ -9,6 +9,7 @@ defmodule AgentOS.ManifestTest do
   ---
   purpose: "Surface content from the people-roster"
   triggers:
+    - type: startup
     - type: time
       at: "07:00"
     - type: message
@@ -44,7 +45,8 @@ defmodule AgentOS.ManifestTest do
     assert m.mounts == ["roster_trust"]
 
     # Triggers
-    assert length(m.triggers) == 3
+    assert length(m.triggers) == 4
+    assert %{type: :startup} in m.triggers
     assert %{type: :time, at: "07:00"} in m.triggers
     assert %{type: :message} in m.triggers
     assert %{type: :event, name: "approval_received"} in m.triggers
