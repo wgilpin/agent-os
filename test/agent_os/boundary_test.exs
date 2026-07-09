@@ -13,7 +13,7 @@ defmodule AgentOS.BoundaryTest do
 
   test "boundary invariants: manifest never crosses to the agent" do
     # 1. Anti-vacuousness check: load real manifest and assert grants and spend are populated (VR-006)
-    manifest_path = "manifests/discovery.md"
+    manifest_path = "test/fixtures/manifests/discovery.md"
     assert {:ok, %Manifest{} = manifest} = Manifest.load(manifest_path)
     assert length(manifest.grants) > 0
     refute is_nil(manifest.spend)

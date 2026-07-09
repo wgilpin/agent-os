@@ -4,7 +4,7 @@ import Config
 # manifest is kept in sync manually; later phases provision from the manifest itself.
 # Secrets/tokens for capabilities are sourced from OS env, never committed directly.
 config :agent_os,
-  manifest_path: "manifests/discovery.md",
+  manifest_path: "test/fixtures/manifests/discovery.md",
   roster_path: "data/roster.db",
   spend_ledger_path: "data/spend_ledger.db",
   pending_approvals_path: "data/pending_approvals.db",
@@ -35,7 +35,7 @@ config :agent_os,
 
 # Hard-wired agent configuration (manifest path, command, timezone, schedule, and capabilities)
 config :agent_os, :agent,
-  manifest_path: "manifests/discovery.md",
+  manifest_path: "test/fixtures/manifests/discovery.md",
   agent_cmd: "docker",
   agent_args: [],
   tz: "Etc/UTC",
@@ -74,6 +74,9 @@ if config_env() == :test do
     # Legacy tests use the discovery manifest as their render/inventory fixture;
     # tests exercising the system-agent guard override this per-test.
     system_agents: [],
+    # Tests must never append to the live data/run_log.md (test_helper.exs wipes
+    # this file at suite start).
+    run_log_path: Path.join(System.tmp_dir!(), "agent_os_test_run_log.md"),
     # Never load real secrets from .env into the test VM (Constitution IV): tests
     # that flip :autostart (e.g. the UDS broker harness) must not pull the live
     # webhook/model keys into System env for the rest of the suite.

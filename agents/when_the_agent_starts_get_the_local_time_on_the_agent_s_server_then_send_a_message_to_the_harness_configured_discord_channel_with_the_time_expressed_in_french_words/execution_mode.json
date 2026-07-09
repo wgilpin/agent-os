@@ -1,4 +1,0 @@
-{
-  "mode": "inference",
-  "rationale": "The local time on the server changes dynamically based on when the agent starts. Fulfilling the purpose requires getting this dynamic time and translating/expressing it into French words, which involves runtime processing and reasoning over dynamic content."
-}

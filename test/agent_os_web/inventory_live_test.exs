@@ -45,12 +45,22 @@ defmodule AgentOSWeb.InventoryLiveTest do
       {StateStore, name: "security_review_results", path: tmp_security, initial: %{}}
     )
 
+    start_supervised!(
+      {StateStore, name: "deployments", path: Path.join(tmp_dir, "deployments.db"), initial: %{}}
+    )
+
     start_supervised!({Phoenix.PubSub, name: AgentOS.PubSub})
     start_supervised!(AgentOSWeb.Endpoint)
+
+    # The discovery manifest is a test fixture (it no longer lives under manifests/,
+    # so it never shows in the real inventory). These UI tests assert against its
+    # card, so surface it in the scanned dir for the duration of the test.
+    File.cp!("test/fixtures/manifests/discovery.md", "manifests/discovery.md")
 
     on_exit(fn ->
       File.rm_rf!(tmp_dir)
       File.rm("manifests/temp_test_agent.md")
+      File.rm("manifests/discovery.md")
     end)
 
     {:ok, tmp_dir: tmp_dir, conn: build_conn()}
@@ -60,7 +70,7 @@ defmodule AgentOSWeb.InventoryLiveTest do
     # Visit /inventory
     assert {:ok, _lv, html} = live(conn, "/inventory")
 
-    # Assert discovery agent (which exists under manifests/discovery.md) is shown
+    # Assert the discovery fixture agent is shown
     assert html =~ "agent-card-discovery"
     assert html =~ "discovery"
     assert html =~ "Surface high-signal"
@@ -116,13 +126,13 @@ defmodule AgentOSWeb.InventoryLiveTest do
   end
 
   test "renders audit log run records, conformance flags, and pending approvals", %{conn: conn} do
-    # Write a mock record to run log
-    # Format: - [timestamp] status=ok actions=1 ...
-    run_log_path = "data/run_log.md"
+    # Write a mock record to the (test-env, tmp) run log. The record must carry
+    # agent= — each card shows only its own runs.
+    run_log_path = AgentOS.RunLog.default_path()
     backup = if File.exists?(run_log_path), do: File.read!(run_log_path), else: nil
 
     File.write!(run_log_path, """
-    - [2026-07-01T20:00:00Z] status=ok actions=3 trigger=timer items_in=10 items_dropped=2 note=Run completed successfully
+    - [2026-07-01T20:00:00Z] status=ok actions=3 agent=discovery trigger=timer items_in=10 items_dropped=2 note=Run completed successfully
     """)
 
     # Seed conformance flag
@@ -197,5 +207,42 @@ defmodule AgentOSWeb.InventoryLiveTest do
     send(lv.pid, :tick)
     html2 = render(lv)
     assert html2 =~ "updated_purpose"
+  end
+
+  test "delete requires an explicit confirmation step", %{conn: conn} do
+    File.write!("manifests/temp_test_agent.md", """
+    ---
+    purpose: "Agent slated for deletion"
+    triggers: []
+    grants: []
+    mounts: []
+    spend:
+      cap: 100000
+      window: daily
+      on_breach: kill
+    owner: human
+    supervision: restart-once
+    ---
+    """)
+
+    assert {:ok, lv, _html} = live(conn, "/inventory")
+    card = "#agent-card-temp_test_agent"
+
+    # First click opens the server-rendered confirmation; nothing is deleted yet.
+    html = lv |> element("#{card} .btn-delete") |> render_click()
+    assert html =~ "delete-confirm"
+    assert html =~ "cannot be undone"
+    assert File.exists?("manifests/temp_test_agent.md")
+
+    # Cancel closes the confirmation without deleting.
+    html = lv |> element("#{card} .btn-cancel-delete") |> render_click()
+    refute html =~ "delete-confirm"
+    assert File.exists?("manifests/temp_test_agent.md")
+
+    # Re-open and confirm: only now does the agent actually go away.
+    lv |> element("#{card} .btn-delete") |> render_click()
+    html = lv |> element("#{card} .btn-confirm-delete") |> render_click()
+    refute html =~ "agent-card-temp_test_agent"
+    refute File.exists?("manifests/temp_test_agent.md")
   end
 end

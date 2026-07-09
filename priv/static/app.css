@@ -25,6 +25,11 @@ body {
   font-family: 'Outfit', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   background-color: var(--color-bg-deep);
   color: var(--color-white);
+  /* Flex column so the site-nav header takes its own height and the page content
+     flexes into the REMAINDER of the viewport. (Content at height:100% under a
+     header inside an overflow:hidden body clips the bottom by the header height.) */
+  display: flex;
+  flex-direction: column;
   height: 100vh;
   width: 100vw;
   margin: 0;
@@ -35,7 +40,8 @@ body {
 main, [data-phx-main], .workspace-wrapper {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   width: 100%;
   overflow: hidden;
   margin: 0;
@@ -48,7 +54,8 @@ main, [data-phx-main], .workspace-wrapper {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100vh;
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 20px;
   background: linear-gradient(135deg, var(--color-bg-deep) 0%, var(--color-bg-main) 100%);
 }
@@ -186,6 +193,24 @@ main, [data-phx-main], .workspace-wrapper {
   color: var(--color-success, #2e7d32);
 }
 
+.delete-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 0 8px;
+  padding: 12px 18px;
+  border-radius: 10px;
+  background-color: #fdecea;
+  border: 1px solid #f5c6c2;
+  font-size: 13px;
+}
+
+.delete-confirm-text {
+  color: #a12b21;
+  font-weight: 500;
+}
+
 .deploy-hint {
   margin-left: 8px;
   font-size: 13px;
@@ -196,6 +221,16 @@ main, [data-phx-main], .workspace-wrapper {
   color: var(--color-primary, #3f3d9e);
   font-weight: 600;
   text-decoration: underline;
+}
+
+.code-missing-warning {
+  margin: 16px 0;
+  padding: 12px 16px;
+  border: 1px solid #e0a800;
+  border-radius: 10px;
+  background-color: #fff8e1;
+  color: #7a5c00;
+  font-size: 14px;
 }
 
 /* Approval queue (bare /consent) */
@@ -799,7 +834,8 @@ main, [data-phx-main], .workspace-wrapper {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 40px 20px;
   background: linear-gradient(135deg, var(--color-bg-deep) 0%, var(--color-bg-main) 100%);
   overflow-y: auto;
@@ -1087,7 +1123,8 @@ main, [data-phx-main], .workspace-wrapper {
 .inventory-dashboard-container {
   padding: 40px;
   background: linear-gradient(135deg, var(--color-bg-deep) 0%, var(--color-bg-main) 100%);
-  min-height: 100vh;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
 }
 

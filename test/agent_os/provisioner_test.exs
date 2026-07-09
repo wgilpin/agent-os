@@ -61,7 +61,7 @@ defmodule AgentOS.ProvisionerTest do
   test "agent_config/0 returns a map with all hard-wired keys" do
     config = Provisioner.agent_config()
     assert is_map(config)
-    assert config.manifest_path == "manifests/discovery.md"
+    assert config.manifest_path == "test/fixtures/manifests/discovery.md"
     assert config.agent_cmd == "docker"
     assert config.agent_args == []
     assert config.tz == "Etc/UTC"

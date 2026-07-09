@@ -25,7 +25,7 @@ defmodule AgentOS.Inventory do
       try do
         AgentOS.Provisioner.agent_config()
       rescue
-        _ -> %{manifest_path: "manifests/discovery.md"}
+        _ -> %{manifest_path: "test/fixtures/manifests/discovery.md"}
       end
 
     manifest_path = Keyword.get(opts, :manifest_path, agent_config.manifest_path)
@@ -48,7 +48,7 @@ defmodule AgentOS.Inventory do
             _ -> nil
           end)
 
-        last_run = parse_last_run(Keyword.get(opts, :run_log_path, "data/run_log.md"))
+        last_run = parse_last_run(Keyword.get(opts, :run_log_path, AgentOS.RunLog.default_path()))
 
         now = Keyword.get(opts, :now, DateTime.utc_now())
         spend_ledger = AgentOS.StateStore.snapshot("spend_ledger")
@@ -268,7 +268,7 @@ defmodule AgentOS.Inventory do
           try do
             AgentOS.Provisioner.agent_config()
           rescue
-            _ -> %{manifest_path: "manifests/discovery.md"}
+            _ -> %{manifest_path: "test/fixtures/manifests/discovery.md"}
           end
 
         manifest_path = Keyword.get(opts, :manifest_path, agent_config.manifest_path)

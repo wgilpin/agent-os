@@ -27,8 +27,12 @@ defmodule AgentOS.Alerter do
     # otherwise default to empty list which lets RunLog.append default its path.
     append_opts = if path, do: [path: path], else: []
 
-    # Write a status=alert entry to the persistent run-log file.
-    AgentOS.RunLog.append(%{status: :alert, actions: 0, note: inspect(reason)}, append_opts)
+    # Write a status=alert entry to the persistent run-log file, attributed to the
+    # dispatched agent when the run opts carried one.
+    AgentOS.RunLog.append(
+      %{status: :alert, actions: 0, agent: Keyword.get(opts, :agent), note: inspect(reason)},
+      append_opts
+    )
 
     # Return the atom :ok, confirming execution success.
     :ok

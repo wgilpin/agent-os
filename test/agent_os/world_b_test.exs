@@ -312,7 +312,7 @@ defmodule AgentOS.WorldBTest do
         )
 
       # Assert it is visible in Inventory.render
-      inv = Inventory.render(manifest_path: "manifests/discovery.md")
+      inv = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert String.contains?(inv, "ref_42")
       assert String.contains?(inv, "external_send")
 
@@ -349,7 +349,7 @@ defmodule AgentOS.WorldBTest do
       # Assert entry is removed from StateStore and Inventory
       snapshot2 = AgentOS.StateStore.snapshot("pending_approvals")
       assert Map.get(snapshot2.approvals, "ref_42") == nil
-      inv2 = Inventory.render(manifest_path: "manifests/discovery.md")
+      inv2 = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       refute String.contains?(inv2, "ref_42")
 
       # 4. Assert (c) duplicate intake approve is a no-op (at-most-once)

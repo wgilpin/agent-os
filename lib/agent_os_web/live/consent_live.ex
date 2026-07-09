@@ -36,14 +36,17 @@ defmodule AgentOSWeb.ConsentLive do
             # Resolve matching pending approval reference
             ref = find_pending_approval_ref(manifest_path)
 
+            agent_name = Path.basename(manifest_path, ".md")
+
             {:ok,
              assign(socket,
                manifest_path: manifest_path,
-               agent_name: Path.basename(manifest_path, ".md"),
+               agent_name: agent_name,
                manifest: manifest,
                entries: sorted_entries,
                ref: ref,
                status: :pending,
+               code_missing: not File.exists?(Path.join(["agents", agent_name, "main.py"])),
                error_message: nil
              )}
 
@@ -146,6 +149,14 @@ defmodule AgentOSWeb.ConsentLive do
               </div>
             <% end %>
           </div>
+
+          <%= if @status == :pending and Map.get(assigns, :code_missing, false) do %>
+            <div class="code-missing-warning" role="alert">
+              <strong>This agent has no generated code.</strong>
+              Approving will deploy it, but it cannot run until it is created again
+              from the Create agent page. Consider deleting it from the inventory instead.
+            </div>
+          <% end %>
 
           <%= if @status == :pending do %>
             <div class="consent-actions">

@@ -39,7 +39,7 @@ defmodule AgentOS.TriggerGatewayTest do
     :ok =
       AgentOS.DeploymentRegistry.record_deployment(
         "discovery",
-        "manifests/discovery.md",
+        "test/fixtures/manifests/discovery.md",
         :reviewed_human
       )
 
@@ -413,7 +413,7 @@ defmodule AgentOS.TriggerGatewayTest do
 
       start_supervised!(DummyRunSupervisor)
 
-      manifest_path = "manifests/discovery.md"
+      manifest_path = "test/fixtures/manifests/discovery.md"
       agent_name = "discovery"
       hash = "MOCKHASH123"
 

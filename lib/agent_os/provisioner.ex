@@ -31,7 +31,7 @@ defmodule AgentOS.Provisioner do
 
   @doc """
   Compares the hard-wired config grants (grants, spend) against
-  the fields declared in manifests/discovery.md. Logs a warning on drift.
+  the fields declared in test/fixtures/manifests/discovery.md. Logs a warning on drift.
 
   ## Returns
     - `:ok` if config matches manifest.

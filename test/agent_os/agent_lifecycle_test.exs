@@ -455,6 +455,15 @@ defmodule AgentOS.AgentLifecycleTest do
     end
   end
 
+  # Creates a stub agents/<agent>/main.py under a temp dir; returns the agents dir.
+  defp write_agent_code(agent) do
+    dir = Path.join(System.tmp_dir!(), "agents_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(Path.join(dir, agent))
+    File.write!(Path.join([dir, agent, "main.py"]), "print('{}')\n")
+    on_exit(fn -> File.rm_rf(dir) end)
+    dir
+  end
+
   describe "run_now/2" do
     test "starts one manual run for a deployed-active agent" do
       agent = "run_now_ok_#{System.unique_integer([:positive])}"
@@ -464,10 +473,29 @@ defmodule AgentOS.AgentLifecycleTest do
       parent = self()
       start_run_fn = fn opts -> send(parent, {:start_run, opts}) && :ok end
 
-      assert :ok = AgentLifecycle.run_now(agent, start_run_fn: start_run_fn)
+      assert :ok =
+               AgentLifecycle.run_now(agent,
+                 start_run_fn: start_run_fn,
+                 agents_dir: write_agent_code(agent)
+               )
+
       assert_receive {:start_run, opts}
       assert opts[:agent] == agent
       assert opts[:trigger] == "manual"
+    end
+
+    test "refuses an agent whose generated code is missing" do
+      agent = "run_now_orphan_#{System.unique_integer([:positive])}"
+      path = write_manifest(agent, "08:30")
+      :ok = DeploymentRegistry.record_deployment(agent, path, :reviewed_human)
+
+      start_run_fn = fn _opts -> flunk("run must not start") end
+
+      assert {:error, :code_missing} =
+               AgentLifecycle.run_now(agent,
+                 start_run_fn: start_run_fn,
+                 agents_dir: Path.join(System.tmp_dir!(), "nonexistent_agents_dir")
+               )
     end
 
     test "refuses a paused agent and a never-deployed agent without starting anything" do

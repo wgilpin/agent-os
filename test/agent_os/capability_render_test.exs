@@ -50,7 +50,7 @@ defmodule AgentOS.CapabilityRenderTest do
   end
 
   test "C1: totality - one entry per grant in discovery_manifest" do
-    {:ok, manifest} = Manifest.load("manifests/discovery.md")
+    {:ok, manifest} = Manifest.load("test/fixtures/manifests/discovery.md")
     entries = CapabilityRender.entries(manifest)
     assert length(entries) == length(manifest.grants)
 

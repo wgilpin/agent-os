@@ -37,7 +37,10 @@ defmodule AgentOSWeb.InventoryLive do
         # last lifecycle-action error, rendered as an inline banner (no flash layout exists).
         action_error: nil,
         # agent whose manual run was just started (inline confirmation note).
-        run_started: nil
+        run_started: nil,
+        # agent_name with the delete confirmation open (nil = none). Delete is
+        # two-step and fully server-rendered so it never depends on browser JS.
+        confirm_delete: nil
       )
 
     {:ok, socket}
@@ -174,13 +177,33 @@ defmodule AgentOSWeb.InventoryLive do
                       <button
                         type="button"
                         class="btn-danger btn-delete"
-                        phx-click="delete"
+                        phx-click="request_delete"
                         phx-value-agent={agent.agent_name}
-                        data-confirm={"Permanently delete \"#{AgentOSWeb.HumanText.humanize_name(agent.agent_name)}\"? This removes its code, its manifest, and all of its runtime state. This cannot be undone."}
                       >
                         Delete
                       </button>
                     </div>
+                    <%= if @confirm_delete == agent.agent_name do %>
+                      <!-- Server-rendered confirmation (no JS): delete only fires from here. -->
+                      <div class="delete-confirm" role="alertdialog">
+                        <span class="delete-confirm-text">
+                          Permanently delete "<%= AgentOSWeb.HumanText.humanize_name(agent.agent_name) %>"?
+                          This removes its code, its manifest, and all of its runtime state.
+                          This cannot be undone.
+                        </span>
+                        <button
+                          type="button"
+                          class="btn-danger btn-confirm-delete"
+                          phx-click="delete"
+                          phx-value-agent={agent.agent_name}
+                        >
+                          Yes, delete permanently
+                        </button>
+                        <button type="button" class="btn-secondary btn-cancel-delete" phx-click="cancel_delete">
+                          Cancel
+                        </button>
+                      </div>
+                    <% end %>
                     <%= if @run_started == agent.agent_name do %>
                       <span class="run-started-note">
                         Run started — it will show under recent executions shortly.
@@ -329,6 +352,7 @@ defmodule AgentOSWeb.InventoryLive do
                             <th>Trigger</th>
                             <th>In / Dropped</th>
                             <th>Note / Cause</th>
+                            <th>When</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -340,11 +364,18 @@ defmodule AgentOSWeb.InventoryLive do
                                 </span>
                               </td>
                               <td class="numeric-cell"><%= run.actions %></td>
-                              <td><code class="trigger-code"><%= run.trigger %></code></td>
+                              <td>
+                                <span class="trigger-code" title={run.trigger}>
+                                  <%= AgentOSWeb.HumanText.humanize_trigger(run.trigger) %>
+                                </span>
+                              </td>
                               <td class="numeric-cell"><%= run.items_in %> / <%= run.items_dropped %></td>
-                              <td class="note-cell">
-                                <%= run.note %>
-                                <%= if run.breached_count > 0, do: " (breached: #{run.breached_count})" %>
+                              <td class="note-cell" title={run.note}>
+                                <%= AgentOSWeb.HumanText.humanize_run_note(run.note) %>
+                                <%= if run.breached_count > 0, do: " (#{run.breached_count} blocked by limits)" %>
+                              </td>
+                              <td class="numeric-cell" title={run.timestamp}>
+                                <%= run_time(run.timestamp) %>
                               </td>
                             </tr>
                           <% end %>
@@ -521,11 +552,27 @@ defmodule AgentOSWeb.InventoryLive do
   end
 
   @impl true
+  def handle_event("request_delete", %{"agent" => agent}, socket) do
+    {:noreply, assign(socket, confirm_delete: agent)}
+  end
+
+  @impl true
+  def handle_event("cancel_delete", _params, socket) do
+    {:noreply, assign(socket, confirm_delete: nil)}
+  end
+
+  @impl true
   def handle_event("delete", %{"agent" => agent}, socket) do
-    # delete/1 always returns :ok (idempotent, tolerant of partial state).
-    socket = apply_lifecycle(socket, agent, fn -> AgentOS.AgentLifecycle.delete(agent) end)
-    # Collapse the edit panel if it was open for the now-gone agent.
-    {:noreply, assign(socket, editing: nil)}
+    # Only reachable from the open confirmation for this agent — a stale or
+    # forged click without the confirmation open is ignored.
+    if socket.assigns.confirm_delete == agent do
+      # delete/1 always returns :ok (idempotent, tolerant of partial state).
+      socket = apply_lifecycle(socket, agent, fn -> AgentOS.AgentLifecycle.delete(agent) end)
+      # Collapse the edit panel if it was open for the now-gone agent.
+      {:noreply, assign(socket, editing: nil, confirm_delete: nil)}
+    else
+      {:noreply, assign(socket, confirm_delete: nil)}
+    end
   end
 
   @impl true
@@ -641,6 +688,11 @@ defmodule AgentOSWeb.InventoryLive do
   defp error_text(:not_active),
     do: "the agent must be deployed and active to run — resume or deploy it first."
 
+  defp error_text(:code_missing),
+    do:
+      "this agent has a manifest but no generated code, so it can't run. " <>
+        "Delete it, or create it again from the Create agent page."
+
   defp error_text(:manifest_missing),
     do: "the agent's manifest file is missing — it can't be resumed."
 
@@ -708,6 +760,13 @@ defmodule AgentOSWeb.InventoryLive do
     |> Enum.map(fn {_idx, row} -> row end)
   end
 
+  # "2026-07-09T16:22:33.745Z" → "2026-07-09 16:22" (raw ISO stays in the tooltip).
+  defp run_time(nil), do: ""
+
+  defp run_time(iso) do
+    iso |> String.slice(0, 16) |> String.replace("T", " ")
+  end
+
   defp schedule_tick do
     Process.send_after(self(), :tick, 5000)
   end
@@ -757,14 +816,20 @@ defmodule AgentOSWeb.InventoryLive do
       |> Path.wildcard()
       |> Enum.reject(&AgentOS.AgentLifecycle.system_agent?(Path.basename(&1, ".md")))
 
+    # One read of the global log; each card gets only ITS runs, newest first.
+    # Legacy lines without an agent= field are attributed to no card.
+    all_runs = RunLog.read_records(RunLog.default_path())
+
     agents_data =
       Enum.reduce(manifest_paths, [], fn path, acc ->
         # Load inventory data using structured accessor
         case Inventory.data(manifest_path: path) do
           {:ok, data} ->
-            # Get run records for this agent
-            # Since RunLog.read_records parses the global run log file, read them here
-            recent_runs = RunLog.read_records("data/run_log.md", window: 5)
+            recent_runs =
+              all_runs
+              |> Enum.filter(&(&1.agent == data.agent_name))
+              |> Enum.take(-5)
+              |> Enum.reverse()
 
             # Build final map: run trace + durable deployment state (FR-008).
             agent_map =

@@ -6,6 +6,8 @@ defmodule AgentOS.ConformanceAuditor.RunRecord do
   @type t :: %__MODULE__{
           status: String.t(),
           actions: non_neg_integer(),
+          agent: String.t() | nil,
+          timestamp: String.t() | nil,
           trigger: String.t() | nil,
           items_in: non_neg_integer(),
           items_dropped: non_neg_integer(),
@@ -19,6 +21,8 @@ defmodule AgentOS.ConformanceAuditor.RunRecord do
   defstruct [
     :status,
     actions: 0,
+    agent: nil,
+    timestamp: nil,
     trigger: nil,
     items_in: 0,
     items_dropped: 0,

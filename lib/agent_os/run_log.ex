@@ -5,7 +5,14 @@ defmodule AgentOS.RunLog do
   and notes to `data/run_log.md`.
   """
 
-  @default_path Path.join(["data", "run_log.md"])
+  @doc """
+  The run-log location: config `:agent_os, :run_log_path` (overridden to a temp file in
+  the test env so tests never touch live history), defaulting to `data/run_log.md`.
+  """
+  @spec default_path() :: Path.t()
+  def default_path do
+    Application.get_env(:agent_os, :run_log_path, Path.join(["data", "run_log.md"]))
+  end
 
   @doc """
   Appends a single line description of a run to the run log.
@@ -17,7 +24,7 @@ defmodule AgentOS.RunLog do
   @spec append(map(), keyword()) :: :ok
   def append(entry_map, opts \\ []) do
     # Get the file path from options, defaulting to @default_path.
-    path = Keyword.get(opts, :path, @default_path)
+    path = Keyword.get(opts, :path, default_path())
 
     # Generate the current UTC timestamp as an ISO-8601 string.
     timestamp = DateTime.utc_now() |> DateTime.to_iso8601()
@@ -55,6 +62,19 @@ defmodule AgentOS.RunLog do
         ""
       end
 
+    agent_str =
+      if agent = Map.get(entry_map, :agent) do
+        agent_str = to_string(agent)
+
+        if String.contains?(agent_str, " ") do
+          raise ArgumentError, "agent name cannot contain whitespace: #{inspect(agent)}"
+        end
+
+        " agent=#{agent_str}"
+      else
+        ""
+      end
+
     gate_str =
       if Map.has_key?(entry_map, :approved_count) do
         ac = Map.get(entry_map, :approved_count, 0)
@@ -70,7 +90,7 @@ defmodule AgentOS.RunLog do
 
     # Format the line as a markdown list item.
     line =
-      "- [#{timestamp}] status=#{status} actions=#{actions}#{trigger_str}#{exit_code_str}#{cause_str}#{items_str}#{gate_str} #{note}"
+      "- [#{timestamp}] status=#{status} actions=#{actions}#{agent_str}#{trigger_str}#{exit_code_str}#{cause_str}#{items_str}#{gate_str} #{note}"
 
     # Ensure the parent directories of the file exist (equivalent to mkdir -p).
     File.mkdir_p!(Path.dirname(path))
@@ -93,7 +113,7 @@ defmodule AgentOS.RunLog do
   @spec append_digest(binary(), keyword()) :: :ok
   def append_digest(text, opts \\ []) do
     # Get target file path.
-    path = Keyword.get(opts, :path, @default_path)
+    path = Keyword.get(opts, :path, default_path())
 
     # Generate timestamp.
     timestamp = DateTime.utc_now() |> DateTime.to_iso8601()
@@ -147,6 +167,8 @@ defmodule AgentOS.RunLog do
       case Integer.parse(actions_str) do
         {actions, _} ->
           trigger = extract_field_parser(line, ~r/\btrigger=([^\s]+)/)
+          agent = extract_field_parser(line, ~r/\bagent=([^\s]+)/)
+          timestamp = extract_field_parser(line, ~r/^- \[([^\]]+)\]/)
           items_in = parse_int_parser(extract_field_parser(line, ~r/\bitems_in=([^\s]+)/), 0)
 
           items_dropped =
@@ -177,7 +199,7 @@ defmodule AgentOS.RunLog do
 
           # Strip fields to get the note
           fields_regex =
-            ~r/\b(status|actions|trigger|exit_code|failure_cause|items_in|items_dropped|approved_count|rejected_count|parked_count|breached_count)=\S+|\bgate_reasons=\[[^\]]*\]/
+            ~r/\b(status|actions|agent|trigger|exit_code|failure_cause|items_in|items_dropped|approved_count|rejected_count|parked_count|breached_count)=\S+|\bgate_reasons=\[[^\]]*\]/
 
           note =
             line
@@ -190,6 +212,8 @@ defmodule AgentOS.RunLog do
            %AgentOS.ConformanceAuditor.RunRecord{
              status: status,
              actions: actions,
+             agent: agent,
+             timestamp: timestamp,
              trigger: trigger,
              items_in: items_in,
              items_dropped: items_dropped,

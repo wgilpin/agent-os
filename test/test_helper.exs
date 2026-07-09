@@ -2,6 +2,10 @@
 # Run them explicitly via: mix test --include docker
 System.put_env("SEARCH_API_KEY", "test_search_api_key_value")
 
+# Fresh shared test run-log (config :run_log_path points at a tmp file, never
+# the live data/run_log.md) — wipe carryover from previous suite runs.
+File.rm(AgentOS.RunLog.default_path())
+
 # Constitution IV guard: no test may reach the live Discord webhook. The credential
 # resolver falls back to System env (a developer shell may export the REAL
 # DISCORD_WEBHOOK_URL), so a suite-wide safe transport stub is installed here.

@@ -202,6 +202,10 @@ defmodule AgentOS.TriggerGateway do
         :ok =
           AgentOS.StateStore.apply_action("pending_approvals", {:delete_in, [:approvals, ref]})
 
+        # Attribute the run-log line to the agent when the approval identifies one
+        # (a deploy approval's recipient IS the agent; other actions carry no agent).
+        log_agent = if action.type == "deploy", do: action.recipient
+
         case decision do
           :approve ->
             effector_fn.(%{action: action, grant: grant})
@@ -228,6 +232,7 @@ defmodule AgentOS.TriggerGateway do
               %{
                 status: :ok,
                 actions: 1,
+                agent: log_agent,
                 trigger: "approval-resume",
                 note: "approved ref=#{ref}"
               },
@@ -243,6 +248,7 @@ defmodule AgentOS.TriggerGateway do
               %{
                 status: :ok,
                 actions: 0,
+                agent: log_agent,
                 trigger: "approval-resume",
                 note: "denied ref=#{ref}"
               },

@@ -7,10 +7,14 @@
     "discord_notify"
   ],
   "confirmed": true,
-  "purpose": "When the agent starts, get the local time on the agent's server, then send a message to the harness-configured discord channel with the time expressed in French words.",
+  "purpose": "Get the local time on startup, translate it into French words, and send it as a message to the configured Discord channel.",
   "spend_limits": {
     "dollar_cap": 0.1,
     "token_limit": 50000
   },
-  "triggers": []
+  "triggers": [
+    {
+      "type": "startup"
+    }
+  ]
 }

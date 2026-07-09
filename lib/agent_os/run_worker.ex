@@ -84,7 +84,7 @@ defmodule AgentOS.RunWorker do
           %{
             agent_cmd: "python",
             agent_args: ["agents/discovery/main.py"],
-            manifest_path: "manifests/discovery.md"
+            manifest_path: "test/fixtures/manifests/discovery.md"
           }
       end
 
@@ -118,13 +118,14 @@ defmodule AgentOS.RunWorker do
 
     case AgentOS.Provisioner.deploy(manifest_path, review_mode, opts) do
       {:blocked, ref} ->
-        run_log_path = Keyword.get(opts, :run_log_path, Path.join(["data", "run_log.md"]))
+        run_log_path = Keyword.get(opts, :run_log_path, RunLog.default_path())
         trigger = Keyword.get(opts, :trigger, :timer)
 
         AgentOS.RunLog.append(
           %{
             status: :error,
             actions: 0,
+            agent: agent_name,
             trigger: trigger,
             note: "deploy blocked: ref=#{ref}"
           },
@@ -276,7 +277,7 @@ defmodule AgentOS.RunWorker do
   end
 
   defp execute_run(cmd, args, manifest, agent_name, run_token, opts) do
-    run_log_path = Keyword.get(opts, :run_log_path, Path.join(["data", "run_log.md"]))
+    run_log_path = Keyword.get(opts, :run_log_path, RunLog.default_path())
     timeout_ms = Keyword.get(opts, :timeout_ms, 30_000)
 
     bookmarks_path =
@@ -314,6 +315,7 @@ defmodule AgentOS.RunWorker do
       # Agent never ran; no effects to report — an empty tally.
       dispatch_on_breach(
         manifest.spend.on_breach,
+        agent_name,
         run_log_path,
         trigger,
         items_in,
@@ -355,6 +357,7 @@ defmodule AgentOS.RunWorker do
 
           dispatch_on_breach(
             manifest.spend.on_breach,
+            agent_name,
             run_log_path,
             trigger,
             items_in,
@@ -366,6 +369,7 @@ defmodule AgentOS.RunWorker do
             %{
               status: :ok,
               actions: tally.approved,
+              agent: agent_name,
               trigger: trigger,
               exit_code: 0,
               items_in: items_in,
@@ -391,6 +395,7 @@ defmodule AgentOS.RunWorker do
             %{
               status: :error,
               actions: 0,
+              agent: agent_name,
               trigger: trigger,
               failure_cause: "malformed_outcome",
               items_in: items_in,
@@ -416,6 +421,7 @@ defmodule AgentOS.RunWorker do
             %{
               status: :error,
               actions: 0,
+              agent: agent_name,
               trigger: trigger,
               exit_code: exit_code,
               failure_cause: failure_cause,
@@ -433,6 +439,7 @@ defmodule AgentOS.RunWorker do
             %{
               status: :error,
               actions: 0,
+              agent: agent_name,
               trigger: trigger,
               failure_cause: "unexpected_stage_result",
               items_in: items_in,
@@ -499,7 +506,15 @@ defmodule AgentOS.RunWorker do
 
   # Logs a spend-breach run and returns the killed sentinel. Effect counts come from the
   # transcript tally (empty on a pre-run breach where the agent never executed).
-  defp dispatch_on_breach(:kill, run_log_path, trigger, items_in, dropped_count, tally) do
+  defp dispatch_on_breach(
+         :kill,
+         agent_name,
+         run_log_path,
+         trigger,
+         items_in,
+         dropped_count,
+         tally
+       ) do
     rejected = Map.get(tally, :rejected, 0)
     parked = Map.get(tally, :parked, 0)
 
@@ -507,6 +522,7 @@ defmodule AgentOS.RunWorker do
       %{
         status: :killed,
         actions: 0,
+        agent: agent_name,
         trigger: trigger,
         exit_code: 0,
         failure_cause: :spend_breach,

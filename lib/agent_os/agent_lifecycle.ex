@@ -108,9 +108,10 @@ defmodule AgentOS.AgentLifecycle do
   cannot be run. The run is asynchronous (ephemeral subprocess via `RunSupervisor`);
   `:ok` means it was started, not that it finished.
   """
-  @spec run_now(String.t(), keyword()) :: :ok | {:error, :system_agent | :not_active}
+  @spec run_now(String.t(), keyword()) :: :ok | {:error, :system_agent | :not_active | :code_missing}
   def run_now(agent_name, opts \\ []) when is_binary(agent_name) do
     start_run_fn = Keyword.get(opts, :start_run_fn, &AgentOS.RunSupervisor.start_run/1)
+    agents_dir = Keyword.get(opts, :agents_dir, "agents")
 
     cond do
       system_agent?(agent_name) ->
@@ -118,6 +119,11 @@ defmodule AgentOS.AgentLifecycle do
 
       not DeploymentRegistry.deployed_and_active?(agent_name) ->
         {:error, :not_active}
+
+      # An orphaned manifest (code never generated, or deleted by hand) can be
+      # deployed but not run — fail with a message instead of a python errno.
+      not File.exists?(Path.join([agents_dir, agent_name, "main.py"])) ->
+        {:error, :code_missing}
 
       true ->
         Logger.info("AgentLifecycle: manual run requested for #{inspect(agent_name)}")
