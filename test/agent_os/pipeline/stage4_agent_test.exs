@@ -489,6 +489,46 @@ defmodule AgentOS.Pipeline.Stage4Test do
                AgentOS.ExecutionMode.load("greeter", spec_dir: ctx.spec_dir)
     end
 
+    test "degenerate short manifest literals are not treated as leaks", ctx do
+      # Observed live: a tiny cap stringifies to a short numeral ("0") that
+      # substring-matches virtually any code (`sys.exit(0)`, `recv(4096)`) — noise,
+      # not leak evidence. Cap 409 deliberately substring-matches the fixture's
+      # `recv(4096)`; near-free prices keep the synthesis call under the cap.
+      manifest = %{us2_manifest() | spend: %Spend{cap: 409, window: :daily, on_breach: :kill}}
+      :ok = InferenceBroker.register(ctx.token, "greeter", manifest)
+
+      opts =
+        ctx.base_opts
+        |> Keyword.put(:provider_fn, provider_returning(det_files_json(deterministic_main_py())))
+        |> Keyword.put(:prices, %{"mock-codegen-model" => %{input: 1, output: 1}})
+        |> Keyword.put(:execution_mode, %AgentOS.ExecutionMode{
+          mode: :deterministic,
+          rationale: "fixed"
+        })
+
+      assert {:ok, %AgentBody{}} = Stage4.generate("greeter", manifest, opts)
+    end
+
+    test "body importing an uninstalled third-party package is rejected", ctx do
+      manifest = us2_manifest()
+      :ok = InferenceBroker.register(ctx.token, "greeter", manifest)
+
+      # Observed live: the synthesis model added `import snoop` (a debug library),
+      # which crashes at import time in the sandbox. The guard catches it pre-write.
+      with_snoop = "import snoop\n" <> deterministic_main_py()
+
+      opts =
+        ctx.base_opts
+        |> Keyword.put(:provider_fn, provider_returning(det_files_json(with_snoop)))
+        |> Keyword.put(:execution_mode, %AgentOS.ExecutionMode{
+          mode: :deterministic,
+          rationale: "fixed"
+        })
+
+      assert {:error, {:disallowed_import, ["snoop"]}} =
+               Stage4.generate("greeter", manifest, opts)
+    end
+
     test "deterministic body with invented argument names is rejected (schema drift)", ctx do
       manifest = us2_manifest()
       :ok = InferenceBroker.register(ctx.token, "greeter", manifest)

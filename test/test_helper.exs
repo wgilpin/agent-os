@@ -1,6 +1,25 @@
+# Cross-run hermeticity: tests name their tmp SQLite files and sockets with
+# System.unique_integer/1, which restarts from the same small values on every VM
+# run. A left-over file from a previous (crashed, interrupted, or differently
+# seeded) run can therefore collide by name, and StateStore silently reuses any
+# existing DB content (CREATE TABLE IF NOT EXISTS, seed-only-if-empty) — leaking
+# stale state ACROSS runs. Point TMPDIR at a fresh per-run directory so
+# System.tmp_dir!() never resolves to a path shared with another run. The base
+# is kept short because UDS socket paths built under it must stay below the
+# ~104-byte sun_path limit. (config-time paths like :run_log_path resolved
+# against the original TMPDIR before this runs; that file is wiped below.)
+run_tmp_dir = "/tmp/aos_run_#{Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)}"
+File.mkdir_p!(run_tmp_dir)
+System.put_env("TMPDIR", run_tmp_dir)
+System.at_exit(fn _ -> File.rm_rf(run_tmp_dir) end)
+
 # Exclude container/docker tests by default to keep the local suite hermetic.
 # Run them explicitly via: mix test --include docker
 System.put_env("SEARCH_API_KEY", "test_search_api_key_value")
+
+# Fresh shared test run-log (config :run_log_path points at a tmp file, never
+# the live data/run_log.md) — wipe carryover from previous suite runs.
+File.rm(AgentOS.RunLog.default_path())
 
 # Constitution IV guard: no test may reach the live Discord webhook. The credential
 # resolver falls back to System env (a developer shell may export the REAL
@@ -86,6 +105,15 @@ defmodule AgentOS.TestHelper do
       {AgentOS.StateStore, name: "action_transcript", path: action_transcript_path, initial: %{}}
     )
 
+    # Durable deployment registry mount — written by AgentOS.DeploymentRegistry on
+    # deploy completion (both direct and approval-resumed paths).
+    deployments_path = Path.join(tmp_dir, "deployments_#{uniq}.db")
+    ExUnit.Callbacks.on_exit(fn -> File.rm(deployments_path) end)
+
+    ExUnit.Callbacks.start_supervised!(
+      {AgentOS.StateStore, name: "deployments", path: deployments_path, initial: %{}}
+    )
+
     default_pass = %{status: :pass, code_hash: ""}
 
     default_review_pass = %AgentOS.Pipeline.Stage5.Verdict{
@@ -135,7 +163,8 @@ defmodule AgentOS.TestHelper do
       conformance_path: conformance_path,
       provenance_path: provenance_path,
       judge_path: judge_path,
-      review_path: review_path
+      review_path: review_path,
+      deployments_path: deployments_path
     }
   end
 
@@ -148,7 +177,7 @@ defmodule AgentOS.TestHelper do
     uniq = System.unique_integer([:positive])
     # The broker chmods the socket's PARENT dir to 0700, so it must be a dir we own
     # (not /tmp itself). Keep the path short to stay under the ~104-char UDS limit.
-    sock_dir = "/tmp/aos_inf_#{uniq}"
+    sock_dir = Path.join(System.tmp_dir!(), "aos_inf_#{uniq}")
     File.mkdir_p!(sock_dir)
     sock = Path.join(sock_dir, "inf.sock")
 

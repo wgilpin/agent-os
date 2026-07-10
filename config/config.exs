@@ -27,6 +27,9 @@ config :agent_os,
   agent_codegen_model: "google/gemini-3.5-flash",
   agent_runtime_model: "google/gemini-3-flash-preview",
   judge_model: "google/gemini-3.5-flash",
+  # Substrate-owned agents: hidden from the inventory UI and refused by every
+  # AgentLifecycle mutation (they are managed by config/code, not the dashboard).
+  system_agents: ["discovery"],
   autostart: true,
   load_dotenv: true,
   credentials: %{},
@@ -46,15 +49,21 @@ config :agent_os, AgentOSWeb.Endpoint,
 
 config :phoenix, :json_library, Jason
 
+# Dev-only code reloading: a browser refresh recompiles changed Elixir modules
+# (LiveView websocket events don't; see endpoint.ex). Never enabled in test/prod.
+if config_env() == :dev do
+  config :agent_os, AgentOSWeb.Endpoint, code_reloader: true
+end
+
 # In tests, the supervision tree does not auto-start the singleton state process — each
 # test starts its own StateStore against an isolated temp term-file (never live state).
 if config_env() == :test do
   # The "discovery" agent is a test-only fixture. The suites (run_supervisor, port_runner,
   # deterministic_e2e, world_b, scheduler, provisioner) exercise the port boundary and the
-  # legacy hard-wired provisioning surface against manifests/discovery.md, so the `:agent`
-  # block and the global `:manifest_path` default live here — never in prod/dev.
+  # legacy hard-wired provisioning surface against test/fixtures/manifests/discovery.md,
+  # so the `:agent` block and the global `:manifest_path` default live here — never in prod/dev.
   config :agent_os, :agent,
-    manifest_path: "manifests/discovery.md",
+    manifest_path: "test/fixtures/manifests/discovery.md",
     agent_cmd: "docker",
     agent_args: [],
     tz: "Etc/UTC",
@@ -66,8 +75,14 @@ if config_env() == :test do
     spend: %{cap: 500_000, window: :daily, on_breach: :kill}
 
   config :agent_os,
-    manifest_path: "manifests/discovery.md",
+    manifest_path: "test/fixtures/manifests/discovery.md",
     autostart: false,
+    # Legacy tests use the discovery manifest as their render/inventory fixture;
+    # tests exercising the system-agent guard override this per-test.
+    system_agents: [],
+    # Tests must never append to the live data/run_log.md (test_helper.exs wipes
+    # this file at suite start).
+    run_log_path: Path.join(System.tmp_dir!(), "agent_os_test_run_log.md"),
     # Never load real secrets from .env into the test VM (Constitution IV): tests
     # that flip :autostart (e.g. the UDS broker harness) must not pull the live
     # webhook/model keys into System env for the rest of the suite.

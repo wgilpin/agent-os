@@ -25,8 +25,10 @@ class BoundaryModel(BaseModel):
     )
 
 class SpendLimitsModel(BaseModel):
+    # Default matches the documented placeholder (the OS UI collects the real
+    # value); 0.0 would project to an inert cap-0 manifest if it ever leaked.
     dollar_cap: float = Field(
-        default=0.0,
+        default=0.1,
         description="Maximum dollar-denominated spend cap, e.g. 0.50"
     )
     token_limit: int = Field(

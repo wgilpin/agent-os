@@ -25,6 +25,13 @@ defmodule AgentOS.Manifest.Projection do
       is_nil(spec.capabilities) or spec.capabilities == [] ->
         {:error, :empty_capabilities}
 
+      # A zero (or negative) cap produces an inert agent: the spend pre-check blocks
+      # every inference AND every connector call (spent 0 >= cap 0). Refuse loudly at
+      # projection instead of generating and judging an agent that can never act.
+      is_nil(spec.spend_limits) or is_nil(spec.spend_limits.dollar_cap) or
+          spec.spend_limits.dollar_cap <= 0 ->
+        {:error, :non_positive_spend_cap}
+
       true ->
         try do
           grants = Enum.map(spec.capabilities, &map_capability_to_grant!(&1, spec.boundaries))
@@ -119,17 +126,17 @@ defmodule AgentOS.Manifest.Projection do
                :time ->
                  "  - type: time\n    at: \"#{t.at}\""
 
-               :event ->
-                 "  - type: event\n    name: \"#{t.name}\""
-
-               :message ->
-                 "  - type: message"
-
                "time" ->
                  "  - type: time\n    at: \"#{Map.get(t, :at) || Map.get(t, "at")}\""
 
+               :event ->
+                 "  - type: event\n    name: \"#{t.name}\""
+
                "event" ->
                  "  - type: event\n    name: \"#{Map.get(t, :name) || Map.get(t, "name")}\""
+
+               :message ->
+                 "  - type: message"
 
                "message" ->
                  "  - type: message"

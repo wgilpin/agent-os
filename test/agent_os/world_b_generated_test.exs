@@ -289,6 +289,16 @@ defmodule AgentOS.WorldBGeneratedTest do
         %{context.agent_name => manifest_with_trigger}
       end
 
+      # Dispatch is registry-gated since 041: register the agent as deployed so
+      # the legitimate intake path fires (the hostile agent-output path above is
+      # rejected regardless of deployment state).
+      :ok =
+        AgentOS.DeploymentRegistry.record_deployment(
+          context.agent_name,
+          "manifests/#{context.agent_name}.md",
+          :reviewed_human
+        )
+
       res =
         TriggerGateway.submit_sync(
           {:event, Hostile.trigger_string(), %{"url" => "https://example.com"}},

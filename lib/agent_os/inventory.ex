@@ -77,17 +77,20 @@ defmodule AgentOS.Inventory do
         agent_name = Path.basename(manifest_path, ".md")
 
         snapshot = AgentOS.StateStore.snapshot("roster_trust")
-        records_count = length(snapshot.records)
+        # Fresh stores key this list with the atom :records; a store hydrated
+        # from a legacy on-disk DB may key it with the string "records".
+        records = Map.get(snapshot, :records) || Map.get(snapshot, "records") || []
+        records_count = length(records)
 
         last_digest =
-          snapshot.records
+          records
           |> Enum.reverse()
           |> Enum.find_value("none", fn
             %{"digest" => text} -> text
             _ -> nil
           end)
 
-        last_run = parse_last_run(Keyword.get(opts, :run_log_path, "data/run_log.md"))
+        last_run = parse_last_run(Keyword.get(opts, :run_log_path, AgentOS.RunLog.default_path()))
 
         now = Keyword.get(opts, :now, DateTime.utc_now())
         spend_ledger = AgentOS.StateStore.snapshot("spend_ledger")

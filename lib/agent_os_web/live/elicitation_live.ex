@@ -1,7 +1,28 @@
 defmodule AgentOSWeb.ElicitationLive do
+  @moduledoc """
+  Chat-driven elicitation workspace. On a confirmed spec, offers a per-run
+  review-mode choice (default consent-gated) and starts the generation pipeline
+  in a supervised async task, rendering live stage progress from PubSub events
+  (FR-001/002/003). Verified by manual walkthrough — no unit tests
+  (Constitution III).
+  """
   use Phoenix.LiveView
 
   alias AgentOS.ElicitationSession
+  alias AgentOS.Pipeline.Orchestrator.PipelineRun
+  alias AgentOS.Pipeline.ProgressEvent
+
+  # Ordered pipeline stages for the progress panel.
+  @pipeline_stages [:manifest, :classify, :agent, :judge, :security_review, :deploy]
+
+  @stage_labels %{
+    manifest: "Manifest projection",
+    classify: "Execution-mode classification",
+    agent: "Agent synthesis",
+    judge: "Judge (blind compliance)",
+    security_review: "Security review",
+    deploy: "Deploy"
+  }
 
   @impl true
   def mount(_params, _session, socket) do
@@ -14,8 +35,40 @@ defmodule AgentOSWeb.ElicitationLive do
        success_message: nil,
        local_prompt: nil,
        purpose_input: "",
-       message_input: ""
+       message_input: "",
+       # Spend cap is a UI control, not an elicitation topic (user decision):
+       # editable in the spec panel, defaults to $0.10, overrides the draft.
+       dollar_cap_input: "0.10",
+       # Pipeline-run state (US1)
+       confirmed_spec: nil,
+       pipeline_state: :idle,
+       run_id: nil,
+       run_agent: nil,
+       stage_states: %{},
+       terminal: nil
      )}
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    # Refresh-rejoin (FR-003): a reload mid-run carries ?run=&agent= — re-subscribe
+    # to the live topic and rebuild what we can from the persisted run record.
+    run_id = params["run"]
+    agent = params["agent"]
+
+    if is_binary(run_id) and run_id != "" and is_binary(agent) and agent != "" and
+         socket.assigns.run_id != run_id do
+      if connected?(socket) do
+        Phoenix.PubSub.subscribe(AgentOS.PubSub, ProgressEvent.run_topic(run_id))
+      end
+
+      {:noreply,
+       socket
+       |> assign(pipeline_state: :running, run_id: run_id, run_agent: agent)
+       |> rebuild_from_record(agent, run_id)}
+    else
+      {:noreply, socket}
+    end
   end
 
   @impl true
@@ -33,15 +86,85 @@ defmodule AgentOSWeb.ElicitationLive do
   def render(assigns) do
     ~H"""
     <div class="workspace-wrapper">
-      <%= if @success_message do %>
+      <%= if @confirmed_spec || @pipeline_state != :idle do %>
         <div class="landing-container">
           <div class="landing-card">
             <div class="landing-logo">
               <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
             </div>
-            <h1>Specification Confirmed!</h1>
-            <p><%= @success_message %></p>
-            <button class="btn-primary" phx-click="reset_flow">Start New Elicitation</button>
+            <h1>Specification Confirmed</h1>
+            <%= if @success_message do %>
+              <p><%= @success_message %></p>
+            <% end %>
+
+            <%= if @pipeline_state == :idle do %>
+              <!-- Review-mode choice + start (FR-001): consent-gated is the default;
+                   riskier modes must be explicitly selected. -->
+              <form class="landing-form" phx-submit="start_pipeline">
+                <label for="review_mode" style="font-size: 13px; text-align: left;">
+                  Deploy review mode
+                </label>
+                <select name="review_mode" id="review_mode" style="padding: 8px;">
+                  <option value="review_if_risky" selected>
+                    Review if risky (permissions-dependent) — default
+                  </option>
+                  <option value="always_review">
+                    Consent-gated (always review)
+                  </option>
+                  <option value="dangerously_skip_review">
+                    DANGEROUS: skip human review
+                  </option>
+                </select>
+                <button type="submit" class="btn-primary">Start Pipeline</button>
+              </form>
+              <button class="btn-refine" phx-click="reset_flow">Start New Elicitation</button>
+            <% else %>
+              <!-- Live stage-progress panel driven by PubSub events (FR-003). -->
+              <div class="pipeline-progress" style="text-align: left; margin-top: 16px;">
+                <h3>Pipeline run <code><%= @run_id %></code></h3>
+                <ul style="list-style: none; padding: 0;">
+                  <%= for stage <- pipeline_stages() do %>
+                    <li style="padding: 4px 0;">
+                      <span><%= stage_icon(Map.get(@stage_states, stage)) %></span>
+                      <span><%= stage_label(stage) %></span>
+                      <%= if detail = stage_detail_text(Map.get(@stage_states, stage)) do %>
+                        <code style="font-size: 12px;">— <%= detail %></code>
+                      <% end %>
+                    </li>
+                  <% end %>
+                </ul>
+
+                <%= case @terminal do %>
+                  <% nil -> %>
+                    <p class="pipeline-running">Running…</p>
+                  <% %{status: :deployed, detail: provenance} -> %>
+                    <div class="decision-banner decision-banner-approved">
+                      <h2>Deployed</h2>
+                      <p>Agent <strong><%= @run_agent %></strong> deployed (provenance: <%= provenance %>).
+                        See <a href="/inventory">the inventory</a>.</p>
+                    </div>
+                  <% %{status: :blocked} -> %>
+                    <div class="decision-banner">
+                      <h2>Blocked — pending consent</h2>
+                      <p>
+                        Deployment is parked for human approval.
+                        <a href={"/consent?manifest=manifests/#{@run_agent}.md"}>
+                          Review and approve in the consent screen
+                        </a>.
+                      </p>
+                    </div>
+                  <% %{status: :stopped, detail: reason} -> %>
+                    <div class="decision-banner decision-banner-rejected">
+                      <h2>Stopped</h2>
+                      <p>The pipeline stopped: <code><%= format_detail(reason) %></code></p>
+                    </div>
+                <% end %>
+
+                <%= if @terminal do %>
+                  <button class="btn-primary" phx-click="reset_flow">Start New Elicitation</button>
+                <% end %>
+              </div>
+            <% end %>
           </div>
         </div>
       <% else %>
@@ -63,6 +186,7 @@ defmodule AgentOSWeb.ElicitationLive do
                 ><%= @purpose_input %></textarea>
                 <button type="submit" class="btn-primary">Start Elicitation Session</button>
               </form>
+              <a href="/inventory" class="landing-inventory-link">View deployed agents →</a>
             </div>
           </div>
         <% else %>
@@ -216,9 +340,19 @@ defmodule AgentOSWeb.ElicitationLive do
                     <div style="display: flex; gap: 20px; margin-top: 4px;">
                       <div>
                         <span style="font-size: 11px; color: var(--color-text-muted); display: block;">Dollar cap</span>
-                        <span class="spec-value">
-                          <%= if @session.spec_draft.spend_limits.dollar_cap > 0, do: "$#{@session.spec_draft.spend_limits.dollar_cap}", else: "— pending" %>
-                        </span>
+                        <form phx-change="set_dollar_cap" style="margin: 0;">
+                          <span class="spec-value" style="display: inline-flex; align-items: center; gap: 2px;">
+                            $
+                            <input
+                              type="number"
+                              name="dollar_cap"
+                              value={@dollar_cap_input}
+                              step="0.01"
+                              min="0.01"
+                              style="width: 70px; padding: 2px 4px; font: inherit;"
+                            />
+                          </span>
+                        </form>
                       </div>
                     </div>
                   </div>
@@ -283,26 +417,63 @@ defmodule AgentOSWeb.ElicitationLive do
   end
 
   @impl true
+  def handle_event("set_dollar_cap", %{"dollar_cap" => raw}, socket) do
+    {:noreply, assign(socket, dollar_cap_input: raw)}
+  end
+
+  @impl true
   def handle_event("confirm_spec", _params, socket) do
     pid = socket.assigns.session_pid
     target_dir = Path.join(["specs", "012-elicit-spec"])
     File.mkdir_p!(target_dir)
 
-    case ElicitationSession.write_spec(pid, target_dir) do
-      :ok ->
-        if Process.alive?(pid), do: GenServer.stop(pid)
+    # The UI's dollar cap is authoritative — the elicitor never asks about spend.
+    # It must land in the session BEFORE write_spec so the file and the pipeline
+    # input agree.
+    case parse_dollar_cap(socket.assigns.dollar_cap_input) do
+      {:ok, cap} ->
+        :ok = ElicitationSession.set_dollar_cap(pid, cap)
+        do_confirm_spec(pid, target_dir, socket)
 
+      :error ->
         {:noreply,
-         assign(socket,
-           session_pid: nil,
-           session: nil,
-           success_message:
-             "Elicited specification written successfully to specs/012-elicit-spec/elicited_spec.json!"
+         put_flash(
+           socket,
+           :error,
+           "Dollar cap must be a positive amount (got: #{inspect(socket.assigns.dollar_cap_input)})"
          )}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to write spec: #{inspect(reason)}")}
     end
+  end
+
+  @impl true
+  def handle_event("start_pipeline", params, socket) do
+    spec = socket.assigns.confirmed_spec
+    review_mode = parse_review_mode(params["review_mode"])
+    run_id = "run_#{System.unique_integer([:positive])}"
+    agent_name = derive_agent_name(spec)
+
+    # Subscribe BEFORE starting the run so no event is missed.
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(AgentOS.PubSub, ProgressEvent.run_topic(run_id))
+    end
+
+    # Fire-and-forget under the dedicated supervisor: the run must survive this
+    # LiveView (FR-002) — never awaited, never linked.
+    {:ok, _task_pid} =
+      Task.Supervisor.start_child(AgentOS.PipelineTaskSupervisor, fn ->
+        AgentOS.Pipeline.Orchestrator.run(spec, review_mode, run_id: run_id)
+      end)
+
+    {:noreply,
+     socket
+     |> assign(
+       pipeline_state: :running,
+       run_id: run_id,
+       run_agent: agent_name,
+       stage_states: %{},
+       terminal: nil
+     )
+     |> push_patch(to: "/?run=#{run_id}&agent=#{agent_name}")}
   end
 
   @impl true
@@ -317,7 +488,18 @@ defmodule AgentOSWeb.ElicitationLive do
 
   @impl true
   def handle_event("reset_flow", _params, socket) do
-    {:noreply, assign(socket, success_message: nil)}
+    {:noreply,
+     socket
+     |> assign(
+       success_message: nil,
+       confirmed_spec: nil,
+       pipeline_state: :idle,
+       run_id: nil,
+       run_agent: nil,
+       stage_states: %{},
+       terminal: nil
+     )
+     |> push_patch(to: "/")}
   end
 
   @impl true
@@ -330,4 +512,134 @@ defmodule AgentOSWeb.ElicitationLive do
   def handle_event("submit_key", _params, socket) do
     {:noreply, socket}
   end
+
+  @impl true
+  def handle_info({:pipeline_progress, %ProgressEvent{} = event}, socket) do
+    # Stale-run guard: only render events for the run this view owns.
+    if event.run_id == socket.assigns.run_id do
+      socket =
+        if event.stage == :pipeline do
+          assign(socket,
+            terminal: %{status: event.status, detail: event.detail},
+            run_agent: event.agent_name
+          )
+        else
+          assign(socket,
+            stage_states:
+              Map.put(socket.assigns.stage_states, event.stage, %{
+                status: event.status,
+                detail: event.detail
+              }),
+            run_agent: event.agent_name
+          )
+        end
+
+      {:noreply, socket}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # --- Pipeline helpers ---
+
+  # Whitelisted review-mode parse: unknown input falls back to the consent-gated
+  # default; the dangerous mode is only reachable by explicit selection (FR-001).
+  defp do_confirm_spec(pid, target_dir, socket) do
+    # Capture the typed confirmed spec BEFORE stopping the session — it is the
+    # pipeline's input (US1).
+    session = ElicitationSession.get_state(pid)
+    confirmed_spec = %{session.spec_draft | confirmed: true}
+
+    case ElicitationSession.write_spec(pid, target_dir) do
+      :ok ->
+        if Process.alive?(pid), do: GenServer.stop(pid)
+
+        {:noreply,
+         assign(socket,
+           session_pid: nil,
+           session: nil,
+           confirmed_spec: confirmed_spec,
+           success_message:
+             "Elicited specification written to specs/012-elicit-spec/elicited_spec.json. " <>
+               "Choose a review mode and start the pipeline."
+         )}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to write spec: #{inspect(reason)}")}
+    end
+  end
+
+  # Parses the UI cap string; only positive amounts confirm (a zero cap makes an
+  # inert agent — projection would reject it anyway; fail at the earliest surface).
+  defp parse_dollar_cap(raw) when is_binary(raw) do
+    case Float.parse(String.trim(raw)) do
+      {cap, ""} when cap > 0 -> {:ok, cap}
+      _ -> :error
+    end
+  end
+
+  defp parse_review_mode("review_if_risky"), do: :review_if_risky
+  defp parse_review_mode("dangerously_skip_review"), do: :dangerously_skip_review
+  defp parse_review_mode(_), do: :always_review
+
+  # Mirrors Orchestrator.determine_name/2 for display and consent-link purposes.
+  defp derive_agent_name(spec) do
+    spec.purpose
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9_]+/, "_")
+    |> String.trim("_")
+  end
+
+  # Rebuilds panel state from the persisted run record after a refresh; a run
+  # still in flight has no record yet — live events fill the panel as they land.
+  defp rebuild_from_record(socket, agent, run_id) do
+    case fetch_pipeline_run(agent) do
+      %PipelineRun{run_id: ^run_id} = record ->
+        stage_states =
+          Enum.into(record.stages, %{}, fn %{stage: stage, status: status, detail: detail} ->
+            {stage, %{status: if(status == :ok, do: :finished, else: :failed), detail: detail}}
+          end)
+
+        terminal =
+          case record.outcome do
+            :deployed -> %{status: :deployed, detail: record.provenance}
+            :blocked -> %{status: :blocked, detail: elem(record.deploy_result, 1)}
+            :stopped -> %{status: :stopped, detail: record.reason}
+            nil -> nil
+          end
+
+        assign(socket, stage_states: stage_states, terminal: terminal)
+
+      _ ->
+        socket
+    end
+  end
+
+  # Reads the persisted run record; tolerates a store that is not running.
+  defp fetch_pipeline_run(agent) do
+    AgentOS.StateStore.snapshot("pipeline_runs")[agent]
+  rescue
+    _ -> nil
+  catch
+    :exit, _ -> nil
+  end
+
+  defp pipeline_stages, do: @pipeline_stages
+
+  defp stage_label(stage), do: Map.get(@stage_labels, stage, to_string(stage))
+
+  defp stage_icon(nil), do: "○"
+  defp stage_icon(%{status: :started}), do: "◔"
+  defp stage_icon(%{status: :finished}), do: "●"
+  defp stage_icon(%{status: :failed}), do: "✕"
+
+  # Text for a stage's detail chip, nil when there is nothing to show.
+  defp stage_detail_text(%{detail: detail}) when not is_nil(detail) and detail != :ok,
+    do: format_detail(detail)
+
+  defp stage_detail_text(_), do: nil
+
+  defp format_detail(detail) when is_binary(detail), do: detail
+  defp format_detail(detail) when is_atom(detail), do: to_string(detail)
+  defp format_detail(detail), do: inspect(detail)
 end

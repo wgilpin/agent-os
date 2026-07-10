@@ -61,7 +61,7 @@ defmodule AgentOS.ProvisionerTest do
   test "agent_config/0 returns a map with all hard-wired keys" do
     config = Provisioner.agent_config()
     assert is_map(config)
-    assert config.manifest_path == "manifests/discovery.md"
+    assert config.manifest_path == "test/fixtures/manifests/discovery.md"
     assert config.agent_cmd == "docker"
     assert config.agent_args == []
     assert config.tz == "Etc/UTC"
@@ -579,6 +579,68 @@ defmodule AgentOS.ProvisionerTest do
       provenance = AgentOS.StateStore.snapshot("provenance")[agent_name]
       assert provenance.status == :failed
       assert provenance.failure_reason == :both_failed
+    end
+
+    test "US3: an already-approved agent cannot re-deploy without green verdicts" do
+      # The consent page records :reviewed_human provenance, which routes deploy
+      # into its idempotent re-deploy branch. That branch must re-check the gate:
+      # approval reviews intent, it does not waive the machine verdicts.
+      temp_manifest =
+        Path.join(System.tmp_dir!(), "healing_gate_#{System.unique_integer([:positive])}.md")
+
+      File.write!(temp_manifest, """
+      ---
+      purpose: "test healing gate"
+      grants: []
+      spend:
+        cap: 50000
+        window: "daily"
+        on_breach: "kill"
+      owner: "human"
+      supervision: "none"
+      ---
+      """)
+
+      on_exit(fn -> File.rm(temp_manifest) end)
+      agent_name = Path.basename(temp_manifest, ".md")
+      {opts, hash} = create_temp_agent(agent_name)
+
+      manifest_hash = Provisioner.manifest_hash(temp_manifest)
+      :ok = Provisioner.record_provenance(agent_name, :reviewed_human, manifest_hash)
+
+      # 1. No verdicts at all -> refused despite the recorded human approval.
+      assert {:error, {:gate_failed, :missing_verdict}} =
+               Provisioner.deploy(temp_manifest, :always_review, opts)
+
+      # 2. Failed security review -> refused with the specific reason.
+      seed_pass_verdicts(agent_name, hash)
+
+      :ok =
+        AgentOS.StateStore.apply_action(
+          "security_review_results",
+          {:put, agent_name,
+           %AgentOS.Pipeline.Stage5.Verdict{
+             status: :fail,
+             reasoning: "bad",
+             timestamp: DateTime.utc_now(),
+             code_hash: hash
+           }}
+        )
+
+      assert {:error, {:gate_failed, :security_review_failed}} =
+               Provisioner.deploy(temp_manifest, :always_review, opts)
+
+      # 3. Green verdicts -> the idempotent re-deploy proceeds.
+      seed_pass_verdicts(agent_name, hash)
+
+      assert {:ok, :reviewed_human} = Provisioner.deploy(temp_manifest, :always_review, opts)
+
+      # 4. :dangerously_skip_review keeps its explicit escape hatch on re-deploys.
+      AgentOS.StateStore.apply_action("judge_results", {:delete_in, [agent_name]})
+      AgentOS.StateStore.apply_action("security_review_results", {:delete_in, [agent_name]})
+
+      assert {:ok, :reviewed_human} =
+               Provisioner.deploy(temp_manifest, :dangerously_skip_review, opts)
     end
   end
 end

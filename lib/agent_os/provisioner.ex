@@ -31,7 +31,7 @@ defmodule AgentOS.Provisioner do
 
   @doc """
   Compares the hard-wired config grants (grants, spend) against
-  the fields declared in manifests/discovery.md. Logs a warning on drift.
+  the fields declared in test/fixtures/manifests/discovery.md. Logs a warning on drift.
 
   ## Returns
     - `:ok` if config matches manifest.
@@ -175,7 +175,33 @@ defmodule AgentOS.Provisioner do
         case get_recorded_provenance(agent_name) do
           %{status: status, hash: ^hash}
           when status in [:reviewed_human, :skipped_in_envelope, :dangerously_skipped] ->
-            {:ok, status}
+            # Re-deploys must still be green: a human approval recorded earlier (e.g.
+            # from the consent page) is a review of INTENT, not a waiver of the machine
+            # verdicts — without this, an agent whose security review failed or never
+            # ran could be deployed and run through the approval door.
+            case deploy_gate(agent_name, normalized_mode, opts) do
+              :ok ->
+                # Heal pre-registry deployments: ensure the durable registry knows about
+                # an agent whose provenance already says deployed (idempotent, only if absent).
+                if is_nil(AgentOS.DeploymentRegistry.get(agent_name)) do
+                  :ok =
+                    AgentOS.DeploymentRegistry.record_deployment(
+                      agent_name,
+                      manifest_path,
+                      status
+                    )
+                end
+
+                {:ok, status}
+
+              {:error, reason} ->
+                Logger.error(
+                  "Deploy gate refused '#{agent_name}': #{inspect(reason)} " <>
+                    "(judge/security verdicts must pass for the current code)"
+                )
+
+                {:error, {:gate_failed, reason}}
+            end
 
           _ ->
             case check_deploy_on_green(agent_name, opts) do
@@ -231,6 +257,21 @@ defmodule AgentOS.Provisioner do
                     end
 
                   :ok = record_provenance(agent_name, provenance, hash)
+
+                  # Deploy completed directly — land the durable registry record
+                  # (FR-005). The approval-resume branch writes its own record in
+                  # TriggerGateway; these are the only two write sites.
+                  :ok =
+                    AgentOS.DeploymentRegistry.record_deployment(
+                      agent_name,
+                      manifest_path,
+                      provenance
+                    )
+
+                  # "when the agent starts": a startup-triggered agent runs once on
+                  # deploy completion (no-op for other trigger types).
+                  :ok = AgentOS.TriggerArming.fire_startup(agent_name, manifest_path)
+
                   {:ok, provenance}
                 end
 
@@ -243,6 +284,23 @@ defmodule AgentOS.Provisioner do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  @doc """
+  The deploy-on-green gate: :ok when the agent's judge and security-review verdicts
+  both pass for the CURRENT code hash. `:dangerously_skip_review` keeps its explicit
+  escape hatch, and system agents (substrate-owned fixtures, never pipeline-generated)
+  carry no verdicts by design. Consent approval calls this before recording
+  `:reviewed_human` provenance so an un-reviewed agent cannot be approved into a
+  deployable state.
+  """
+  @spec deploy_gate(binary(), atom(), keyword()) :: :ok | {:error, atom()}
+  def deploy_gate(agent_name, review_mode, opts \\ []) do
+    cond do
+      normalize_mode(review_mode) == :dangerously_skip_review -> :ok
+      AgentOS.AgentLifecycle.system_agent?(agent_name) -> :ok
+      true -> check_deploy_on_green(agent_name, opts)
     end
   end
 

@@ -1,0 +1,4 @@
+{
+  "mode": "inference",
+  "rationale": "The local time on startup is dynamic content that is not known until runtime. Translating this dynamic time into French words (e.g., converting '14:30' to 'quatorze heures trente' or 'deux heures et demie') and formatting the message requires reasoning and composing based on the runtime payload."
+}

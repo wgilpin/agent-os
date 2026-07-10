@@ -12,6 +12,7 @@ defmodule AgentOS.Pipeline.Orchestrator.PipelineRun do
           | {:error, term()}
 
   @type t :: %__MODULE__{
+          run_id: String.t() | nil,
           agent_name: String.t(),
           purpose: String.t(),
           stages: [stage_outcome()],
@@ -28,6 +29,7 @@ defmodule AgentOS.Pipeline.Orchestrator.PipelineRun do
         }
 
   defstruct [
+    :run_id,
     :agent_name,
     :purpose,
     :outcome,
@@ -75,7 +77,12 @@ defmodule AgentOS.Pipeline.Orchestrator do
     spec_dir = Keyword.get(opts, :spec_dir, "agents")
     manifest_dir = Keyword.get(opts, :manifest_dir, "manifests")
 
+    # The run_id keys the per-run progress topic and is persisted on the run
+    # record so a refreshed UI can re-subscribe (FR-003).
+    run_id = Keyword.get(opts, :run_id) || "run_#{System.unique_integer([:positive])}"
+
     run = %PipelineRun{
+      run_id: run_id,
       agent_name: agent_name,
       purpose: spec.purpose,
       stages: [],
@@ -149,8 +156,12 @@ defmodule AgentOS.Pipeline.Orchestrator do
           # Stage 4 (synthesis contract) and Stage 3 (judge) via opts, so judge and agent
           # derive independently from manifest + purpose + one substrate-recorded bit —
           # co-generation isolation holds (research D5).
+          emit_progress(run, :classify, :started)
+
           {:ok, execution_mode} =
             AgentOS.ExecutionMode.classify(agent_name, manifest, opts_with_token)
+
+          emit_progress(run, :classify, :finished, execution_mode.mode)
 
           Logger.info(
             "[Orchestrator] Classified '#{agent_name}' as #{execution_mode.mode} — #{execution_mode.rationale}"
@@ -368,13 +379,17 @@ defmodule AgentOS.Pipeline.Orchestrator do
   # --- Helper for catching crashes in stages ---
 
   defp safe_call(stage_name, fun, run) do
+    emit_progress(run, stage_name, :started)
+
     try do
       case fun.() do
         {:ok, result} ->
+          emit_progress(run, stage_name, :finished, stage_detail(stage_name, result))
           new_stages = run.stages ++ [%{stage: stage_name, status: :ok, detail: :ok}]
           {:ok, %{run | stages: new_stages}, result}
 
         {:error, reason} ->
+          emit_progress(run, stage_name, :failed, reason)
           new_stages = run.stages ++ [%{stage: stage_name, status: :error, detail: reason}]
 
           {:error,
@@ -394,6 +409,8 @@ defmodule AgentOS.Pipeline.Orchestrator do
           "Stage #{stage_name} crashed: #{inspect(exception)}\n#{Exception.format_stacktrace(stacktrace)}"
         )
 
+        emit_progress(run, stage_name, :failed, {:crash, exception})
+
         new_stages =
           run.stages ++ [%{stage: stage_name, status: :error, detail: {:crash, exception}}]
 
@@ -409,6 +426,8 @@ defmodule AgentOS.Pipeline.Orchestrator do
       :exit, value ->
         Logger.error("Stage #{stage_name} exited: #{inspect(value)}")
 
+        emit_progress(run, stage_name, :failed, {:exit, value})
+
         new_stages =
           run.stages ++ [%{stage: stage_name, status: :error, detail: {:exit, value}}]
 
@@ -421,6 +440,19 @@ defmodule AgentOS.Pipeline.Orchestrator do
              reason: {:exit, value}
          }}
     end
+  end
+
+  # Extracts the UI-relevant detail from a stage result: the verdict status for
+  # verdict-bearing stages, nil elsewhere.
+  defp stage_detail(:judge, %{status: status}), do: status
+  defp stage_detail(:security_review, %{status: status}), do: status
+  defp stage_detail(_stage, _result), do: nil
+
+  # Broadcasts a typed progress event for this run (per-run topic + firehose).
+  defp emit_progress(run, stage, status, detail \\ nil) do
+    run.run_id
+    |> AgentOS.Pipeline.ProgressEvent.new(run.agent_name, stage, status, detail)
+    |> AgentOS.Pipeline.ProgressEvent.broadcast()
   end
 
   # --- Helpers ---
@@ -445,6 +477,28 @@ defmodule AgentOS.Pipeline.Orchestrator do
   defp record_run(run, opts) do
     agent_name = run.agent_name
     run_log_path = Keyword.get(opts, :run_log_path)
+
+    # Exactly one terminal progress event per run (FR-003): deployed / blocked
+    # (with the approval ref) / stopped (with the reason).
+    {terminal_status, terminal_detail} =
+      case run.outcome do
+        :deployed ->
+          {:deployed, run.provenance}
+
+        :blocked ->
+          ref =
+            case run.deploy_result do
+              {:blocked, blocked_ref} -> blocked_ref
+              _ -> nil
+            end
+
+          {:blocked, ref}
+
+        :stopped ->
+          {:stopped, run.reason}
+      end
+
+    emit_progress(run, :pipeline, terminal_status, terminal_detail)
 
     # Persist via StateStore
     try do

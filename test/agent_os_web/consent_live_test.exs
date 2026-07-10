@@ -34,6 +34,13 @@ defmodule AgentOSWeb.ConsentLiveTest do
       {AgentOS.StateStore, name: "security_review_results", path: tmp_security, initial: %{}}
     )
 
+    # Approval-resume for deploy-shaped actions writes the deployment registry (041).
+    tmp_deployments = Path.join(tmp_dir, "deployments.db")
+
+    start_supervised!(
+      {AgentOS.StateStore, name: "deployments", path: tmp_deployments, initial: %{}}
+    )
+
     start_supervised!({Phoenix.PubSub, name: AgentOS.PubSub})
     start_supervised!(AgentOS.TriggerGateway)
     start_supervised!({AgentOS.RunSupervisor, [worker_fn: fn _opts -> :ok end]})
@@ -78,9 +85,9 @@ defmodule AgentOSWeb.ConsentLiveTest do
     assert html =~ "verify deterministic consent display"
 
     # Assert exact phrases
-    assert html =~ "WRITE TO YOUR LOCAL STATE STORE"
-    assert html =~ "SEND MESSAGES OUT TO EXTERNAL RECIPIENTS"
-    assert html =~ "READ INCOMING EMAILS FROM GMAIL"
+    assert html =~ "Write to your local state store"
+    assert html =~ "Send messages out to external recipients"
+    assert html =~ "Read incoming emails from Gmail"
 
     # Assert scoping values
     assert html =~ "append"
@@ -153,6 +160,70 @@ defmodule AgentOSWeb.ConsentLiveTest do
     refute Map.has_key?(approvals, ref)
   end
 
+  test "approve is refused by the deploy gate when machine verdicts are not green", %{
+    tmp_dir: tmp_dir,
+    conn: conn
+  } do
+    # The test env runs :dangerously_skip_review; force the real gate for this test.
+    original_mode = Application.get_env(:agent_os, :review_mode)
+    Application.put_env(:agent_os, :review_mode, :always_review)
+
+    on_exit(fn ->
+      if original_mode,
+        do: Application.put_env(:agent_os, :review_mode, original_mode),
+        else: Application.delete_env(:agent_os, :review_mode)
+    end)
+
+    manifest_path = Path.join(tmp_dir, "ungated_agent.md")
+
+    File.write!(manifest_path, """
+    ---
+    purpose: "testing approval gate"
+    grants:
+      - connector: kv_append
+        methods: ["append"]
+    spend:
+      cap: 100000
+      window: daily
+      on_breach: kill
+    owner: human
+    supervision: restart-once-and-alert
+    ---
+    """)
+
+    ref = "ref_deploy_ungated_agent_1"
+
+    action = %AgentOS.ProposedAction{
+      type: "deploy",
+      recipient: "ungated_agent",
+      method: manifest_path,
+      payload: %{"hash" => "HASH123"}
+    }
+
+    grant = %AgentOS.Manifest.Grant{connector: "deploy"}
+
+    :ok =
+      AgentOS.StateStore.apply_action(
+        "pending_approvals",
+        {:put, :approvals, %{ref => %{ref: ref, action: action, grant: grant}}}
+      )
+
+    assert {:ok, lv, _html} = live(conn, "/consent?manifest=#{manifest_path}")
+
+    # No judge/security verdicts exist for this agent: approval must be refused.
+    html = lv |> element(".btn-approve") |> render_click()
+    refute html =~ "Deployment Approved!"
+    assert html =~ "Not approved:"
+
+    # Provenance must NOT say a human review happened.
+    provenance = AgentOS.StateStore.snapshot("provenance")
+    refute match?(%{status: :reviewed_human}, Map.get(provenance, "ungated_agent"))
+
+    # The pending ref survives so the decision can be made after a re-run.
+    pending = AgentOS.StateStore.snapshot("pending_approvals")
+    assert Map.has_key?(Map.get(pending, :approvals, %{}), ref)
+  end
+
   test "reject blocks deploy, cancels pending approval ref, and leaves agent code unexecuted", %{
     tmp_dir: tmp_dir,
     conn: conn
@@ -208,6 +279,89 @@ defmodule AgentOSWeb.ConsentLiveTest do
     pending = AgentOS.StateStore.snapshot("pending_approvals")
     approvals = Map.get(pending, :approvals, %{})
     refute Map.has_key?(approvals, ref)
+  end
+
+  test "gate refusal offers the re-run remedy for an agent WITH code (FR-006)", %{
+    tmp_dir: tmp_dir,
+    conn: conn
+  } do
+    original_mode = Application.get_env(:agent_os, :review_mode)
+    Application.put_env(:agent_os, :review_mode, :always_review)
+
+    manifest_path = Path.join(tmp_dir, "coded_consent.md")
+
+    File.write!(manifest_path, """
+    ---
+    purpose: "re-run remedy for coded agent"
+    grants:
+      - connector: kv_append
+        methods: ["append"]
+    spend:
+      cap: 100000
+      window: daily
+      on_breach: kill
+    owner: human
+    supervision: restart-once-and-alert
+    ---
+    """)
+
+    # The consent view checks code presence against the real agents/<name>/main.py.
+    File.mkdir_p!("agents/coded_consent")
+    File.write!("agents/coded_consent/main.py", "print('x')")
+
+    on_exit(fn ->
+      if original_mode,
+        do: Application.put_env(:agent_os, :review_mode, original_mode),
+        else: Application.delete_env(:agent_os, :review_mode)
+
+      File.rm_rf!("agents/coded_consent")
+    end)
+
+    assert {:ok, lv, _html} = live(conn, "/consent?manifest=#{manifest_path}")
+    html = lv |> element(".btn-approve") |> render_click()
+
+    assert html =~ "Not approved:"
+    assert html =~ "Re-run its checks from the inventory."
+    assert html =~ ~s(href="/inventory")
+  end
+
+  test "gate refusal directs an orphan (no code) to re-create or delete (FR-006)", %{
+    tmp_dir: tmp_dir,
+    conn: conn
+  } do
+    original_mode = Application.get_env(:agent_os, :review_mode)
+    Application.put_env(:agent_os, :review_mode, :always_review)
+
+    on_exit(fn ->
+      if original_mode,
+        do: Application.put_env(:agent_os, :review_mode, original_mode),
+        else: Application.delete_env(:agent_os, :review_mode)
+    end)
+
+    manifest_path = Path.join(tmp_dir, "orphan_consent.md")
+
+    File.write!(manifest_path, """
+    ---
+    purpose: "re-run remedy for orphan agent"
+    grants:
+      - connector: kv_append
+        methods: ["append"]
+    spend:
+      cap: 100000
+      window: daily
+      on_breach: kill
+    owner: human
+    supervision: restart-once-and-alert
+    ---
+    """)
+
+    # No agents/orphan_consent/main.py exists → code_missing is true.
+    assert {:ok, lv, _html} = live(conn, "/consent?manifest=#{manifest_path}")
+    html = lv |> element(".btn-approve") |> render_click()
+
+    assert html =~ "Not approved:"
+    assert html =~ "Re-create it from the Create agent page, or delete it"
+    refute html =~ "Re-run its checks from the inventory."
   end
 
   test "surfaces connector registration lookup loud-failure error on missing registry connector",

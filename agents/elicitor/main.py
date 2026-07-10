@@ -2,12 +2,12 @@ import json
 import os
 import sys
 import socket
-from typing import List, Dict, Any
+from typing import Dict, Any
 
 # Ensure project root is in sys.path for robust module resolution
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from agents.elicitor.models import ElicitorResponse, ElicitedSpecModel, BoundaryModel, SpendLimitsModel
+from agents.elicitor.models import ElicitorResponse
 
 def load_env_file():
     """Manually parse .env in project root to support dotenv formats with/without export."""
@@ -43,6 +43,7 @@ def run_live(session_data: Dict[str, Any]) -> ElicitorResponse:
 
     transcript = session_data.get("transcript", [])
     original_purpose = session_data.get("original_purpose", "")
+    available_capabilities = session_data.get("available_capabilities", [])
 
     # Construct the instruction and prompt history
     system_instruction = """
@@ -50,14 +51,31 @@ def run_live(session_data: Dict[str, Any]) -> ElicitorResponse:
     
     CRITICAL RULES:
     1. Minimise everything (Principle I Simplicity First, II Explicit Scope Control). Surface the smallest set of capabilities, triggers, and spend limits the purpose actually needs.
+    1a. ALWAYS populate `triggers` from the purpose — an agent with no trigger can never run. Map the intent: "on start / when it starts / on load / on deploy / once" -> [{"type": "startup"}]; "every day at HH:MM / daily" -> [{"type": "time", "at": "HH:MM"}]; "when a message/email arrives / on message" -> [{"type": "message"}]; a named signal -> [{"type": "event", "name": "..."}]. If genuinely unclear, ask ONE question to pin it down before confirming.
     2. Suggest read-only or draft-only permissions rather than direct send or delete access.
     3. Push back on scope creep. If the user asks for actions that aren't strictly necessary to satisfy the purpose, set scope_creep_detected to true and explain why in pushback_message.
     4. Fill in the ElicitedSpecModel structure representing the spec draft.
     5. Formulate a single, concise next clarifying question to ask the user. When the spec is KISS-clear and all boundaries/spends are decided, ask the user to confirm the spec.
     6. When the user confirms the spec (e.g., says "yes", "confirm", "looks good"), set confirmed to true.
     7. NEVER ask the user about raw token limits or token counts. Instead, estimate a reasonable default token limit (e.g. 50,000 to 200,000 tokens based on the complexity and scope of the purpose) and fill it in automatically in the background.
-    8. Capture trigger intent in the triggers list. Phrases like "upon loading", "on load", "when the agent starts", or "at startup" mean {"type": "startup"}. A schedule ("every day at 7am", "each morning") means {"type": "time", "at": "07:00"}. Reacting to a named event means {"type": "event", "name": ...}. Responding to incoming messages means {"type": "message"}. Only include triggers the purpose actually implies; if none is stated, leave triggers empty and ask when the agent should run.
+    8. NEVER ask the user about the dollar spend cap — the OS user interface collects it
+       directly (editable field, default $0.10) and its value overrides the draft. Set
+       dollar_cap to 0.1 as a placeholder and move on.
     """
+
+    # The substrate supplies the registry's legal capability identifiers; the spec
+    # must use these EXACTLY — an invented id is rejected downstream at the
+    # manifest projection's registry gate.
+    if available_capabilities:
+        capability_lines = "\n".join(
+            f"    - {cap['id']}: {cap.get('description', '')}" for cap in available_capabilities
+        )
+        system_instruction += (
+            "\n    9. The `capabilities` list may ONLY contain identifiers from this exact list. "
+            "Map the user's intent onto these ids; NEVER invent, rename, or re-case an identifier. "
+            "If no listed capability fits the purpose, say so instead of inventing one.\n"
+            f"{capability_lines}\n"
+        )
 
     # Format transcript messages for the prompt
     formatted_transcript = []

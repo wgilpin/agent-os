@@ -7,9 +7,14 @@
     "discord_notify"
   ],
   "confirmed": true,
-  "purpose": "Send a 'Hello, World!' notification to a Discord channel via a pre-configured webhook upon receiving a message trigger, then exit.",
+  "purpose": "Get the local time on startup, translate it into French words, and send it as a message to the configured Discord channel.",
   "spend_limits": {
-    "dollar_cap": 0.05,
+    "dollar_cap": 0.1,
     "token_limit": 50000
-  }
+  },
+  "triggers": [
+    {
+      "type": "startup"
+    }
+  ]
 }

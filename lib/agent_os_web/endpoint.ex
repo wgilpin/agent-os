@@ -30,6 +30,14 @@ defmodule AgentOSWeb.Endpoint do
     gzip: false
   )
 
+  # Dev-only (config :code_reloader): recompiles changed modules on each full HTTP
+  # request, so a browser refresh picks up Elixir edits without a server restart.
+  # LiveView events ride the websocket and do NOT pass through plugs — an F5 is
+  # still needed after code changes.
+  if code_reloading? do
+    plug(Phoenix.CodeReloader)
+  end
+
   plug(Plug.RequestId)
   plug(Plug.Telemetry, event_prefix: [:phoenix, :endpoint])
 

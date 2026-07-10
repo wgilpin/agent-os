@@ -12,6 +12,20 @@
     <link phx-track-static rel="stylesheet" href="/app.css" />
   </head>
   <body>
+    <header class="site-nav">
+      <span class="site-nav-brand">Agent OS</span>
+      <nav class="site-nav-links">
+        <a href="/" class={"site-nav-link#{if @conn.request_path == "/", do: " site-nav-link-active"}"}>
+          Create agent
+        </a>
+        <a href="/consent" class={"site-nav-link#{if @conn.request_path == "/consent", do: " site-nav-link-active"}"}>
+          Approvals
+        </a>
+        <a href="/inventory" class={"site-nav-link#{if @conn.request_path == "/inventory", do: " site-nav-link-active"}"}>
+          Inventory
+        </a>
+      </nav>
+    </header>
     <%= @inner_content %>
     <!-- Load Phoenix and LiveView scripts served by our Endpoint -->
     <script phx-track-static type="text/javascript" src="/phoenix/phoenix.js"></script>

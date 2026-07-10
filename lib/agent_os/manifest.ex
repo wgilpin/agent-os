@@ -21,6 +21,7 @@ defmodule AgentOS.Manifest do
           | %{type: :time, at: String.t()}
           | %{type: :event, name: String.t()}
           | %{type: :message}
+          | %{type: :startup}
 
   @type t :: %__MODULE__{
           purpose: String.t(),
@@ -181,6 +182,11 @@ defmodule AgentOS.Manifest do
 
       "message" ->
         %{type: :message}
+
+      # Fires one run when the agent becomes live: at deploy time and again each
+      # time the substrate boots and re-arms it. "when the agent starts."
+      "startup" ->
+        %{type: :startup}
 
       other ->
         raise "Unsupported trigger type: #{inspect(other)}"

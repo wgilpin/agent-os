@@ -261,6 +261,16 @@ defmodule AgentOS.WorldBTest do
         %{context.agent_name => context.manifest}
       end
 
+      # Dispatch is registry-gated since 041: register the agent as deployed so
+      # the legitimate intake path fires (the hostile agent-output path above is
+      # rejected regardless of deployment state).
+      :ok =
+        AgentOS.DeploymentRegistry.record_deployment(
+          context.agent_name,
+          "manifests/#{context.agent_name}.md",
+          :reviewed_human
+        )
+
       # Call TriggerGateway.submit_sync
       res =
         TriggerGateway.submit_sync(
@@ -302,7 +312,7 @@ defmodule AgentOS.WorldBTest do
         )
 
       # Assert it is visible in Inventory.render
-      inv = Inventory.render(manifest_path: "manifests/discovery.md")
+      inv = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert String.contains?(inv, "ref_42")
       assert String.contains?(inv, "external_send")
 
@@ -339,7 +349,7 @@ defmodule AgentOS.WorldBTest do
       # Assert entry is removed from StateStore and Inventory
       snapshot2 = AgentOS.StateStore.snapshot("pending_approvals")
       assert Map.get(snapshot2.approvals, "ref_42") == nil
-      inv2 = Inventory.render(manifest_path: "manifests/discovery.md")
+      inv2 = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       refute String.contains?(inv2, "ref_42")
 
       # 4. Assert (c) duplicate intake approve is a no-op (at-most-once)

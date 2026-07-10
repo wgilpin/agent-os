@@ -33,6 +33,31 @@ defmodule AgentOS.ManifestTest do
   Some markdown body here.
   """
 
+  test "parses a startup trigger" do
+    tmp =
+      Path.join(System.tmp_dir!(), "manifest_startup_#{System.unique_integer([:positive])}.md")
+
+    File.write!(tmp, """
+    ---
+    purpose: "run on start"
+    triggers:
+      - type: startup
+    grants: []
+    spend:
+      cap: 1000
+      window: daily
+      on_breach: kill
+    owner: human
+    supervision: none
+    ---
+    body
+    """)
+
+    on_exit(fn -> File.rm(tmp) end)
+
+    assert {:ok, %Manifest{triggers: [%{type: :startup}]}} = Manifest.load(tmp)
+  end
+
   test "parses happy path manifest correctly" do
     tmp = Path.join(System.tmp_dir!(), "manifest_happy_#{System.unique_integer([:positive])}.md")
     File.write!(tmp, @happy_manifest)

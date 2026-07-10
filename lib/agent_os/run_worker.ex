@@ -82,14 +82,35 @@ defmodule AgentOS.RunWorker do
       rescue
         _ ->
           %{
-            agent_cmd: "python",
+            agent_cmd: python_bin(),
             agent_args: ["agents/discovery/main.py"],
-            manifest_path: "manifests/discovery.md"
+            manifest_path: "test/fixtures/manifests/discovery.md"
           }
       end
 
-    manifest_path = Keyword.get(opts, :manifest_path, cfg.manifest_path)
+    # Dispatchers (TriggerGateway, TriggerArming, AgentLifecycle.run_now) identify the
+    # target by :agent; direct callers may pass :manifest_path. With neither, the legacy
+    # config agent runs.
+    manifest_path =
+      Keyword.get(opts, :manifest_path) ||
+        agent_manifest_path(Keyword.get(opts, :agent)) ||
+        cfg.manifest_path
+
     agent_name = Path.basename(manifest_path, ".md")
+    config_agent = Path.basename(cfg.manifest_path, ".md")
+
+    # Generated agents run their generated entrypoint directly — their only side-effect
+    # path is the broker UDS tool channel, and the docker sandbox image exists only for
+    # the config agent. An explicit :agent_cmd (tests, config overrides) always wins.
+    opts =
+      if agent_name != config_agent and not Keyword.has_key?(opts, :agent_cmd) do
+        Keyword.merge(opts,
+          agent_cmd: python_bin(),
+          agent_args: [Path.join(["agents", agent_name, "main.py"])]
+        )
+      else
+        opts
+      end
 
     review_mode =
       Keyword.get(opts, :review_mode) ||
@@ -97,13 +118,14 @@ defmodule AgentOS.RunWorker do
 
     case AgentOS.Provisioner.deploy(manifest_path, review_mode, opts) do
       {:blocked, ref} ->
-        run_log_path = Keyword.get(opts, :run_log_path, Path.join(["data", "run_log.md"]))
+        run_log_path = Keyword.get(opts, :run_log_path, RunLog.default_path())
         trigger = Keyword.get(opts, :trigger, :timer)
 
         AgentOS.RunLog.append(
           %{
             status: :error,
             actions: 0,
+            agent: agent_name,
             trigger: trigger,
             note: "deploy blocked: ref=#{ref}"
           },
@@ -239,8 +261,28 @@ defmodule AgentOS.RunWorker do
     end
   end
 
+  # The manifest for a dispatched :agent — the deployment record's path when registered,
+  # else the conventional location. Tolerates an absent registry (minimal test trees).
+  # Generated agents import venv-installed packages (e.g. pydantic), so they run
+  # under the project venv interpreter, not whatever bare `python` is on PATH —
+  # the same resolution the elicitor and the judge harness use.
+  defp python_bin, do: System.get_env("PYTHON_BIN") || ".venv/bin/python"
+
+  defp agent_manifest_path(nil), do: nil
+
+  defp agent_manifest_path(agent) when is_binary(agent) do
+    case AgentOS.DeploymentRegistry.get(agent) do
+      %{manifest_path: path} when is_binary(path) -> path
+      _ -> Path.join("manifests", agent <> ".md")
+    end
+  rescue
+    _ -> Path.join("manifests", agent <> ".md")
+  catch
+    :exit, _ -> Path.join("manifests", agent <> ".md")
+  end
+
   defp execute_run(cmd, args, manifest, agent_name, run_token, opts) do
-    run_log_path = Keyword.get(opts, :run_log_path, Path.join(["data", "run_log.md"]))
+    run_log_path = Keyword.get(opts, :run_log_path, RunLog.default_path())
     timeout_ms = Keyword.get(opts, :timeout_ms, 30_000)
 
     bookmarks_path =
@@ -278,6 +320,7 @@ defmodule AgentOS.RunWorker do
       # Agent never ran; no effects to report — an empty tally.
       dispatch_on_breach(
         manifest.spend.on_breach,
+        agent_name,
         run_log_path,
         trigger,
         items_in,
@@ -290,7 +333,14 @@ defmodule AgentOS.RunWorker do
              (if cmd == "docker" do
                 Jason.encode!(build_payload(snapshot, items, Keyword.get(opts, :trigger_input)))
               else
-                Jason.encode!(%{"roster" => snapshot.records || []})
+                # Non-docker (generated-agent / test) runs still receive their trigger
+                # payload — a message-triggered agent is useless without its message.
+                base = %{"roster" => roster_records(snapshot)}
+
+                case Keyword.get(opts, :trigger_input) do
+                  nil -> Jason.encode!(base)
+                  trigger_input -> Jason.encode!(Map.put(base, "trigger_input", trigger_input))
+                end
               end),
            {:ok, stdout} <- PortRunner.run(input_json, cmd, args, timeout_ms: timeout_ms),
            {:ok, _outcome} <- OutcomeRecord.parse(stdout) do
@@ -312,6 +362,7 @@ defmodule AgentOS.RunWorker do
 
           dispatch_on_breach(
             manifest.spend.on_breach,
+            agent_name,
             run_log_path,
             trigger,
             items_in,
@@ -323,6 +374,7 @@ defmodule AgentOS.RunWorker do
             %{
               status: :ok,
               actions: tally.approved,
+              agent: agent_name,
               trigger: trigger,
               exit_code: 0,
               items_in: items_in,
@@ -348,6 +400,7 @@ defmodule AgentOS.RunWorker do
             %{
               status: :error,
               actions: 0,
+              agent: agent_name,
               trigger: trigger,
               failure_cause: "malformed_outcome",
               items_in: items_in,
@@ -373,6 +426,7 @@ defmodule AgentOS.RunWorker do
             %{
               status: :error,
               actions: 0,
+              agent: agent_name,
               trigger: trigger,
               exit_code: exit_code,
               failure_cause: failure_cause,
@@ -390,6 +444,7 @@ defmodule AgentOS.RunWorker do
             %{
               status: :error,
               actions: 0,
+              agent: agent_name,
               trigger: trigger,
               failure_cause: "unexpected_stage_result",
               items_in: items_in,
@@ -437,7 +492,7 @@ defmodule AgentOS.RunWorker do
   @spec build_payload(map(), list(), term()) :: map()
   def build_payload(snapshot, items, trigger_input) do
     payload = %{
-      "state" => %{"records" => snapshot.records || []},
+      "state" => %{"records" => roster_records(snapshot)},
       "items" => items
     }
 
@@ -448,9 +503,23 @@ defmodule AgentOS.RunWorker do
     end
   end
 
+  # Reads the roster list tolerantly: fresh stores key it with the atom
+  # :records, while a store hydrated from a legacy on-disk DB uses "records".
+  defp roster_records(snapshot) do
+    Map.get(snapshot, :records) || Map.get(snapshot, "records") || []
+  end
+
   # Logs a spend-breach run and returns the killed sentinel. Effect counts come from the
   # transcript tally (empty on a pre-run breach where the agent never executed).
-  defp dispatch_on_breach(:kill, run_log_path, trigger, items_in, dropped_count, tally) do
+  defp dispatch_on_breach(
+         :kill,
+         agent_name,
+         run_log_path,
+         trigger,
+         items_in,
+         dropped_count,
+         tally
+       ) do
     rejected = Map.get(tally, :rejected, 0)
     parked = Map.get(tally, :parked, 0)
 
@@ -458,6 +527,7 @@ defmodule AgentOS.RunWorker do
       %{
         status: :killed,
         actions: 0,
+        agent: agent_name,
         trigger: trigger,
         exit_code: 0,
         failure_cause: :spend_breach,

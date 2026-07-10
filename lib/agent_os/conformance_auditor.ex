@@ -179,7 +179,7 @@ defmodule AgentOS.ConformanceAuditor do
   def run_pass(opts \\ []) do
     manifest_path =
       Keyword.get(opts, :manifest_path) ||
-        Application.get_env(:agent_os, :manifest_path, "manifests/discovery.md")
+        Application.get_env(:agent_os, :manifest_path, "test/fixtures/manifests/discovery.md")
 
     agent = Path.basename(manifest_path, ".md")
 
@@ -189,7 +189,7 @@ defmodule AgentOS.ConformanceAuditor do
         _ -> "unknown"
       end
 
-    run_log_path = Keyword.get(opts, :run_log_path) || Path.join(["data", "run_log.md"])
+    run_log_path = Keyword.get(opts, :run_log_path) || AgentOS.RunLog.default_path()
     window = Keyword.get(opts, :window) || Application.get_env(:agent_os, :conformance_window, 20)
     records = RunLog.read_records(run_log_path, window: window)
 

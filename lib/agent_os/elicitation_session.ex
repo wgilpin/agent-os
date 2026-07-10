@@ -40,6 +40,16 @@ defmodule AgentOS.ElicitationSession do
     GenServer.call(pid, {:write_spec, target_dir})
   end
 
+  @doc """
+  Overrides the draft's dollar spend cap with the UI-supplied value. The cap is a
+  UI control (editable in the spec panel, default $0.10) — never an elicitation
+  question, so the UI value is authoritative over whatever the elicitor drafted.
+  """
+  @spec set_dollar_cap(pid(), float()) :: :ok | {:error, :no_draft}
+  def set_dollar_cap(pid, cap) when is_number(cap) and cap > 0 do
+    GenServer.call(pid, {:set_dollar_cap, cap})
+  end
+
   # Server Callbacks
 
   @impl true
@@ -149,9 +159,14 @@ defmodule AgentOS.ElicitationSession do
             spec_draft: spec_draft
         }
 
-        # If next_question is empty and confirmed is true, mark confirmed
+        # The elicitor's structured `confirmed` flag is the confirmation signal.
+        # Do NOT also require an empty next_question: the model often closes with
+        # prose ("Spec confirmed. No further questions.") and nothing instructs it
+        # to return an empty string, so gating on emptiness silently strands
+        # confirmed sessions in :active (observed live). The human confirm click
+        # remains the actual gate; this only surfaces the offer.
         updated_session =
-          if spec_draft.confirmed and next_q == "" do
+          if spec_draft.confirmed do
             %{updated_session | status: :confirmed}
           else
             updated_session
@@ -162,6 +177,19 @@ defmodule AgentOS.ElicitationSession do
 
       {:error, reason} ->
         {:reply, {:error, reason}, {session, prev_question, run_token}}
+    end
+  end
+
+  @impl true
+  def handle_call({:set_dollar_cap, cap}, _from, {session, next_question, run_token}) do
+    case session.spec_draft do
+      nil ->
+        {:reply, {:error, :no_draft}, {session, next_question, run_token}}
+
+      draft ->
+        updated_draft = %{draft | spend_limits: %{draft.spend_limits | dollar_cap: cap}}
+        updated_session = %{session | spec_draft: updated_draft}
+        {:reply, :ok, {updated_session, next_question, run_token}}
     end
   end
 
@@ -212,9 +240,34 @@ defmodule AgentOS.ElicitationSession do
     end
   end
 
-  # Helper: Run the python elicitor port
+  @doc """
+  The connector registry's public capability vocabulary — the ONLY identifiers an
+  elicited spec may request. Sent to the elicitor so it never invents ids; the
+  same names the tool declarations already expose, so nothing manifest-private
+  crosses the boundary.
+  """
+  @spec capability_vocabulary() :: [%{String.t() => String.t()}]
+  def capability_vocabulary do
+    AgentOS.Connector.registry()
+    |> Enum.map(fn {id, meta} ->
+      description =
+        get_in(meta, [:tool_declaration, "function", "description"]) || id
+
+      %{"id" => id, "description" => description}
+    end)
+    |> Enum.sort_by(& &1["id"])
+  end
+
   defp run_elicitor(%ConversationSession{} = session, run_token) do
-    input_payload = ConversationSession.to_map(session) |> Jason.encode!()
+    # The elicitor must speak the registry's capability vocabulary — otherwise it
+    # invents ids (observed live: 'Discord.send_message') that the manifest
+    # projection rightly refuses at the registry gate.
+    input_payload =
+      session
+      |> ConversationSession.to_map()
+      |> Map.put("available_capabilities", capability_vocabulary())
+      |> Jason.encode!()
+
     python_bin = System.get_env("PYTHON_BIN") || ".venv/bin/python"
 
     original_run_token = System.get_env("RUN_TOKEN")

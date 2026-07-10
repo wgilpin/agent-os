@@ -99,7 +99,7 @@ defmodule AgentOS.InventoryTest do
         {:append, :records, %{"digest" => "test digest text"}}
       )
 
-    report = Inventory.render(manifest_path: "manifests/discovery.md")
+    report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
 
     assert report =~ "Agent OS Standing Inventory"
     assert report =~ "PURPOSE: Surface high-signal"
@@ -123,7 +123,7 @@ defmodule AgentOS.InventoryTest do
           {:put, "discovery", %{spent: 3, window_start: now}}
         )
 
-      report_a = Inventory.render(manifest_path: "manifests/discovery.md", now: now)
+      report_a = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md", now: now)
       assert report_a =~ "SPEND: $0.000003 / $0.5 per daily"
 
       # (b) seed spent: 5, window_start: 25 hours ago -> resets to 0 on display
@@ -135,14 +135,14 @@ defmodule AgentOS.InventoryTest do
           {:put, "discovery", %{spent: 5, window_start: past_time}}
         )
 
-      report_b = Inventory.render(manifest_path: "manifests/discovery.md", now: now)
+      report_b = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md", now: now)
       assert report_b =~ "SPEND: $0.0 / $0.5 per daily"
     end
 
     test "renders spend with empty ledger as 0" do
       now = ~U[2026-06-29 12:00:00Z]
       # empty ledger (discovery not present)
-      report = Inventory.render(manifest_path: "manifests/discovery.md", now: now)
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md", now: now)
       assert report =~ "SPEND: $0.0 / $0.5 per daily"
     end
   end
@@ -168,7 +168,7 @@ defmodule AgentOS.InventoryTest do
          %{"ref_42" => %{ref: "ref_42", action: mock_action, grant: mock_grant}}}
       )
 
-    report = Inventory.render(manifest_path: "manifests/discovery.md")
+    report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
 
     assert report =~ "Pending approvals:"
     assert report =~ "ref_42"
@@ -180,7 +180,7 @@ defmodule AgentOS.InventoryTest do
     alias AgentOS.ConformanceAuditor.Flag
 
     test "renders insufficient data when no verdict exists" do
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ "CONFORMANCE: insufficient data (0 runs recorded)"
     end
 
@@ -194,7 +194,7 @@ defmodule AgentOS.InventoryTest do
 
       :ok = StateStore.apply_action("conformance", {:put, "discovery", verdict})
 
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ "CONFORMANCE: clean"
     end
 
@@ -222,7 +222,7 @@ defmodule AgentOS.InventoryTest do
 
       :ok = StateStore.apply_action("conformance", {:put, "discovery", verdict})
 
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ "CONFORMANCE: flagged"
       assert report =~ "  [trust]  gate-breach — manifest-breach attempt recorded in last 20 runs"
       assert report =~ "  [trust]  denied-approval — 3 approval-required actions denied in window"
@@ -230,7 +230,7 @@ defmodule AgentOS.InventoryTest do
     end
 
     test "renders DEPLOY PROVENANCE from provenance StateStore" do
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ "DEPLOY PROVENANCE: unknown"
 
       :ok =
@@ -239,7 +239,7 @@ defmodule AgentOS.InventoryTest do
           {:put, "discovery", %{status: :skipped_in_envelope, hash: "123"}}
         )
 
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ "DEPLOY PROVENANCE: skipped-in-envelope"
 
       :ok =
@@ -248,7 +248,7 @@ defmodule AgentOS.InventoryTest do
           {:put, "discovery", %{status: :reviewed_human, hash: "123"}}
         )
 
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ "DEPLOY PROVENANCE: reviewed=human"
     end
 
@@ -260,7 +260,7 @@ defmodule AgentOS.InventoryTest do
           {:put, "discovery", %{status: :failed, hash: "123", failure_reason: :judge_failed}}
         )
 
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ "DEPLOY PROVENANCE: failed (check: judge)"
 
       # 2. security-review failed
@@ -271,7 +271,7 @@ defmodule AgentOS.InventoryTest do
            %{status: :failed, hash: "123", failure_reason: :security_review_failed}}
         )
 
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ "DEPLOY PROVENANCE: failed (check: security-review)"
 
       # 3. both failed
@@ -281,7 +281,7 @@ defmodule AgentOS.InventoryTest do
           {:put, "discovery", %{status: :failed, hash: "123", failure_reason: :both_failed}}
         )
 
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ "DEPLOY PROVENANCE: failed (check: both)"
 
       # 4. missing/stale verdict
@@ -291,7 +291,7 @@ defmodule AgentOS.InventoryTest do
           {:put, "discovery", %{status: :failed, hash: "123", failure_reason: :missing_verdict}}
         )
 
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ "DEPLOY PROVENANCE: failed (check: missing/stale verdict)"
 
       :ok =
@@ -300,14 +300,14 @@ defmodule AgentOS.InventoryTest do
           {:put, "discovery", %{status: :failed, hash: "123", failure_reason: :stale_verdict}}
         )
 
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ "DEPLOY PROVENANCE: failed (check: missing/stale verdict)"
     end
   end
 
   describe "judge results visibility (Stage 3)" do
     test "renders JUDGE: unrun when no judge result is recorded" do
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ "JUDGE: unrun"
     end
 
@@ -325,7 +325,7 @@ defmodule AgentOS.InventoryTest do
            %{status: :pass, last_run: ~U[2026-06-30 22:15:00Z], reasoning: "all checks passed"}}
         )
 
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ "JUDGE: pass (last run: 2026-06-30T22:15:00Z)"
 
       assert report =~
@@ -346,14 +346,14 @@ defmodule AgentOS.InventoryTest do
            %{status: :fail, last_run: ~U[2026-06-30 22:15:00Z], reasoning: "x"}}
         )
 
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ "JUDGE: fail (last run: 2026-06-30T22:15:00Z)"
     end
   end
 
   describe "security review results visibility (Stage 5)" do
     test "renders SECURITY REVIEW: unrun when no security review is recorded" do
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ "SECURITY REVIEW: unrun"
     end
 
@@ -377,7 +377,7 @@ defmodule AgentOS.InventoryTest do
            %{status: :pass, timestamp: ~U[2026-06-30 22:15:00Z], reasoning: "code looks safe"}}
         )
 
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ "SECURITY REVIEW: pass (reviewed at: 2026-06-30T22:15:00Z)"
       assert report =~ "Reasoning: code looks safe"
       assert report =~ "Disclaimer: Security review is a probabilistic LLM smoke detector."
@@ -403,7 +403,7 @@ defmodule AgentOS.InventoryTest do
            %{status: :fail, timestamp: ~U[2026-06-30 22:15:00Z], reasoning: "dangerous connector"}}
         )
 
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ "SECURITY REVIEW: fail (reviewed at: 2026-06-30T22:15:00Z)"
       assert report =~ "Reasoning: dangerous connector"
     end
@@ -503,7 +503,7 @@ defmodule AgentOS.InventoryTest do
           {:append, :records, %{"digest" => "structured digest test"}}
         )
 
-      {:ok, data} = Inventory.data(manifest_path: "manifests/discovery.md")
+      {:ok, data} = Inventory.data(manifest_path: "test/fixtures/manifests/discovery.md")
 
       assert is_map(data)
       assert data.agent_name == "discovery"
@@ -513,7 +513,7 @@ defmodule AgentOS.InventoryTest do
       assert is_list(data.capabilities)
       assert is_list(data.pending_approvals)
 
-      report = Inventory.render(manifest_path: "manifests/discovery.md")
+      report = Inventory.render(manifest_path: "test/fixtures/manifests/discovery.md")
       assert report =~ data.purpose
       assert report =~ data.last_digest
     end

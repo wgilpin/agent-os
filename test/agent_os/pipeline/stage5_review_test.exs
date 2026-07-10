@@ -92,6 +92,55 @@ defmodule AgentOS.Pipeline.Stage5Test do
              StateStore.snapshot("security_review_results") |> Map.get("test_agent")
   end
 
+  test "review/3 tolerates a markdown-fenced JSON verdict from the model",
+       %{manifest: manifest} do
+    # Regression: a live review returned ```json ... ``` and the pipeline stopped
+    # with a Jason.DecodeError even though the verdict inside was a pass.
+    code_files = %{
+      "main.py" => "import sys\nprint('hello')",
+      "models.py" => "from pydantic import BaseModel"
+    }
+
+    fenced =
+      "```json\n" <>
+        Jason.encode!(%{"status" => "pass", "reasoning" => "No issues found."}) <>
+        "\n```"
+
+    mock_provider = fn _model, _messages, _secret ->
+      %{input_tokens: 100, output_tokens: 200, completion: fenced}
+    end
+
+    assert {:ok, %Verdict{status: :pass, reasoning: "No issues found."}} =
+             Stage5.review("test_agent", manifest, code_files,
+               run_token: "token-123",
+               provider_fn: mock_provider,
+               model: "mock-model",
+               prices: %{"mock-model" => %{input: 0, output: 0}}
+             )
+  end
+
+  test "decode_verdict/2 strips code fences before decoding" do
+    now = DateTime.utc_now()
+
+    fenced = """
+    ```json
+    {
+      "status": "fail",
+      "reasoning": "Direct provider call bypasses the broker."
+    }
+    ```
+    """
+
+    assert {:ok, %Verdict{status: :fail, reasoning: reasoning}} =
+             Stage5.decode_verdict(fenced, now)
+
+    assert reasoning =~ "bypasses the broker"
+
+    # Unfenced JSON still decodes.
+    assert {:ok, %Verdict{status: :pass}} =
+             Stage5.decode_verdict(~s({"status": "pass", "reasoning": "ok"}), now)
+  end
+
   # T006 Test
   test "review/3 rejects immediately if required files are missing", %{manifest: manifest} do
     code_files = %{

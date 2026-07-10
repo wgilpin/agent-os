@@ -74,6 +74,13 @@ defmodule AgentOS.Application do
            name: "pipeline_runs",
            path: Application.get_env(:agent_os, :pipeline_runs_path, "data/pipeline_runs.db"),
            initial: %{}},
+          # "check_reruns" records the outcome of user-triggered "Re-run checks"
+          # recovery runs (spec 043), keyed by agent name. Sole writer is
+          # AgentOS.Pipeline.Rerun.
+          {AgentOS.StateStore,
+           name: "check_reruns",
+           path: Application.get_env(:agent_os, :check_reruns_path, "data/check_reruns.db"),
+           initial: %{}},
           {AgentOS.StateStore,
            name: "security_review_results",
            path:
@@ -88,6 +95,12 @@ defmodule AgentOS.Application do
            path:
              Application.get_env(:agent_os, :action_transcript_path, "data/action_transcript.db"),
            initial: %{}},
+          # "deployments" is the durable deployment registry: which agents are
+          # deployed and active. Sole writer is AgentOS.DeploymentRegistry.
+          {AgentOS.StateStore,
+           name: "deployments",
+           path: Application.get_env(:agent_os, :deployments_path, "data/deployments.db"),
+           initial: %{}},
           AgentOS.CredentialProxy,
           AgentOS.InferenceBroker,
           {AgentOS.InferencePriceSync, []},
@@ -97,11 +110,23 @@ defmodule AgentOS.Application do
           # ConnectorSupervisor isolates dynamic connector executions
           {Task.Supervisor, name: AgentOS.ConnectorSupervisor},
 
+          # PipelineTaskSupervisor runs UI-started generation pipelines detached
+          # from the LiveView process, so a run survives the browser session.
+          {Task.Supervisor, name: AgentOS.PipelineTaskSupervisor},
+
+          # RunLock enforces one re-run/pipeline run per agent at a time (spec 043,
+          # FR-009): the "Re-run checks" action claims it before spawning its task.
+          AgentOS.Pipeline.RunLock,
+
           # RunSupervisor handles starting and retrying worker execution tasks.
           AgentOS.RunSupervisor,
 
           # TriggerGateway handles incoming trigger signals (event, message, approval-resume).
           AgentOS.TriggerGateway,
+
+          # TriggerArming re-arms deployed agents' manifest time triggers from the
+          # durable deployment registry at boot (no catch-up of missed windows).
+          {AgentOS.TriggerArming, []},
 
           # Scheduler is the GenServer running the daily 07:00 self-rescheduling timer loop.
           {AgentOS.Scheduler, []},

@@ -7,6 +7,20 @@ defmodule AgentOS.Manifest.ProjectionTest do
   alias AgentOS.Manifest.Spend
   alias AgentOS.Manifest.Projection
 
+  test "rejects a non-positive spend cap (inert-agent guard)" do
+    # A cap of 0 blocks every inference and connector call at the spend pre-check;
+    # projection must refuse loudly instead of building an agent that can never act.
+    spec = %ElicitedSpec{
+      purpose: "Send the local time to Discord in French words",
+      capabilities: ["discord_notify"],
+      boundaries: %{egress_domains: [], target_locations: []},
+      spend_limits: %{dollar_cap: 0.0, token_limit: 50_000},
+      confirmed: true
+    }
+
+    assert {:error, :non_positive_spend_cap} = Projection.project(spec)
+  end
+
   test "projects a valid confirmed ElicitedSpec successfully" do
     spec = %ElicitedSpec{
       purpose: "Surface content from recruiter emails",

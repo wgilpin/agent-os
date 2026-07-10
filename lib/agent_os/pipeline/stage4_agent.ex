@@ -155,6 +155,7 @@ defmodule AgentOS.Pipeline.Stage4 do
          :ok <- guard_deterministic_args(files, manifest, mode),
          :ok <- guard_no_direct_provider(files),
          :ok <- guard_python_syntax(files),
+         :ok <- guard_allowed_imports(files),
          :ok <- write_files(agent_name, files, opts),
          :ok <- ExecutionMode.store(agent_name, execution_mode, opts) do
       {:ok,
@@ -325,9 +326,13 @@ defmodule AgentOS.Pipeline.Stage4 do
       The only environment variables you may read are RUN_TOKEN and INFERENCE_SOCKET.
     - NEVER read, embed, or hard-code the manifest, a recipient/allowlist, a spend cap,
       a credential, or any environment variable other than INFERENCE_SOCKET and RUN_TOKEN.
+    - Import ONLY the Python standard library, pydantic, and your own models module.
+      NO other third-party packages (no requests, snoop, httpx, rich, ...) — the
+      sandbox has none of them installed and the import will crash the agent.
     - DO NOT use Literal[...] types in your Pydantic models.
     - You MUST terminate by writing exactly one line of JSON (the outcome record) to
-      stdout and exiting 0. On an unexpected exception, exit non-zero (never silent).
+      stdout and exiting 0. On an unexpected exception, print the error to stderr and
+      exit non-zero (never a silent success, never a swallowed exception).
     - Respond with JSON ONLY, of the exact form:
       {"files": [{"path": "main.py", "content": "..."}, {"path": "models.py", "content": "..."}]}
     """
@@ -424,9 +429,13 @@ defmodule AgentOS.Pipeline.Stage4 do
     - You MUST instruct the inference broker (the LLM) in your system prompt to strictly use the exact `connector_id` and `methods` strings that are listed in its granted capabilities context.
     - NEVER perform a privileged effect directly; only ever PROPOSE actions in the
       stdout JSON for the substrate to validate and perform.
-    - If you encounter an unexpected exception (e.g. KeyError, JSONDecodeError), you MUST exit
-      with a non-zero status code (e.g., `sys.exit(1)`). Do NOT swallow exceptions with a silent
-      `sys.exit(0)`, as this breaks the OS testing harness.
+    - If you encounter an unexpected exception (e.g. KeyError, JSONDecodeError), you MUST print
+      the error to stderr and exit with a non-zero status code (e.g., `sys.exit(1)`). Do NOT
+      swallow exceptions silently — a bare `except: sys.exit(1)` with no stderr message makes
+      failures undiagnosable.
+    - Import ONLY the Python standard library, pydantic, and your own models module. NO other
+      third-party packages (no requests, snoop, httpx, rich, ...) — the sandbox has none of
+      them installed and the import will crash the agent.
     - Respond with JSON ONLY, of the exact form:
       {"files": [{"path": "main.py", "content": "..."}, {"path": "models.py", "content": "..."}]}
     """
@@ -595,9 +604,12 @@ defmodule AgentOS.Pipeline.Stage4 do
 
     manifest_literals = [to_string(manifest.spend.cap)] ++ grant_literals
 
+    # Degenerate literals (< 4 chars, e.g. a cap of "0") substring-match virtually
+    # any code (`sys.exit(0)`, `status 200`) while revealing nothing if "leaked" —
+    # they are noise, not evidence (observed live: cap 0 flagged every body).
     leaked_literal =
       Enum.find(manifest_literals, fn literal ->
-        literal != "" and String.contains?(joined, literal)
+        String.length(literal) >= 4 and String.contains?(joined, literal)
       end)
 
     leaks_credential? = Enum.any?(@credential_patterns, &(joined =~ &1))
@@ -700,6 +712,60 @@ defmodule AgentOS.Pipeline.Stage4 do
       end)
 
     if invalid?, do: {:error, :invalid_python_syntax}, else: :ok
+  end
+
+  # Extracts every top-level import via Python's ast and rejects anything outside
+  # the standard library, pydantic, or the body's own generated modules. The sandbox
+  # venv installs nothing else, so a stray third-party import (observed live:
+  # `import snoop`) is a guaranteed runtime crash the syntax guard cannot see.
+  # Runs after guard_python_syntax, so ast.parse is known to succeed.
+  @import_check_script """
+  import ast, sys
+  tree = ast.parse(open(sys.argv[1]).read())
+  mods = set()
+  for node in ast.walk(tree):
+      if isinstance(node, ast.Import):
+          mods |= {a.name.split('.')[0] for a in node.names}
+      elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+          mods.add(node.module.split('.')[0])
+  allowed = set(sys.stdlib_module_names) | set(sys.argv[2].split(','))
+  print(','.join(sorted(mods - allowed)))
+  """
+
+  defp guard_allowed_imports(files) do
+    py_files = Enum.filter(files, &String.ends_with?(&1.path, ".py"))
+
+    # The body may import its sibling generated modules (models.py -> "models").
+    own_modules = Enum.map_join(py_files, ",", &Path.rootname(&1.path))
+
+    disallowed =
+      Enum.flat_map(py_files, fn %GeneratedFile{content: content} ->
+        tmp_path =
+          Path.join(System.tmp_dir!(), "stage4_imports_#{System.unique_integer([:positive])}.py")
+
+        File.write!(tmp_path, content)
+
+        result =
+          System.cmd(
+            "python3",
+            ["-c", @import_check_script, tmp_path, "pydantic," <> own_modules],
+            stderr_to_stdout: true
+          )
+
+        File.rm(tmp_path)
+
+        case result do
+          {output, 0} -> output |> String.trim() |> String.split(",", trim: true)
+          {_output, _nonzero} -> ["<import scan failed>"]
+        end
+      end)
+
+    if disallowed == [] do
+      :ok
+    else
+      IO.warn("Synthesized body imports unavailable packages: #{inspect(disallowed)}")
+      {:error, {:disallowed_import, disallowed}}
+    end
   end
 
   # --- Write -------------------------------------------------------------

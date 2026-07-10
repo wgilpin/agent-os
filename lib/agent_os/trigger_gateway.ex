@@ -82,6 +82,7 @@ defmodule AgentOS.TriggerGateway do
     else
       manifests_fn = Keyword.get(opts, :manifests_fn, &default_manifests/0)
       start_run_fn = Keyword.get(opts, :start_run_fn, &AgentOS.RunSupervisor.start_run/1)
+      registry_fn = registry_fn(opts)
 
       manifests = manifests_fn.()
 
@@ -93,9 +94,25 @@ defmodule AgentOS.TriggerGateway do
           end)
         end)
 
-      case matching_agents do
+      # Deployment-registry gate (FR-006): a manifest on disk is not enough —
+      # only registered, active agents fire. Refusals are logged loudly.
+      deployable_agents =
+        Enum.filter(matching_agents, fn {agent_name, _manifest} ->
+          if registry_fn.(agent_name) do
+            true
+          else
+            Logger.warning(
+              "TriggerGateway: refusing event #{inspect(name)} for agent " <>
+                "#{inspect(agent_name)} — not deployed (no active registry record)"
+            )
+
+            false
+          end
+        end)
+
+      case deployable_agents do
         [] ->
-          Logger.info("TriggerGateway: no agent declares event #{inspect(name)}")
+          Logger.info("TriggerGateway: no deployed agent declares event #{inspect(name)}")
           {:fired, []}
 
         agents ->
@@ -110,9 +127,16 @@ defmodule AgentOS.TriggerGateway do
     end
   end
 
+  # Resolves the deployment-registry predicate: injectable for hermetic tests,
+  # defaulting to the durable registry.
+  defp registry_fn(opts) do
+    Keyword.get(opts, :registry_fn, &AgentOS.DeploymentRegistry.deployed_and_active?/1)
+  end
+
   defp dispatch_message(agent_name, content, opts) do
     manifests_fn = Keyword.get(opts, :manifests_fn, &default_manifests/0)
     start_run_fn = Keyword.get(opts, :start_run_fn, &AgentOS.RunSupervisor.start_run/1)
+    registry_fn = registry_fn(opts)
 
     manifests = manifests_fn.()
 
@@ -122,23 +146,37 @@ defmodule AgentOS.TriggerGateway do
         {:rejected, :unknown_agent}
 
       {:ok, manifest} ->
-        has_message_trigger =
-          Enum.any?(manifest.triggers, fn
-            %{type: :message} -> true
-            _ -> false
-          end)
+        cond do
+          # Deployment-registry gate (FR-006): manifests on disk without an active
+          # registry record never fire; the refusal is observable.
+          not registry_fn.(agent_name) ->
+            Logger.warning(
+              "TriggerGateway: refusing message for agent #{inspect(agent_name)} — " <>
+                "not deployed (no active registry record)"
+            )
 
-        if has_message_trigger do
-          start_run_fn.(trigger: "message", trigger_input: content, agent: agent_name)
-          {:fired, [agent_name]}
-        else
-          Logger.warning(
-            "TriggerGateway: agent #{inspect(agent_name)} does not declare message trigger"
-          )
+            {:rejected, :not_deployed}
 
-          {:rejected, :no_message_trigger}
+          not declares_message_trigger?(manifest) ->
+            Logger.warning(
+              "TriggerGateway: agent #{inspect(agent_name)} does not declare message trigger"
+            )
+
+            {:rejected, :no_message_trigger}
+
+          true ->
+            start_run_fn.(trigger: "message", trigger_input: content, agent: agent_name)
+            {:fired, [agent_name]}
         end
     end
+  end
+
+  # True when the manifest declares a message trigger.
+  defp declares_message_trigger?(manifest) do
+    Enum.any?(manifest.triggers, fn
+      %{type: :message} -> true
+      _ -> false
+    end)
   end
 
   defp dispatch_approval(decision, ref, opts) do
@@ -164,14 +202,37 @@ defmodule AgentOS.TriggerGateway do
         :ok =
           AgentOS.StateStore.apply_action("pending_approvals", {:delete_in, [:approvals, ref]})
 
+        # Attribute the run-log line to the agent when the approval identifies one
+        # (a deploy approval's recipient IS the agent; other actions carry no agent).
+        log_agent = if action.type == "deploy", do: action.recipient
+
         case decision do
           :approve ->
             effector_fn.(%{action: action, grant: grant})
+
+            # A deploy-shaped approval completes a deployment: land the durable
+            # registry record here (substrate-side, not in any UI) so BOTH deploy
+            # completion branches write the registry (FR-005). Non-deploy approvals
+            # never touch the deployment registry.
+            if action.type == "deploy" do
+              :ok =
+                AgentOS.DeploymentRegistry.record_deployment(
+                  action.recipient,
+                  action.method,
+                  :reviewed_human
+                )
+
+              # "when the agent starts": fire a startup run on approval-resumed
+              # deploy completion, matching the direct-deploy branch (no-op for
+              # non-startup agents).
+              :ok = AgentOS.TriggerArming.fire_startup(action.recipient, action.method)
+            end
 
             AgentOS.RunLog.append(
               %{
                 status: :ok,
                 actions: 1,
+                agent: log_agent,
                 trigger: "approval-resume",
                 note: "approved ref=#{ref}"
               },
@@ -187,6 +248,7 @@ defmodule AgentOS.TriggerGateway do
               %{
                 status: :ok,
                 actions: 0,
+                agent: log_agent,
                 trigger: "approval-resume",
                 note: "denied ref=#{ref}"
               },
