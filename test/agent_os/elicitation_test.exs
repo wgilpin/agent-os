@@ -162,7 +162,8 @@ defmodule AgentOS.ElicitationTest do
       File.rm_rf(tmp_dir)
 
       if original_inf_path,
-        do: Application.put_env(:agent_os, :inference_uds_path, original_inf_path)
+        do: Application.put_env(:agent_os, :inference_uds_path, original_inf_path),
+        else: Application.delete_env(:agent_os, :inference_uds_path)
 
       if original_autostart != nil,
         do: Application.put_env(:agent_os, :autostart, original_autostart),
