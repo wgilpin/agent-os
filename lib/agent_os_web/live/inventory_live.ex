@@ -38,6 +38,8 @@ defmodule AgentOSWeb.InventoryLive do
         action_error: nil,
         # agent whose manual run was just started (inline confirmation note).
         run_started: nil,
+        # agent whose "Re-run checks" was just triggered (inline confirmation note).
+        rerun_started: nil,
         # agent_name with the delete confirmation open (nil = none). Delete is
         # two-step and fully server-rendered so it never depends on browser JS.
         confirm_delete: nil
@@ -133,6 +135,23 @@ defmodule AgentOSWeb.InventoryLive do
                     </div>
                   </div>
 
+                  <%= if agent.last_rerun do %>
+                    <!-- Last "Re-run checks" outcome (spec 043, FR-007): stays visible after the
+                         fact; the failing check + reason surface here for a red/incomplete run. -->
+                    <div class="meta-row rerun-history-row">
+                      <strong>Last checks re-run:</strong>
+                      <span class={"badge badge-rerun-#{agent.last_rerun.outcome}"}>
+                        <%= rerun_outcome_label(agent.last_rerun.outcome) %>
+                      </span>
+                      <span class="rerun-when" title={agent.last_rerun.finished_at}>
+                        <%= rerun_when(agent.last_rerun.finished_at) %>
+                      </span>
+                      <%= if agent.last_rerun.reason do %>
+                        <span class="rerun-reason">— <%= agent.last_rerun.reason %></span>
+                      <% end %>
+                    </div>
+                  <% end %>
+
                   <!-- Lifecycle controls (spec 042): pause/resume/delete + edit panel.
                        All mutations route through AgentOS.AgentLifecycle; the view stays thin. -->
                   <div class="meta-row lifecycle-row">
@@ -164,6 +183,19 @@ defmodule AgentOSWeb.InventoryLive do
                           phx-value-agent={agent.agent_name}
                         >
                           Resume
+                        </button>
+                      <% end %>
+                      <%= if agent.rerun_available? do %>
+                        <!-- Re-run checks (spec 043): re-examine existing code + manifest with the
+                             same compliance/security checks. Only for agents that HAVE code and
+                             whose checks are not already green for that code. -->
+                        <button
+                          type="button"
+                          class="btn-secondary btn-rerun-checks"
+                          phx-click="rerun_checks"
+                          phx-value-agent={agent.agent_name}
+                        >
+                          Re-run checks
                         </button>
                       <% end %>
                       <button
@@ -207,6 +239,11 @@ defmodule AgentOSWeb.InventoryLive do
                     <%= if @run_started == agent.agent_name do %>
                       <span class="run-started-note">
                         Run started — it will show under recent executions shortly.
+                      </span>
+                    <% end %>
+                    <%= if @rerun_started == agent.agent_name do %>
+                      <span class="rerun-started-note">
+                        Checks re-running — the Code check and Safety check above will update shortly.
                       </span>
                     <% end %>
                     <%= if awaiting_approval?(agent) do %>
@@ -492,16 +529,30 @@ defmodule AgentOSWeb.InventoryLive do
   end
 
   @impl true
-  def handle_info({:pipeline_progress, %ProgressEvent{}}, socket) do
+  def handle_info({:pipeline_progress, %ProgressEvent{} = event}, socket) do
     # Any pipeline/deployment activity refreshes the dashboard immediately —
     # the 5s poll stays as fallback (FR-008).
     socket =
       socket
       |> assign_agents_data()
       |> assign(last_updated: DateTime.utc_now())
+      |> maybe_clear_rerun_note(event)
 
     {:noreply, socket}
   end
+
+  # A rerun's terminal event carries stage :pipeline (its per-check events are
+  # :judge/:security_review). Clear the "Checks re-running" note then — the
+  # refreshed agents_data shows the persisted outcome line in its place.
+  defp maybe_clear_rerun_note(socket, %ProgressEvent{stage: :pipeline, agent_name: agent}) do
+    if socket.assigns.rerun_started == agent do
+      assign(socket, rerun_started: nil)
+    else
+      socket
+    end
+  end
+
+  defp maybe_clear_rerun_note(socket, _event), do: socket
 
   @impl true
   def handle_event("test_fire", %{"agent" => agent, "payload" => payload}, socket) do
@@ -538,6 +589,25 @@ defmodule AgentOSWeb.InventoryLive do
 
       {:error, reason} ->
         {:noreply, assign(socket, action_error: error_text(reason))}
+    end
+  end
+
+  @impl true
+  def handle_event("rerun_checks", %{"agent" => agent}, socket) do
+    # Recovery path (spec 043): re-run the compliance + security checks against the agent's
+    # EXISTING code. Progress and the outcome arrive over the pipeline firehose this view
+    # already subscribes to; here we just confirm start or surface a refusal.
+    case AgentOS.Pipeline.Rerun.start(agent) do
+      {:ok, _run_id} ->
+        socket =
+          socket
+          |> assign(action_error: nil, run_started: nil, rerun_started: agent)
+          |> refresh_after_action(agent)
+
+        {:noreply, socket}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, action_error: rerun_error_text(reason))}
     end
   end
 
@@ -711,6 +781,37 @@ defmodule AgentOSWeb.InventoryLive do
 
   defp error_text(other), do: "something went wrong (#{inspect(other)})."
 
+  # Human-readable copy for a refused "Re-run checks" request (spec 043).
+  defp rerun_error_text(:busy),
+    do:
+      "a check is already running for this agent — wait for it to finish before starting another."
+
+  defp rerun_error_text(:code_missing),
+    do:
+      "this agent has no generated code, so there's nothing to check. " <>
+        "Delete it, or create it again from the Create agent page."
+
+  defp rerun_error_text(:system_agent),
+    do: "that agent belongs to the substrate — its checks can't be re-run from here."
+
+  defp rerun_error_text(:manifest_missing),
+    do: "this agent's manifest file is missing, so its checks can't be re-run."
+
+  defp rerun_error_text(:checks_green),
+    do: "this agent's checks already pass for its current code — there's nothing to re-run."
+
+  defp rerun_error_text(other), do: "couldn't start the re-run (#{inspect(other)})."
+
+  # Label for a persisted re-run outcome.
+  defp rerun_outcome_label(:passed), do: "passed"
+  defp rerun_outcome_label(:failed), do: "failed"
+  defp rerun_outcome_label(:incomplete), do: "did not complete"
+  defp rerun_outcome_label(other), do: to_string(other)
+
+  # Formats a re-run's finish DateTime for the card ("2026-07-10 12:00"); blank if in flight.
+  defp rerun_when(%DateTime{} = dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M")
+  defp rerun_when(_), do: ""
+
   # Deployment-state predicates for the lifecycle controls.
   defp paused?(%AgentOS.DeploymentRecord{active: false}), do: true
   defp paused?(_), do: false
@@ -781,6 +882,15 @@ defmodule AgentOSWeb.InventoryLive do
     :exit, _ -> nil
   end
 
+  # Reads the latest "Re-run checks" record for an agent, tolerating an absent store.
+  defp fetch_last_rerun(agent_name) do
+    AgentOS.StateStore.snapshot("check_reruns")[agent_name]
+  rescue
+    _ -> nil
+  catch
+    :exit, _ -> nil
+  end
+
   # Deployment badge helpers: state comes from the registry, not from the mere
   # existence of a manifest file (FR-008).
   defp deployed_active?(%AgentOS.DeploymentRecord{active: true}), do: true
@@ -836,6 +946,18 @@ defmodule AgentOSWeb.InventoryLive do
               data
               |> Map.put(:recent_runs, recent_runs)
               |> Map.put(:deployment, fetch_deployment(data.agent_name))
+              # Re-run eligibility (spec 043): only agents WITH generated code get the button.
+              |> Map.put(
+                :code_present?,
+                File.exists?(Path.join(["agents", data.agent_name, "main.py"]))
+              )
+              # A re-run is a recovery path: hide it when both checks already pass for
+              # the current code (the gate would open; a re-run would change nothing).
+              |> Map.put(
+                :rerun_available?,
+                AgentOS.Pipeline.Rerun.eligible?(data.agent_name) == :ok
+              )
+              |> Map.put(:last_rerun, fetch_last_rerun(data.agent_name))
 
             [agent_map | acc]
 
@@ -981,6 +1103,9 @@ defmodule AgentOSWeb.InventoryLive do
           type in [:time, "time"] -> "Time: #{at}"
           type in [:message, "message"] -> "Message"
           type in [:event, "event"] -> "Event: #{name}"
+          type in [:startup, "startup"] -> "On startup"
+          # Unknown-but-typed triggers get a readable label, never raw Elixir.
+          not is_nil(type) -> type |> to_string() |> String.capitalize()
           true -> inspect(other)
         end
 

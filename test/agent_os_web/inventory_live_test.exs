@@ -209,6 +209,206 @@ defmodule AgentOSWeb.InventoryLiveTest do
     assert html2 =~ "updated_purpose"
   end
 
+  test "shows 'Re-run checks' only for agents with generated code (spec 043)", %{conn: conn} do
+    # Orphan: manifest, no code → no button.
+    File.write!("manifests/temp_test_agent.md", """
+    ---
+    purpose: "orphan with no code"
+    triggers: []
+    grants: []
+    mounts: []
+    spend:
+      cap: 100000
+      window: daily
+      on_breach: kill
+    owner: human
+    supervision: restart-once
+    ---
+    """)
+
+    # Coded agent: manifest + generated code → button present.
+    File.write!("manifests/coded_agent.md", """
+    ---
+    purpose: "agent with generated code"
+    triggers: []
+    grants: []
+    mounts: []
+    spend:
+      cap: 100000
+      window: daily
+      on_breach: kill
+    owner: human
+    supervision: restart-once
+    ---
+    """)
+
+    File.mkdir_p!("agents/coded_agent")
+    File.write!("agents/coded_agent/main.py", "print('x')")
+    File.write!("agents/coded_agent/models.py", "x = 1")
+
+    on_exit(fn ->
+      File.rm("manifests/coded_agent.md")
+      File.rm_rf!("agents/coded_agent")
+    end)
+
+    assert {:ok, lv, _html} = live(conn, "/inventory")
+
+    assert has_element?(lv, "#agent-card-coded_agent .btn-rerun-checks")
+    refute has_element?(lv, "#agent-card-temp_test_agent .btn-rerun-checks")
+
+    # Green agent: both verdicts pass for the CURRENT code → the recovery button
+    # disappears (a re-run would be a paid no-op).
+    hash = AgentOS.Provisioner.code_hash("coded_agent", [])
+
+    :ok =
+      StateStore.apply_action(
+        "judge_results",
+        {:put, "coded_agent", %{status: :pass, code_hash: hash}}
+      )
+
+    :ok =
+      StateStore.apply_action(
+        "security_review_results",
+        {:put, "coded_agent",
+         %AgentOS.Pipeline.Stage5.Verdict{
+           status: :pass,
+           reasoning: "ok",
+           timestamp: DateTime.utc_now(),
+           code_hash: hash
+         }}
+      )
+
+    assert {:ok, lv2, _html} = live(conn, "/inventory")
+    refute has_element?(lv2, "#agent-card-coded_agent .btn-rerun-checks")
+  end
+
+  test "a re-run refused as busy surfaces the 'already running' copy (FR-009)", %{conn: conn} do
+    start_supervised!(AgentOS.Pipeline.RunLock)
+
+    File.write!("manifests/coded_agent.md", """
+    ---
+    purpose: "agent with generated code"
+    triggers: []
+    grants: []
+    mounts: []
+    spend:
+      cap: 100000
+      window: daily
+      on_breach: kill
+    owner: human
+    supervision: restart-once
+    ---
+    """)
+
+    File.mkdir_p!("agents/coded_agent")
+    File.write!("agents/coded_agent/main.py", "print('x')")
+    File.write!("agents/coded_agent/models.py", "x = 1")
+
+    on_exit(fn ->
+      File.rm("manifests/coded_agent.md")
+      File.rm_rf!("agents/coded_agent")
+    end)
+
+    # Simulate an in-flight run for this agent so the click is refused.
+    :ok = AgentOS.Pipeline.RunLock.claim("coded_agent")
+
+    assert {:ok, lv, _html} = live(conn, "/inventory")
+    html = lv |> element("#agent-card-coded_agent .btn-rerun-checks") |> render_click()
+
+    assert html =~ "a check is already running for this agent"
+  end
+
+  test "the 'Checks re-running' note clears on the rerun's terminal event", %{conn: conn} do
+    start_supervised!(AgentOS.Pipeline.RunLock)
+
+    File.write!("manifests/coded_agent.md", """
+    ---
+    purpose: "agent with generated code"
+    triggers: []
+    grants: []
+    mounts: []
+    spend:
+      cap: 100000
+      window: daily
+      on_breach: kill
+    owner: human
+    supervision: restart-once
+    ---
+    """)
+
+    File.mkdir_p!("agents/coded_agent")
+    File.write!("agents/coded_agent/main.py", "print('x')")
+    File.write!("agents/coded_agent/models.py", "x = 1")
+
+    # The click must not spawn a real checks task: stub the runner via the config seam.
+    Application.put_env(:agent_os, :rerun_default_opts,
+      runner_fn: fn _agent, _run_id, _opts -> :ok end
+    )
+
+    on_exit(fn ->
+      Application.delete_env(:agent_os, :rerun_default_opts)
+      File.rm("manifests/coded_agent.md")
+      File.rm_rf!("agents/coded_agent")
+    end)
+
+    assert {:ok, lv, _html} = live(conn, "/inventory")
+
+    html = lv |> element("#agent-card-coded_agent .btn-rerun-checks") |> render_click()
+    assert html =~ "Checks re-running"
+
+    # A per-check event must NOT clear the note...
+    send(
+      lv.pid,
+      {:pipeline_progress,
+       %AgentOS.Pipeline.ProgressEvent{
+         run_id: "rerun_1",
+         agent_name: "coded_agent",
+         stage: :judge,
+         status: :finished,
+         at: DateTime.utc_now()
+       }}
+    )
+
+    assert render(lv) =~ "Checks re-running"
+
+    # ...but the terminal event (stage :pipeline, as Rerun emits on completion) must.
+    send(
+      lv.pid,
+      {:pipeline_progress,
+       %AgentOS.Pipeline.ProgressEvent{
+         run_id: "rerun_1",
+         agent_name: "coded_agent",
+         stage: :pipeline,
+         status: :passed,
+         at: DateTime.utc_now()
+       }}
+    )
+
+    refute render(lv) =~ "Checks re-running"
+  end
+
+  test "startup triggers render as a readable pill, not a raw map", %{conn: conn} do
+    File.write!("manifests/temp_test_agent.md", """
+    ---
+    purpose: "startup trigger rendering"
+    triggers:
+      - type: startup
+    grants: []
+    mounts: []
+    spend:
+      cap: 100000
+      window: daily
+      on_breach: kill
+    owner: human
+    supervision: restart-once
+    ---
+    """)
+
+    assert {:ok, _lv, html} = live(conn, "/inventory")
+    assert html =~ "On startup"
+    refute html =~ "%{type:"
+  end
+
   test "delete requires an explicit confirmation step", %{conn: conn} do
     File.write!("manifests/temp_test_agent.md", """
     ---

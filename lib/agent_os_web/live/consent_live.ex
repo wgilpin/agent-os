@@ -162,6 +162,10 @@ defmodule AgentOSWeb.ConsentLive do
           <%= if @status == :pending and Map.get(assigns, :gate_error) do %>
             <div class="gate-error-banner" role="alert">
               <strong>Not approved:</strong> <%= @gate_error %>
+              <%= if not Map.get(assigns, :code_missing, false) do %>
+                <!-- Agent has code: the remedy is to re-run its checks from the inventory (FR-006). -->
+                <.link navigate="/inventory" class="gate-error-link">Re-run its checks from the inventory.</.link>
+              <% end %>
             </div>
           <% end %>
 
@@ -200,8 +204,12 @@ defmodule AgentOSWeb.ConsentLive do
       # routes Provisioner.deploy into its idempotent re-deploy path, so the gate
       # must be checked here, not after.
       case AgentOS.Provisioner.deploy_gate(socket.assigns.agent_name, review_mode) do
-        :ok -> do_approve(socket)
-        {:error, reason} -> {:noreply, assign(socket, gate_error: gate_error_text(reason))}
+        :ok ->
+          do_approve(socket)
+
+        {:error, reason} ->
+          {:noreply,
+           assign(socket, gate_error: gate_error_text(reason, socket.assigns.code_missing))}
       end
     else
       {:noreply, socket}
@@ -246,25 +254,37 @@ defmodule AgentOSWeb.ConsentLive do
     {:noreply, assign(socket, status: :approved)}
   end
 
-  # Human-readable copy for a deploy-gate refusal on the approve button.
-  defp gate_error_text(:missing_verdict),
+  # Human-readable copy for a deploy-gate refusal on the approve button (spec 043, FR-006):
+  # names the reason, then appends the appropriate remedy. For an agent WITH code the remedy
+  # is the "Re-run its checks from the inventory" link rendered in the banner; for an orphan
+  # (no code) there is nothing to check, so the text directs re-create or delete.
+  defp gate_error_text(reason, code_missing?) do
+    base = gate_reason_text(reason)
+
+    if code_missing? do
+      base <> " Re-create it from the Create agent page, or delete it from the inventory."
+    else
+      base
+    end
+  end
+
+  defp gate_reason_text(:missing_verdict),
     do:
       "this agent's safety checks (code check and security review) haven't completed, " <>
-        "so it can't be approved. Re-create it from the Create agent page to re-run them."
+        "so it can't be approved."
 
-  defp gate_error_text(:stale_verdict),
+  defp gate_reason_text(:stale_verdict),
     do:
       "this agent's code doesn't match the code its safety checks reviewed " <>
-        "(it may have been changed, regenerated, or never generated). " <>
-        "Re-create it from the Create agent page to re-run the checks."
+        "(it may have been changed, regenerated, or never generated), so it can't be approved."
 
-  defp gate_error_text(:security_review_failed),
+  defp gate_reason_text(:security_review_failed),
     do: "this agent's security review did not pass, so it can't be approved."
 
-  defp gate_error_text(:judge_failed),
+  defp gate_reason_text(:judge_failed),
     do: "this agent's code check (blind compliance test) did not pass, so it can't be approved."
 
-  defp gate_error_text(:both_failed),
+  defp gate_reason_text(:both_failed),
     do: "this agent failed both its code check and its security review, so it can't be approved."
 
   # Human-readable text helpers shared with the inventory dashboard.

@@ -281,6 +281,89 @@ defmodule AgentOSWeb.ConsentLiveTest do
     refute Map.has_key?(approvals, ref)
   end
 
+  test "gate refusal offers the re-run remedy for an agent WITH code (FR-006)", %{
+    tmp_dir: tmp_dir,
+    conn: conn
+  } do
+    original_mode = Application.get_env(:agent_os, :review_mode)
+    Application.put_env(:agent_os, :review_mode, :always_review)
+
+    manifest_path = Path.join(tmp_dir, "coded_consent.md")
+
+    File.write!(manifest_path, """
+    ---
+    purpose: "re-run remedy for coded agent"
+    grants:
+      - connector: kv_append
+        methods: ["append"]
+    spend:
+      cap: 100000
+      window: daily
+      on_breach: kill
+    owner: human
+    supervision: restart-once-and-alert
+    ---
+    """)
+
+    # The consent view checks code presence against the real agents/<name>/main.py.
+    File.mkdir_p!("agents/coded_consent")
+    File.write!("agents/coded_consent/main.py", "print('x')")
+
+    on_exit(fn ->
+      if original_mode,
+        do: Application.put_env(:agent_os, :review_mode, original_mode),
+        else: Application.delete_env(:agent_os, :review_mode)
+
+      File.rm_rf!("agents/coded_consent")
+    end)
+
+    assert {:ok, lv, _html} = live(conn, "/consent?manifest=#{manifest_path}")
+    html = lv |> element(".btn-approve") |> render_click()
+
+    assert html =~ "Not approved:"
+    assert html =~ "Re-run its checks from the inventory."
+    assert html =~ ~s(href="/inventory")
+  end
+
+  test "gate refusal directs an orphan (no code) to re-create or delete (FR-006)", %{
+    tmp_dir: tmp_dir,
+    conn: conn
+  } do
+    original_mode = Application.get_env(:agent_os, :review_mode)
+    Application.put_env(:agent_os, :review_mode, :always_review)
+
+    on_exit(fn ->
+      if original_mode,
+        do: Application.put_env(:agent_os, :review_mode, original_mode),
+        else: Application.delete_env(:agent_os, :review_mode)
+    end)
+
+    manifest_path = Path.join(tmp_dir, "orphan_consent.md")
+
+    File.write!(manifest_path, """
+    ---
+    purpose: "re-run remedy for orphan agent"
+    grants:
+      - connector: kv_append
+        methods: ["append"]
+    spend:
+      cap: 100000
+      window: daily
+      on_breach: kill
+    owner: human
+    supervision: restart-once-and-alert
+    ---
+    """)
+
+    # No agents/orphan_consent/main.py exists → code_missing is true.
+    assert {:ok, lv, _html} = live(conn, "/consent?manifest=#{manifest_path}")
+    html = lv |> element(".btn-approve") |> render_click()
+
+    assert html =~ "Not approved:"
+    assert html =~ "Re-create it from the Create agent page, or delete it"
+    refute html =~ "Re-run its checks from the inventory."
+  end
+
   test "surfaces connector registration lookup loud-failure error on missing registry connector",
        %{tmp_dir: tmp_dir, conn: conn} do
     # Temporarily override connector registry to simulate a missing connector

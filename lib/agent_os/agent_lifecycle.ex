@@ -40,7 +40,7 @@ defmodule AgentOS.AgentLifecycle do
   # Per-agent state stores wiped on delete. Each keys entries by agent_name at the top level,
   # so a single {:delete_in, [name]} removes the agent's slice. "pending_approvals" is handled
   # separately (nested under [:approvals, ref]); "data/run_log.md" is global history, kept.
-  @per_agent_stores ~w(spend_ledger provenance conformance judge_results security_review_results)
+  @per_agent_stores ~w(spend_ledger provenance conformance judge_results security_review_results check_reruns)
 
   @doc """
   True for substrate-owned agents (config `:agent_os, :system_agents`): hidden from the
