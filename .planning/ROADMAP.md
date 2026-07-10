@@ -39,6 +39,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 8: Connector Ecosystem (v7)** - Pluggable connector registry + synchronous tools (web search)
 - [x] **Phase 9: Persistent State & Permissions (v8)** - Queryable durable store, split build-time/runtime consent, agent-invisible namespaces
 - [ ] **Phase 10: Priorities Coach (v9)** - First *live* read + notify + OAuth: a generated daily coaching agent that reads a doc, pings Google Chat, ingests the reply, and writes the doc back
+- [ ] **Phase 11: Generated-Agent Runtime Isolation (v10)** - Every agent body — generated included — runs inside the container sandbox; runtime pluggable (runc → runsc/gVisor → Apple Containers endgame)
 
 ## Phase Details
 
@@ -242,10 +243,30 @@ Plans:
 - [ ] 10-06: `drive_read` + `drive_write` connectors — live read + write-back of a Google Doc over the 10-01 egress path using 10-05's OAuth credential; id-scoped grant. Depends on 10-01, 10-05.
 - [ ] 10-07: Regenerate the coach against Drive (Wave-B acceptance) — re-run 10-04 with the doc source switched to Drive; confirm OAuth injection, live read/write, world-B still green. Depends on 10-04, 10-06.
 
+### Phase 11: Generated-Agent Runtime Isolation (v10)
+**Goal**: Close the runtime-containment gap for generated agents. Today `run_worker` routes any agent whose name ≠ the config agent AROUND the `Sandbox` — generated bodies run as a bare `.venv/bin/python` child of the BEAM, at the operator's macOS user, with full filesystem, open network, and clipboard access. Per [threat-model-agent-isolation.md](../docs/threat-model-agent-isolation.md), the layers are a funnel (Stage-5 review → Gate → sandbox) and residual risk is the *product* of the misses — but for generated agents the sandbox layer is absent, so the funnel degenerates to a single probabilistic layer (review) for exactly the code class that must be sized for the adversarial case. The operator's stated threat model is machine-authored code on a personal Mac with live bank/1Password/Google sessions: the concrete unmitigated paths are clipboard polling (1Password copies secrets there), reads of `~/.ssh`/`~/.aws`/`.env`/browser storage, and unrestricted outbound exfiltration. This phase routes ALL agent execution through the container sandbox, then hardens the wall in depth-ordered steps.
+**Depends on**: Phase 7 (the hardened `Sandbox` argv builder + socket sandboxing that generated agents will now also run behind)
+**Surfaced by**: review of the `run_worker` dispatch during 043 — the `agent_cmd: python_bin()` bypass at the generated-agent branch.
+**Success Criteria** (what must be TRUE):
+  1. No agent body executes outside the container sandbox: the direct-python dispatch branch in `run_worker` is gone; config and generated agents share the `Sandbox.build_argv` path (network=none, read-only root, cap-drop ALL, non-root, memory/pids limits), differing only in image and mounts.
+  2. A generated agent's code is mounted read-only; its only writable surfaces are the scratch tmpfs and the inference UDS — proven by a world-B-style containment probe (attempt host-file read, outbound socket, write outside scratch → all fail, loudly logged).
+  3. The container runtime is a config knob (`runc` | `runsc`), defaulting to runsc where available and falling back LOUDLY (Constitution VI) — never silently — where not.
+  4. Docker Desktop file sharing is trimmed to the minimum host paths the substrate needs (the inference UDS dir and agent code mounts) — recorded as an operator checklist item in the threat-model doc, since root-in-VM reaches anything virtiofs-shared.
+  5. (Endgame, own spec) An Apple Containers backend runs each agent in its own hardware VM natively on macOS — no Docker Desktop dependency — with the broker channel migrated from the UDS bind-mount to vsock (virtiofs cannot carry unix sockets; this is the backend's core design problem).
+**Plans**: 4 (+ ops item)
+
+Plans:
+- [ ] 11-01: Generated agents into the container sandbox (spec 044) — build a generated-agent runtime image (venv deps baked in, replacing the host `.venv/bin/python` resolution), mount `agents/<name>/` read-only, delete the `run_worker` bypass branch; containment probe added to the suite. No deps.
+- [ ] 11-02 (ops, zero code): trim Docker Desktop → Resources → File Sharing from `/Users` down to the specific paths agent_os mounts; document in the threat-model note as a standing operator invariant. No deps.
+- [ ] 11-03: Pluggable runtime knob — `Sandbox.build_argv` gains a configurable `--runtime`; default runsc (gVisor) where installed, loud fallback to runc; cuts the runc-escape → VM-root → shared-mount chain. Depends on 11-01.
+- [ ] 11-04: Apple Containers backend — per-agent lightweight hardware VMs via Apple's `container` tool (native macOS, no Docker Desktop); requires a second argv builder (its CLI is not docker-flag-compatible) and the UDS→vsock migration of the broker channel. Spin-up target: sub-second cold; if per-run latency matters, a warm pool (pre-started sandboxes blocked on stdin-read — fits `PortRunner`'s one-JSON-line feed) is the lever, and it favours cheap-idle runtimes. Depends on 11-01; independent of 11-03.
+
+> **Decision record (2026-07-10):** gVisor over Kata/Firecracker for the container-side hardening — comparable isolation for this workload shape (short-lived untrusted Python, syscall-light), ~tens-of-ms overhead vs hundreds, and critically it passes the host inference-UDS bind-mount through, which real VMs cannot (virtiofs drops sockets); a VM backend therefore requires the vsock rework and is sequenced as the 11-04 endgame rather than the default path. On macOS dev, Docker Desktop's Linux VM already provides a hardware wall between sandboxed agents and the host session — the acute gap is agents running outside any sandbox (11-01), not runc vs runsc (11-03).
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11 (11-01/11-02 may run ahead of Phase 10 — they close an active security gap and nothing in Phase 10 depends on them)
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -259,3 +280,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 8. Connector Ecosystem (v7) | 3/3 | Complete | 2026-07-02 |
 | 9. Persistent State & Permissions (v8) | 3/3 | Complete | 2026-07-02 |
 | 10. Priorities Coach (v9) | 0/7 | Planned — see [phase-10-priorities-coach-roadmap.md](phase-10-priorities-coach-roadmap.md) | — |
+| 11. Generated-Agent Runtime Isolation (v10) | 0/4 | Planned — 11-01 is spec 044 | — |
