@@ -37,6 +37,21 @@ persisted state — never by asking the agent.
 - **Legibility** — the substrate always presents a standing inventory of what exists and
   a legible trace of what happened, readable without asking the agent.
 
+## Deployment model: one person's Mac, not the cloud
+
+Agent OS is a **single-user system that runs on your own Mac**. It is not a cloud
+service and is not meant to become one. That inverts the usual security emphasis:
+
+- **The heavy security is *inside* the machine** — deliberately so. Untrusted,
+  model-generated agents execute right next to your personal files, shell, and
+  credentials, so the controls on them are strict: no network, read-only rootfs,
+  non-root, hard resource limits, a single socket to the broker, a deterministic
+  gate on every action, brokered credentials, and a spend cap that kills on breach.
+- **There is deliberately little security *around* the app** — no login, no TLS,
+  no multi-tenancy. The web UI (including the consent screen) assumes the one
+  operator sitting at the machine. Keep port 4000 on localhost; do not expose it
+  to a network you don't trust, and do not deploy this to a shared host as-is.
+
 ## Architectural invariants
 
 These are locked and not re-litigated per feature:

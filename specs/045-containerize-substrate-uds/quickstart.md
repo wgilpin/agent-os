@@ -1,5 +1,9 @@
 # Quickstart: Containerized Substrate
 
+Agent OS is a **single-user app for your own Mac** — not a cloud deployment. The strict
+security lives around the *agents* (they run untrusted next to your personal machine);
+the app's own surface (UI on :4000, no auth) assumes the one operator at the keyboard.
+
 The substrate runs **only containerized** (spec 045 amendment). A host app start on macOS is
 refused loudly by the boot guard (`lib/agent_os/application.ex`) because a host-run BEAM broker's
 Unix socket is kernel-local and unreachable from agent containers in the OrbStack VM. The
