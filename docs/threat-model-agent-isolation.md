@@ -117,6 +117,25 @@ body is hostile, not the common case where it is clumsy.
    inference call, and forward only the one broker socket (vsock, under a microVM) rather
    than mounting host paths — so even a sandbox escape yields little.
 
+## Status update (2026-07-11): generated agents are now sandboxed (spec 044 / 11-01)
+
+The acute gap this note described — generated agent bodies running *outside* any sandbox,
+as a bare `.venv/bin/python` child of the BEAM at the operator's macOS user — is closed.
+`run_worker` no longer has a direct host-interpreter dispatch branch: config and generated
+agents share the one `Sandbox.build_argv` path (network none, read-only root, cap-drop ALL,
+non-root, memory/pids limits), differing only in image and mounts. A generated body runs
+the generic `agent-generated:dev` image with its code bind-mounted **read-only** at
+`/app/agents/<name>`; the inference UDS remains the sole writable host-backed mount. A
+world-B-style containment probe (`test/agent_os/generated_containment_test.exs`) proves a
+hostile body cannot read host files outside its mounts, open outbound connections, or write
+outside `/scratch`, and every dispatch failure (missing image, unavailable daemon,
+unmountable code) fails loudly with a diagnosable cause rather than falling back to a host run.
+
+Still open follow-ups (later Phase 11 plans): the pluggable runtime knob (`runc`/`runsc`,
+11-03), the Apple Containers per-agent-VM backend with a vsock broker channel (11-04), and
+the standing operator task to trim Docker Desktop file sharing to just the inference-UDS
+directory and agent code mounts (11-02).
+
 ## One-line summary
 
 The instinct that "a container mitigates a buggy agent" is true, and containers earn

@@ -99,18 +99,11 @@ defmodule AgentOS.RunWorker do
     agent_name = Path.basename(manifest_path, ".md")
     config_agent = Path.basename(cfg.manifest_path, ".md")
 
-    # Generated agents run their generated entrypoint directly — their only side-effect
-    # path is the broker UDS tool channel, and the docker sandbox image exists only for
-    # the config agent. An explicit :agent_cmd (tests, config overrides) always wins.
-    opts =
-      if agent_name != config_agent and not Keyword.has_key?(opts, :agent_cmd) do
-        Keyword.merge(opts,
-          agent_cmd: python_bin(),
-          agent_args: [Path.join(["agents", agent_name, "main.py"])]
-        )
-      else
-        opts
-      end
+    # Both config and generated agents run through the one container sandbox path
+    # (FR-004/FR-005). There is NO direct host-interpreter dispatch for generated agents:
+    # the bypass that ran them as a bare `.venv/bin/python` child has been removed. An
+    # explicit :agent_cmd (tests, harnesses) still wins at the dispatch guard below (FR-006).
+    config_agent? = agent_name == config_agent
 
     review_mode =
       Keyword.get(opts, :review_mode) ||
@@ -195,10 +188,13 @@ defmodule AgentOS.RunWorker do
                 end
               )
 
-            {cmd, args} =
+            {cmd, args, dispatch} =
               if Keyword.has_key?(opts_with_env, :agent_cmd) and
                    Keyword.get(opts_with_env, :agent_cmd) != "docker" do
-                {Keyword.get(opts_with_env, :agent_cmd), Keyword.get(opts_with_env, :agent_args)}
+                # Explicit command override (tests, harnesses): honoured unchanged (FR-006);
+                # no sandbox, no pre-flight.
+                {Keyword.get(opts_with_env, :agent_cmd), Keyword.get(opts_with_env, :agent_args),
+                 nil}
               else
                 cidfile =
                   Keyword.get(opts_with_env, :cidfile) ||
@@ -218,27 +214,38 @@ defmodule AgentOS.RunWorker do
                     _ -> "1000:#{configured_gid}"
                   end
 
+                # Config and generated agents share this struct; dispatch_spec/3 supplies the
+                # only differences — image, entrypoint, command, and the read-only code mount
+                # for generated bodies (FR-002/FR-003/FR-004).
+                spec = dispatch_spec(agent_name, config_agent, opts_with_env)
+
                 sandbox = %AgentOS.Sandbox{
-                  image: Keyword.get(opts_with_env, :image, "agent-discovery:dev"),
+                  image: spec.image,
                   cidfile: cidfile,
                   network: Keyword.get(opts_with_env, :network, "none"),
                   memory_mb: Keyword.get(opts_with_env, :memory_mb, 128),
                   cpus: Keyword.get(opts_with_env, :cpus, "0.5"),
                   user: aligned_user,
                   env: Keyword.get(opts_with_env, :env, %{}),
-                  entrypoint: Keyword.get(opts_with_env, :entrypoint),
-                  cmd_args: Keyword.get(opts_with_env, :cmd_args),
-                  mounts: [
-                    {Path.expand(
-                       Application.get_env(:agent_os, :inference_uds_path, "data/inference.sock")
-                     ), "/tmp/inference.sock"}
-                  ]
+                  entrypoint: spec.entrypoint,
+                  cmd_args: spec.cmd_args,
+                  mounts: spec.mounts
                 }
 
-                {"docker", AgentOS.Sandbox.build_argv(sandbox)}
+                {"docker", AgentOS.Sandbox.build_argv(sandbox), spec}
               end
 
-            res = execute_run(cmd, args, manifest, agent_name, run_token, opts_with_env)
+            res =
+              execute_run(
+                cmd,
+                args,
+                manifest,
+                agent_name,
+                run_token,
+                config_agent?,
+                dispatch,
+                opts_with_env
+              )
 
             if original_run_token,
               do: System.put_env("RUN_TOKEN", original_run_token),
@@ -268,6 +275,56 @@ defmodule AgentOS.RunWorker do
   # the same resolution the elicitor and the judge harness use.
   defp python_bin, do: System.get_env("PYTHON_BIN") || ".venv/bin/python"
 
+  @doc """
+  Builds the per-agent container dispatch parameters — image, entrypoint, command, mounts,
+  and the code directory to mount — for the one shared sandbox path (FR-004).
+
+  Config and generated agents differ ONLY here: the config agent runs its own code-baked
+  image (no code mount, baked entrypoint), while a generated agent runs the generic
+  `generated_agent_image` with its body bind-mounted read-only at `/app/agents/<name>`
+  (FR-002/FR-003) and the interpreter invoked against that mounted path. The inference UDS
+  is the sole writable host mount for both (FR-007). Explicit `:image`, `:entrypoint`, and
+  `:cmd_args` opts (tests) still override. Pure and Docker-free so it is unit-testable.
+  """
+  @spec dispatch_spec(binary(), binary(), keyword()) :: %{
+          image: binary(),
+          entrypoint: binary() | nil,
+          cmd_args: [binary()] | nil,
+          mounts: [{binary(), binary()}],
+          code_dir: binary() | nil
+        }
+  def dispatch_spec(agent_name, config_agent, opts \\ []) do
+    inference_mount =
+      {Path.expand(Application.get_env(:agent_os, :inference_uds_path, "data/inference.sock")),
+       "/tmp/inference.sock"}
+
+    if agent_name == config_agent do
+      %{
+        image:
+          Keyword.get(opts, :image) ||
+            Application.get_env(:agent_os, :agent_image, "agent-discovery:dev"),
+        entrypoint: Keyword.get(opts, :entrypoint),
+        cmd_args: Keyword.get(opts, :cmd_args),
+        mounts: [inference_mount],
+        code_dir: nil
+      }
+    else
+      # Generated body: mounted read-only; sandbox.ex enforces the ":ro" suffix and the
+      # inference-UDS exception, so this is the only place the code path is named.
+      code_dir = Path.expand(Path.join(["agents", agent_name]))
+
+      %{
+        image:
+          Keyword.get(opts, :image) ||
+            Application.get_env(:agent_os, :generated_agent_image, "agent-generated:dev"),
+        entrypoint: Keyword.get(opts, :entrypoint) || "/app/.venv/bin/python",
+        cmd_args: Keyword.get(opts, :cmd_args) || ["/app/agents/#{agent_name}/main.py"],
+        mounts: [inference_mount, {code_dir, "/app/agents/#{agent_name}:ro"}],
+        code_dir: code_dir
+      }
+    end
+  end
+
   defp agent_manifest_path(nil), do: nil
 
   defp agent_manifest_path(agent) when is_binary(agent) do
@@ -281,7 +338,98 @@ defmodule AgentOS.RunWorker do
     :exit, _ -> Path.join("manifests", agent <> ".md")
   end
 
-  defp execute_run(cmd, args, manifest, agent_name, run_token, opts) do
+  # Pre-flights the container runtime, then runs the pipeline. Missing images, an
+  # unavailable daemon, or an unmountable code directory fail loudly with a diagnosable
+  # cause (Constitution VI, FR-009) — never silently and never by falling back to a host run
+  # (the fallback branch no longer exists).
+  defp execute_run(cmd, args, manifest, agent_name, run_token, config_agent?, dispatch, opts) do
+    run_log_path = Keyword.get(opts, :run_log_path, RunLog.default_path())
+    trigger = Keyword.get(opts, :trigger, :timer)
+
+    case preflight_docker(cmd, dispatch, agent_name, run_log_path, trigger) do
+      {:error, _reason} = err ->
+        err
+
+      :ok ->
+        do_execute_run(cmd, args, manifest, agent_name, run_token, config_agent?, opts)
+    end
+  end
+
+  # Sandbox dispatch: verify the code mount, then the runtime image/daemon. Only the
+  # docker path (a non-nil dispatch spec) is pre-flighted; explicit overrides are not.
+  defp preflight_docker(
+         "docker",
+         %{image: image, code_dir: code_dir},
+         agent_name,
+         run_log_path,
+         trigger
+       ) do
+    cond do
+      not is_nil(code_dir) and not File.dir?(code_dir) ->
+        preflight_fail(
+          "code_unmountable",
+          :code_unmountable,
+          "agent code directory is absent or unreadable: #{code_dir}",
+          agent_name,
+          run_log_path,
+          trigger
+        )
+
+      true ->
+        preflight_image(image, agent_name, run_log_path, trigger)
+    end
+  end
+
+  # Non-docker dispatch (explicit override) has no pre-flight.
+  defp preflight_docker(_cmd, _dispatch, _agent_name, _run_log_path, _trigger), do: :ok
+
+  # `docker image inspect` distinguishes a missing image from an unavailable daemon so
+  # each fails with its own diagnosable cause (FR-009).
+  defp preflight_image(image, agent_name, run_log_path, trigger) do
+    case System.cmd("docker", ["image", "inspect", image], stderr_to_stdout: true) do
+      {_out, 0} ->
+        :ok
+
+      {out, _code} ->
+        {cause_str, cause} = classify_image_error(out)
+
+        preflight_fail(
+          cause_str,
+          cause,
+          "docker image inspect failed for #{image}: #{String.trim(out)}",
+          agent_name,
+          run_log_path,
+          trigger
+        )
+    end
+  end
+
+  defp classify_image_error(out) do
+    if out =~ "Cannot connect to the Docker daemon",
+      do: {"runtime_unavailable", :runtime_unavailable},
+      else: {"image_unavailable", :image_unavailable}
+  end
+
+  # Logs loudly and records a diagnosable failure_cause in the run-log (FR-009).
+  defp preflight_fail(cause_str, cause, message, agent_name, run_log_path, trigger) do
+    Logger.error("dispatch pre-flight failed for '#{agent_name}': #{message}")
+
+    RunLog.append(
+      %{
+        status: :error,
+        actions: 0,
+        agent: agent_name,
+        trigger: trigger,
+        failure_cause: cause_str,
+        note: "dispatch pre-flight failed: #{message}"
+      },
+      path: run_log_path
+    )
+
+    {:error, cause}
+  end
+
+  defp do_execute_run(cmd, args, manifest, agent_name, run_token, config_agent?, opts) do
     run_log_path = Keyword.get(opts, :run_log_path, RunLog.default_path())
     timeout_ms = Keyword.get(opts, :timeout_ms, 30_000)
 
@@ -291,8 +439,14 @@ defmodule AgentOS.RunWorker do
 
     trigger = Keyword.get(opts, :trigger, :timer)
 
+    # Bookmarks + the full {state, items} payload are the config/discovery agent's real
+    # sandboxed-run input ONLY. Generated agents (docker or override) and any test override
+    # get the minimal {roster}+trigger_input payload — this keys on config-agent identity,
+    # not merely on cmd == "docker" (which generated agents now also use).
+    config_docker? = config_agent? and cmd == "docker"
+
     {items, dropped_count} =
-      if cmd == "docker" do
+      if config_docker? do
         case Keyword.get(opts, :items) do
           nil -> AgentOS.Provisioner.load_and_sanitize_bookmarks(bookmarks_path)
           explicit_items -> {explicit_items, 0}
@@ -330,7 +484,7 @@ defmodule AgentOS.RunWorker do
     else
       with snapshot <- StateStore.snapshot("roster_trust"),
            input_json <-
-             (if cmd == "docker" do
+             (if config_docker? do
                 Jason.encode!(build_payload(snapshot, items, Keyword.get(opts, :trigger_input)))
               else
                 # Non-docker (generated-agent / test) runs still receive their trigger
