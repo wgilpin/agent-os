@@ -63,7 +63,40 @@ in `lib/agent_os/` is agent code, and no agent code lives outside `agents/`.
   BEAM port boundary (`port_runner.ex`) — currently the discovery agent
   (`agents/discovery/`) and the elicitor agent (`agents/elicitor/`). Python appears
   *only* here. Shipped as deterministic stubs for tests.
-- **Tests:** ExUnit, deterministic only — no live LLM, no network, no Docker in any test.
+- **Tests:** ExUnit, deterministic — no live LLM and no network in any test. The default
+  host suite is hermetic (Docker-tagged tests excluded); the sandbox↔broker E2E tests run
+  the substrate containerized inside the OrbStack VM (see below).
+
+## Running the app
+
+The substrate runs **only containerized** (spec 045). On macOS a Unix socket cannot cross the
+host↔VM kernel boundary, so a host-run BEAM broker cannot be reached by sandboxed agents — a
+host app start on macOS is therefore **refused loudly** (it names the container entry point). The
+container is the one and only way to run everything: scheduler, triggers, generation, elicitation,
+and the LiveView web UI.
+
+```bash
+docker compose build substrate          # build the containerized substrate (macOS + OrbStack)
+docker compose up substrate             # THE way to run the app; UI at http://localhost:4000
+```
+
+`docker compose up substrate` starts the full app in the OrbStack VM (MIX_ENV=dev), with the
+inference socket on the shared `aos_inf` named volume and the web UI published to the macOS host
+at http://localhost:4000. For a real run reaching the model, the key is resolved from the
+`MODEL_KEY` env var or the repo's `.env` (never committed).
+
+## Running the suites
+
+```bash
+mix test                                # default hermetic host suite (no container needed)
+docker compose run --rm e2e             # docker-tagged E2E suite in-VM (sandbox↔broker path)
+```
+
+The default host suite is hermetic and needs no container (autostart is disabled there, so the
+boot guard never fires). The docker-tagged sandbox↔broker E2E tests run the substrate in the
+OrbStack VM via the `e2e` compose service (MIX_ENV=test), sharing the inference socket with agent
+containers over the `aos_inf` named volume. Details in
+`specs/045-containerize-substrate-uds/quickstart.md`.
 
 ## Roadmap so far
 
@@ -94,6 +127,26 @@ Built incrementally as numbered specs under `specs/`:
 23. **023 — Consent screen UI**: human-in-the-loop deployment approval panel.
 24. **024 — Standing inventory dashboard**: real-time control plane inventory dashboard.
 25. **025 — Container privilege restriction**: Phase 7 container hardening, process limits, and memory/CPU resource limits.
+26. **026 — Socket security permissions**: group-scoped inference socket access.
+27. **027 — E2E generation thread**: end-to-end agent generation pipeline.
+28. **028 — Pluggable connector registry**: connectors as declared, registered plugins.
+29. **029 — Synchronous tools**: synchronous tool execution through the gate.
+30. **030 — Connector admission**: admission control for connector plugins.
+31. **031 — Approval flag split**: separated approval flags for distinct consent surfaces.
+32. **032 — Queryable store**: queryable substrate state store.
+33. **033 — Retire term file**: legacy term-file persistence retired.
+34. **034 — Discord notify**: outbound Discord notification connector.
+35. **035 — File connectors**: file read/append connectors.
+36. **036 — Discord ingress**: inbound Discord message triggers.
+37. **037 — Priorities coach generation**: generated priorities-coach agent.
+38. **038 — Deterministic capability rails**: deterministic tool-call rails at the gate.
+39. **039 — Run worker transcript migration**: transcript ownership moved to the rail.
+40. **040 — Optional inference**: deterministic agents and the direct tool-call channel.
+41. **041 — UI pipeline deploy**: generation pipeline surfaced in the UI.
+42. **042 — Agent lifecycle controls**: pause, retire, and re-run controls.
+43. **043 — Rerun checks**: re-runnable verification checks.
+44. **044 — Sandbox generated agents**: generated agents run in the same container sandbox as config agents.
+45. **045 — Containerize substrate**: substrate runs in-VM so the inference socket works cross-container on macOS.
 
 Planning artifacts (spec, plan, tasks, contracts) for each live in
 `specs/<NNN>-<name>/`. The binding principles live in

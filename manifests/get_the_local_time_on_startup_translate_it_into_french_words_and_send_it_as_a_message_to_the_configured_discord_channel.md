@@ -1,7 +1,8 @@
 ---
 purpose: "Get the local time on startup, translate it into French words, and send it as a message to the configured Discord channel."
 triggers: 
-  - type: startup
+  - type: time
+    at: "08:00"
 grants:
   - connector: discord_notify
     methods: ["notify"]

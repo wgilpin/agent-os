@@ -114,9 +114,11 @@ defmodule AgentOS.RunWorker do
         run_log_path = Keyword.get(opts, :run_log_path, RunLog.default_path())
         trigger = Keyword.get(opts, :trigger, :timer)
 
+        # A run parked on human approval is not a failure: it gets its own
+        # :blocked status so the UI can render it as "waiting for you", not ERROR.
         AgentOS.RunLog.append(
           %{
-            status: :error,
+            status: :blocked,
             actions: 0,
             agent: agent_name,
             trigger: trigger,
@@ -166,11 +168,15 @@ defmodule AgentOS.RunWorker do
               )
             )
 
+            # The socket path the agent process sees inside its container: /tmp/inference.sock in
+            # host-bind mode, or the in-volume path (identical both sides) in shared-volume mode.
+            container_inf_socket = AgentOS.InferenceTopology.container_socket_path()
+
             opts_with_env =
               Keyword.update(
                 opts,
                 :env,
-                %{"RUN_TOKEN" => run_token, "INFERENCE_SOCKET" => "/tmp/inference.sock"}
+                %{"RUN_TOKEN" => run_token, "INFERENCE_SOCKET" => container_inf_socket}
                 |> (fn env ->
                       if effective_model,
                         do: Map.put(env, "AGENT_MODEL", effective_model),
@@ -179,7 +185,7 @@ defmodule AgentOS.RunWorker do
                 fn existing_env ->
                   existing_env
                   |> Map.put("RUN_TOKEN", run_token)
-                  |> Map.put("INFERENCE_SOCKET", "/tmp/inference.sock")
+                  |> Map.put("INFERENCE_SOCKET", container_inf_socket)
                   |> (fn env ->
                         if effective_model,
                           do: Map.put(env, "AGENT_MODEL", effective_model),
@@ -294,9 +300,23 @@ defmodule AgentOS.RunWorker do
           code_dir: binary() | nil
         }
   def dispatch_spec(agent_name, config_agent, opts \\ []) do
+    # Inference channel mount source depends on the socket topology (feature 045):
+    #   host-bind    -> bind the host socket FILE at the fixed container target
+    #                   /tmp/inference.sock (current behaviour on Linux hosts / unit tests).
+    #   shared-volume -> mount the NAMED VOLUME at its identical path in both containers, so a
+    #                   macOS-VM agent shares the broker's listening endpoint (same kernel), not
+    #                   just a bind-shared file node. sandbox.ex validates this is the sole
+    #                   writable mount.
     inference_mount =
-      {Path.expand(Application.get_env(:agent_os, :inference_uds_path, "data/inference.sock")),
-       "/tmp/inference.sock"}
+      case AgentOS.InferenceTopology.mode() do
+        :host_bind ->
+          {Path.expand(
+             Application.get_env(:agent_os, :inference_uds_path, "data/inference.sock")
+           ), "/tmp/inference.sock"}
+
+        :shared_volume ->
+          {AgentOS.InferenceTopology.volume_name(), AgentOS.InferenceTopology.volume_path()}
+      end
 
     if agent_name == config_agent do
       %{

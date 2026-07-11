@@ -175,9 +175,31 @@ defmodule AgentOS.TestHelper do
   """
   def start_broker_uds!(provider_fn) do
     uniq = System.unique_integer([:positive])
-    # The broker chmods the socket's PARENT dir to 0700, so it must be a dir we own
-    # (not /tmp itself). Keep the path short to stay under the ~104-char UDS limit.
-    sock_dir = Path.join(System.tmp_dir!(), "aos_inf_#{uniq}")
+
+    # Socket location depends on where the substrate runs (feature 045):
+    #   in-container (AOS_IN_CONTAINER set) -> a per-test dir on the SHARED VOLUME (/run/aos),
+    #     so an agent container dispatched by this test reaches this test's own socket while
+    #     staying isolated from other tests (FR-008). Configure shared-volume mode for the test.
+    #   host (default) -> a per-test dir under the OS tmp dir; host-bind mode (unchanged).
+    # Either way the broker chmods the socket's PARENT dir, so it must be a dir we own (not the
+    # volume/tmp root). Keep the path short to stay under the ~104-char UDS limit.
+    in_container? = System.get_env("AOS_IN_CONTAINER") not in [nil, ""]
+
+    prev_vol = Application.get_env(:agent_os, :inference_socket_volume)
+    prev_vol_path = Application.get_env(:agent_os, :inference_socket_volume_path)
+
+    sock_dir =
+      if in_container? do
+        volume_path =
+          Application.get_env(:agent_os, :inference_socket_volume_path, "/run/aos")
+
+        Application.put_env(:agent_os, :inference_socket_volume, "aos_inf")
+        Application.put_env(:agent_os, :inference_socket_volume_path, volume_path)
+        Path.join(volume_path, "test_#{uniq}")
+      else
+        Path.join(System.tmp_dir!(), "aos_inf_#{uniq}")
+      end
+
     File.mkdir_p!(sock_dir)
     sock = Path.join(sock_dir, "inf.sock")
 
@@ -193,6 +215,14 @@ defmodule AgentOS.TestHelper do
       if prev_uds,
         do: Application.put_env(:agent_os, :inference_uds_path, prev_uds),
         else: Application.delete_env(:agent_os, :inference_uds_path)
+
+      if prev_vol,
+        do: Application.put_env(:agent_os, :inference_socket_volume, prev_vol),
+        else: Application.delete_env(:agent_os, :inference_socket_volume)
+
+      if prev_vol_path,
+        do: Application.put_env(:agent_os, :inference_socket_volume_path, prev_vol_path),
+        else: Application.delete_env(:agent_os, :inference_socket_volume_path)
 
       Application.put_env(:agent_os, :autostart, prev_autostart)
 

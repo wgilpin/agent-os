@@ -158,14 +158,27 @@ defmodule AgentOSWeb.InventoryLive do
                     <strong>Controls:</strong>
                     <div class="lifecycle-buttons">
                       <%= if deployed_active?(agent.deployment) do %>
-                        <button
-                          type="button"
-                          class="btn-secondary btn-run-now"
-                          phx-click="run_now"
-                          phx-value-agent={agent.agent_name}
-                        >
-                          Run now
-                        </button>
+                        <%= if agent.needs_approval? do %>
+                          <!-- A run would only park on approval, so the honest control IS the
+                               approval: park/reuse the ask and take the human to the consent page. -->
+                          <button
+                            type="button"
+                            class="btn-secondary btn-approve-to-run"
+                            phx-click="open_approval"
+                            phx-value-agent={agent.agent_name}
+                          >
+                            Approve to run…
+                          </button>
+                        <% else %>
+                          <button
+                            type="button"
+                            class="btn-secondary btn-run-now"
+                            phx-click="run_now"
+                            phx-value-agent={agent.agent_name}
+                          >
+                            Run now
+                          </button>
+                        <% end %>
                         <button
                           type="button"
                           class="btn-secondary btn-pause"
@@ -577,6 +590,21 @@ defmodule AgentOSWeb.InventoryLive do
   end
 
   @impl true
+  def handle_event("open_approval", %{"agent" => agent}, socket) do
+    # Park (or reuse) the pending approval, then take the human straight to THAT
+    # agent's consent page — the run itself starts from the approval decision
+    # (approval-resume trigger).
+    case AgentOS.AgentLifecycle.request_approval(agent) do
+      {:ok, %{manifest_path: manifest_path}} ->
+        {:noreply,
+         push_navigate(socket, to: "/consent?" <> URI.encode_query(manifest: manifest_path))}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, action_error: error_text(reason))}
+    end
+  end
+
+  @impl true
   def handle_event("run_now", %{"agent" => agent}, socket) do
     case AgentOS.AgentLifecycle.run_now(agent) do
       :ok ->
@@ -758,6 +786,11 @@ defmodule AgentOSWeb.InventoryLive do
   defp error_text(:not_active),
     do: "the agent must be deployed and active to run — resume or deploy it first."
 
+  defp error_text(:awaiting_approval),
+    do:
+      "this agent needs your approval before it can run — use \"Approve to run\" " <>
+        "or open the consent page."
+
   defp error_text(:code_missing),
     do:
       "this agent has a manifest but no generated code, so it can't run. " <>
@@ -930,6 +963,9 @@ defmodule AgentOSWeb.InventoryLive do
     # Legacy lines without an agent= field are attributed to no card.
     all_runs = RunLog.read_records(RunLog.default_path())
 
+    # Same mode the run path will use, so the offered control matches what a run would do.
+    review_mode = Application.get_env(:agent_os, :review_mode, :always_review)
+
     agents_data =
       Enum.reduce(manifest_paths, [], fn path, acc ->
         # Load inventory data using structured accessor
@@ -958,6 +994,13 @@ defmodule AgentOSWeb.InventoryLive do
                 AgentOS.Pipeline.Rerun.eligible?(data.agent_name) == :ok
               )
               |> Map.put(:last_rerun, fetch_last_rerun(data.agent_name))
+              # Approval forecast (read-only): decides whether the card offers
+              # "Run now" or "Approve to run…" — a run that would park on approval
+              # is never offered as a run.
+              |> Map.put(
+                :needs_approval?,
+                AgentOS.Provisioner.approval_required?(path, review_mode)
+              )
 
             [agent_map | acc]
 

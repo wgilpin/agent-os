@@ -566,12 +566,45 @@ defmodule AgentOS.InferenceBroker do
 
   # --- UDS Listener ---
 
+  # Sets the socket parent-dir permissions per topology mode (feature 045). Returns :ok or a
+  # loud {:error, reason} that propagates to init/1 as {:uds_listener_failed, reason} (FR-009).
+  defp prepare_socket_dir(parent_dir) do
+    case AgentOS.InferenceTopology.mode() do
+      :host_bind ->
+        # Owner-only: the agent bind-mounts the socket file directly, not this dir.
+        File.chmod(parent_dir, 0o700)
+
+      :shared_volume ->
+        # Group-traversable dir owned by the inference GID so a cross-container agent reaches
+        # the socket; still excludes users outside that group (SC-005).
+        target_gid = get_configured_gid()
+
+        with :ok <- File.chmod(parent_dir, 0o770),
+             :ok <- :file.change_group(String.to_charlist(parent_dir), target_gid) do
+          :ok
+        else
+          {:error, reason} ->
+            Logger.error(
+              "Failed to prepare shared-volume socket dir #{parent_dir} (mode 0770, GID #{target_gid}): #{inspect(reason)}"
+            )
+
+            {:error, {:socket_dir_prepare_failed, reason}}
+        end
+    end
+  end
+
   defp start_uds_listener(socket_path) do
     File.rm(socket_path)
     parent_dir = Path.dirname(socket_path)
     File.mkdir_p!(parent_dir)
 
-    with :ok <- File.chmod(parent_dir, 0o700),
+    # Parent-dir permissions depend on the socket topology (feature 045):
+    #   host-bind    -> 0700, owner-only (unchanged; the agent bind-mounts the socket FILE).
+    #   shared-volume -> 0770 + chgrp to the configured inference GID, so a cross-container agent
+    #                   running 1000:<gid> can TRAVERSE the dir to reach the socket. The BEAM runs
+    #                   as root inside the substrate container, so chgrp succeeds (the earlier
+    #                   :eperm was a macOS-host, non-root limitation). Others are still excluded.
+    with :ok <- prepare_socket_dir(parent_dir),
          {:ok, listen_socket} <-
            :gen_tcp.listen(0, [
              :binary,
