@@ -27,6 +27,12 @@ config :agent_os,
   agent_codegen_model: "google/gemini-3.5-flash",
   agent_runtime_model: "google/gemini-3-flash-preview",
   judge_model: "google/gemini-3.5-flash",
+  # Container runtime images. Both config and generated agents run through the one
+  # Sandbox.build_argv path (FR-004), differing only in image + mounts: the config agent's
+  # image bakes its own code, while the generated-agent image bakes deps only and mounts the
+  # body read-only at run time (FR-002/FR-003).
+  agent_image: "agent-discovery:dev",
+  generated_agent_image: "agent-generated:dev",
   # Substrate-owned agents: hidden from the inventory UI and refused by every
   # AgentLifecycle mutation (they are managed by config/code, not the dashboard).
   system_agents: ["discovery"],

@@ -256,7 +256,7 @@ Plans:
 **Plans**: 4 (+ ops item)
 
 Plans:
-- [ ] 11-01: Generated agents into the container sandbox (spec 044) — build a generated-agent runtime image (venv deps baked in, replacing the host `.venv/bin/python` resolution), mount `agents/<name>/` read-only, delete the `run_worker` bypass branch; containment probe added to the suite. No deps.
+- [x] 11-01: Generated agents into the container sandbox (spec 044) — build a generated-agent runtime image (venv deps baked in, replacing the host `.venv/bin/python` resolution), mount `agents/<name>/` read-only, delete the `run_worker` bypass branch; containment probe added to the suite. No deps.
 - [ ] 11-02 (ops, zero code): trim Docker Desktop → Resources → File Sharing from `/Users` down to the specific paths agent_os mounts; document in the threat-model note as a standing operator invariant. No deps.
 - [ ] 11-03: Pluggable runtime knob — `Sandbox.build_argv` gains a configurable `--runtime`; default runsc (gVisor) where installed, loud fallback to runc; cuts the runc-escape → VM-root → shared-mount chain. Depends on 11-01.
 - [ ] 11-04: Apple Containers backend — per-agent lightweight hardware VMs via Apple's `container` tool (native macOS, no Docker Desktop); requires a second argv builder (its CLI is not docker-flag-compatible) and the UDS→vsock migration of the broker channel. Spin-up target: sub-second cold; if per-run latency matters, a warm pool (pre-started sandboxes blocked on stdin-read — fits `PortRunner`'s one-JSON-line feed) is the lever, and it favours cheap-idle runtimes. Depends on 11-01; independent of 11-03.
@@ -280,4 +280,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 8. Connector Ecosystem (v7) | 3/3 | Complete | 2026-07-02 |
 | 9. Persistent State & Permissions (v8) | 3/3 | Complete | 2026-07-02 |
 | 10. Priorities Coach (v9) | 0/7 | Planned — see [phase-10-priorities-coach-roadmap.md](phase-10-priorities-coach-roadmap.md) | — |
-| 11. Generated-Agent Runtime Isolation (v10) | 0/4 | Planned — 11-01 is spec 044 | — |
+| 11. Generated-Agent Runtime Isolation (v10) | 1/4 | 11-01 done (spec 044); 11-02/03/04 open | 2026-07-11 |
