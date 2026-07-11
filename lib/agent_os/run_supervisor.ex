@@ -76,6 +76,12 @@ defmodule AgentOS.RunSupervisor do
       {:killed, _reason} ->
         :ok
 
+      # Parked on human approval: not a failure. Retrying is pointless (approval
+      # cannot arrive between attempts) and alerting is noise — the block is already
+      # visible as the run-log :blocked row and the pending item on the consent page.
+      {:error, {:deploy_blocked, _ref}} ->
+        :ok
+
       # If an error tuple is returned:
       {:error, reason} ->
         # If we have attempted less than twice (attempts start at 0, retry runs at attempts = 1):

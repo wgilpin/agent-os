@@ -178,15 +178,15 @@ defmodule AgentOSWeb.ConsentLive do
 
           <%= if @status == :approved do %>
             <div class="decision-banner decision-banner-approved">
-              <h2>Deployment Approved!</h2>
-              <p>Consent has been recorded successfully. Downstream deployment has been unblocked.</p>
+              <h2>Approved</h2>
+              <p>The agent is being deployed. Its triggers are armed, and any startup run begins shortly.</p>
             </div>
           <% end %>
 
           <%= if @status == :rejected do %>
             <div class="decision-banner decision-banner-rejected">
-              <h2>Deployment Rejected</h2>
-              <p>This deployment has been rejected by the user. Downstream execution is blocked.</p>
+              <h2>Rejected</h2>
+              <p>The agent will not be deployed or run.</p>
             </div>
           <% end %>
         <% end %>
@@ -312,16 +312,22 @@ defmodule AgentOSWeb.ConsentLive do
     end)
   end
 
-  # Every non-system agent that is not deployed: reviewing and approving it here is
-  # always the path to deployment (including agents approved earlier whose deploy never
-  # completed). Store lookups tolerate absent stores (minimal test trees).
+  # Every non-system agent waiting on the owner's consent: never-deployed agents
+  # (reviewing here is always their path to deployment), AND deployed agents whose
+  # current manifest+code is not approved (e.g. a run would park under :always_review).
+  # Store lookups tolerate absent stores (minimal test trees).
   defp awaiting_agents do
+    review_mode = Application.get_env(:agent_os, :review_mode, :always_review)
+
     "manifests/*.md"
     |> Path.wildcard()
     |> Enum.reject(&AgentOS.AgentLifecycle.system_agent?(Path.basename(&1, ".md")))
     |> Enum.filter(fn path ->
       agent_name = Path.basename(path, ".md")
-      is_nil(safe_lookup(fn -> AgentOS.DeploymentRegistry.get(agent_name) end))
+
+      is_nil(safe_lookup(fn -> AgentOS.DeploymentRegistry.get(agent_name) end)) or
+        safe_lookup(fn -> AgentOS.Provisioner.approval_required?(path, review_mode) end) ==
+          true
     end)
     |> Enum.map(fn path -> %{path: path, agent_name: Path.basename(path, ".md")} end)
     |> Enum.sort_by(& &1.agent_name)

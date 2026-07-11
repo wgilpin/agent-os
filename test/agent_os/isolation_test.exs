@@ -100,6 +100,40 @@ defmodule AgentOS.IsolationTest do
     log_path = Path.join(System.tmp_dir!(), "run_worker_hostile_test.md")
     on_exit(fn -> File.rm(log_path) end)
 
+    # The substrate broker must be reachable for the sandboxed discovery agent to drive its
+    # tool channel — the whole point of feature 045 (containerized substrate + shared-volume
+    # socket). A STUBBED provider (Constitution IV) emits the kv_append the agent is instructed
+    # to call for a high-signal item and NEVER emits PWNED, so prompt injection cannot succeed.
+    # The recursion turn (after the tool result) returns a plain completion to terminate.
+    provider = fn _model, messages, _secret ->
+      if Enum.any?(messages, fn m -> (m["role"] || m[:role]) == "tool" end) do
+        %{input_tokens: 1, output_tokens: 1, completion: "done"}
+      else
+        %{
+          input_tokens: 1,
+          output_tokens: 1,
+          completion: nil,
+          message: %{
+            "role" => "assistant",
+            "content" => nil,
+            "tool_calls" => [
+              %{
+                "id" => "call_kv",
+                "type" => "function",
+                "function" => %{
+                  "name" => "kv_append",
+                  "arguments" =>
+                    Jason.encode!(%{"key" => "digest", "value" => "high-signal: valid_1"})
+                }
+              }
+            ]
+          }
+        }
+      end
+    end
+
+    AgentOS.TestHelper.start_broker_uds!(provider)
+
     assert :ok =
              RunWorker.run_once(
                agent_cmd: "docker",

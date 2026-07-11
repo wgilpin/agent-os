@@ -1452,6 +1452,12 @@ main, [data-phx-main], .workspace-wrapper {
   color: #92400E;
 }
 
+/* Parked on human approval — informational, not a failure. */
+.run-status-badge-blocked {
+  background-color: #E0E7FF;
+  color: #3730A3;
+}
+
 .numeric-cell {
   font-variant-numeric: tabular-nums;
   font-family: monospace;

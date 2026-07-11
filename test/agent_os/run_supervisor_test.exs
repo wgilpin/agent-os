@@ -236,6 +236,28 @@ defmodule AgentOS.RunSupervisorTest do
     assert log_content =~ ":persistent_failure"
   end
 
+  test "RunSupervisor deploy-blocked path: parked on approval — no retry, no alert", %{
+    log_path: log_path
+  } do
+    test_pid = self()
+
+    worker_fn = fn _opts ->
+      send(test_pid, :worker_called)
+      {:error, {:deploy_blocked, "ref_deploy_some_agent_1"}}
+    end
+
+    assert :ok = RunSupervisor.start_run(worker_fn: worker_fn, run_log_path: log_path)
+
+    # Exactly one attempt: approval cannot arrive between attempts, so retrying is noise.
+    assert_receive :worker_called, 500
+    refute_receive :worker_called, 500
+
+    # And no Alerter entry: the block is surfaced by the run-log :blocked row +
+    # the pending item on the consent page, not as a failure alert.
+    Process.sleep(100)
+    refute File.exists?(log_path) and File.read!(log_path) =~ "status=alert"
+  end
+
   # NOTE: Spend *charging* and window rollover moved off run_worker onto the broker
   # under the tool-channel cutover. That behaviour is covered at its new home:
   # windowing in spend_ledger_test.exs (current_entry/3) and metering/breach in

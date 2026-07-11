@@ -1,0 +1,85 @@
+# Feature 045: run the substrate (BEAM) in the OrbStack VM so sandboxed agents can reach the
+# inference broker's Unix socket over a shared named volume (see docs/substrate-containerization
+# -analysis.md and specs/045-containerize-substrate-uds/).
+#
+# The containerized substrate is the ONE AND ONLY way to run the app (amendment: host-mode app
+# start is refused loudly on macOS — see lib/agent_os/application.ex boot guard). Two services
+# share the same image and volumes:
+#
+#   substrate  — the full long-running app (scheduler, triggers, generation, elicitation, and the
+#                LiveView web UI). MIX_ENV=dev, published on host port 4000.
+#   e2e        — the docker-tagged E2E test suite in-VM. MIX_ENV=test, one-shot.
+#
+# Documented entry points (quickstart.md):
+#   Build:        docker compose build substrate
+#   Run the app:  docker compose up substrate           (FR-012/SC-006; open http://localhost:4000)
+#   E2E suite:    docker compose run --rm e2e            (SC-002; docker-tagged suite in-VM)
+#   Real run:     docker compose run --rm substrate <run cmd>  (SC-001; MODEL_KEY from env/.env)
+
+# Common build + mounts + container-local artifact dirs, shared by both services (YAML anchors).
+x-substrate-base: &substrate-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  working_dir: /Users/will/projects/agent_os
+  volumes:
+    # Shared inference volume: the socket lives here, mounted at the IDENTICAL path in the
+    # substrate and every dispatched agent container. This is the sole cross-container writable
+    # channel (sandbox.ex enforces it in shared-volume mode).
+    - aos_inf:/run/aos
+    # VM Docker daemon: lets the substrate dispatch SIBLING agent containers.
+    - /var/run/docker.sock:/var/run/docker.sock
+    # Repo at the IDENTICAL absolute host path so Path.expand-derived generated-agent code mounts
+    # (run_worker.ex dispatch_spec/3) resolve for those siblings (FR-007), and so repo-local data/
+    # persistence (rosters, ledgers, run logs) writes straight back to the working tree (FR-013).
+    - /Users/will/projects/agent_os:/Users/will/projects/agent_os
+
+x-substrate-env: &substrate-env
+  # Marks the process as in-container: activates shared-volume topology (config/config.exs) and
+  # satisfies the boot guard (application.ex). Without it, a macOS host start is refused.
+  AOS_IN_CONTAINER: "1"
+  # The socket group. 1000 == the agent image's `app` group, so an agent running 1000:1000 reaches
+  # the 0660 group-owned socket via its primary group (SC-005).
+  INFERENCE_GID: "1000"
+  # Container-local build/deps so Linux artifacts never clash with the host macOS _build (the repo
+  # is bind-mounted live at the identical path).
+  MIX_DEPS_PATH: /opt/aos/deps
+  MIX_BUILD_PATH: /opt/aos/_build
+  # The Linux Python venv baked into the image (the bind-mounted repo .venv is a macOS binary and
+  # cannot exec here). PortRunner/host-process agent bodies (discovery, elicitor, judge) use this.
+  PYTHON_BIN: /opt/aos/venv/bin/python
+  PYTHONPATH: /Users/will/projects/agent_os
+  # Model-key passthrough for real runs (SC-001): CredentialSource resolves :model_key from the
+  # MODEL_KEY env var, falling back to the bind-mounted .env (loaded at startup outside MIX_ENV=test).
+  MODEL_KEY: ${MODEL_KEY:-}
+
+services:
+  # The full substrate app — THE way to run Agent OS (FR-012/FR-013). `docker compose up substrate`
+  # starts the scheduler, triggers, generation pipeline, elicitation, and the LiveView web UI bound
+  # to 0.0.0.0:4000 (config/config.exs), published to the macOS host at http://localhost:4000.
+  substrate:
+    <<: *substrate-base
+    environment:
+      <<: *substrate-env
+      MIX_ENV: dev
+    ports:
+      - "4000:4000"
+    # deps.get first because MIX_DEPS_PATH is container-local; then boot the full app and stay up.
+    command: sh -c "mix deps.get && mix run --no-halt"
+
+  # The docker-tagged E2E suite in-VM (SC-002). `--only docker` runs exactly the sibling-container
+  # tests that REQUIRE the containerized substrate (hostile-web isolation + generated-agent broker
+  # E2E); host-bind unit tests belong to the host suite (`mix test` on the host, green + hermetic).
+  e2e:
+    <<: *substrate-base
+    environment:
+      <<: *substrate-env
+      MIX_ENV: test
+    command: sh -c "mix deps.get && mix test --only docker"
+
+volumes:
+  # Pin the real volume name to `aos_inf` (NOT the compose-prefixed `agent_os_aos_inf`), so the
+  # substrate's `docker run -v aos_inf:/run/aos` sibling dispatch mounts the SAME volume the
+  # substrate itself holds the socket on. Without this the socket is invisible cross-container.
+  aos_inf:
+    name: aos_inf

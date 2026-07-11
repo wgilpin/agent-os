@@ -109,7 +109,7 @@ defmodule AgentOS.AgentLifecycle do
   `:ok` means it was started, not that it finished.
   """
   @spec run_now(String.t(), keyword()) ::
-          :ok | {:error, :system_agent | :not_active | :code_missing}
+          :ok | {:error, :system_agent | :not_active | :code_missing | :awaiting_approval}
   def run_now(agent_name, opts \\ []) when is_binary(agent_name) do
     start_run_fn = Keyword.get(opts, :start_run_fn, &AgentOS.RunSupervisor.start_run/1)
     agents_dir = Keyword.get(opts, :agents_dir, "agents")
@@ -126,10 +126,66 @@ defmodule AgentOS.AgentLifecycle do
       not File.exists?(Path.join([agents_dir, agent_name, "main.py"])) ->
         {:error, :code_missing}
 
+      # A run that would only park on human approval is refused up front: the UI
+      # offers "Approve to run" (request_approval/2 + the consent page) instead.
+      run_needs_approval?(agent_name, opts) ->
+        {:error, :awaiting_approval}
+
       true ->
         Logger.info("AgentLifecycle: manual run requested for #{inspect(agent_name)}")
         start_run_fn.(trigger: "manual", agent: agent_name)
         :ok
+    end
+  end
+
+  @doc """
+  Parks (or reuses) the pending human approval for an agent whose current manifest +
+  code is not yet approved, WITHOUT running it — the inventory "Approve to run"
+  affordance. Returns `{:ok, %{ref: ref | :already_approved, manifest_path: path}}`
+  so the caller can send the human straight to that agent's consent page, or
+  `{:error, reason}`.
+  """
+  @spec request_approval(String.t(), keyword()) ::
+          {:ok, %{ref: String.t() | :already_approved, manifest_path: String.t()}}
+          | {:error, term()}
+  def request_approval(agent_name, opts \\ []) when is_binary(agent_name) do
+    if system_agent?(agent_name) do
+      {:error, :system_agent}
+    else
+      mpath = effective_manifest_path(agent_name, opts)
+
+      case AgentOS.Provisioner.deploy(mpath, configured_review_mode(opts), opts) do
+        {:blocked, ref} -> {:ok, %{ref: ref, manifest_path: mpath}}
+        {:ok, _status} -> {:ok, %{ref: :already_approved, manifest_path: mpath}}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  defp run_needs_approval?(agent_name, opts) do
+    AgentOS.Provisioner.approval_required?(
+      effective_manifest_path(agent_name, opts),
+      configured_review_mode(opts)
+    )
+  end
+
+  defp configured_review_mode(opts) do
+    Keyword.get(opts, :review_mode) ||
+      Application.get_env(:agent_os, :review_mode, :always_review)
+  end
+
+  # Same resolution order the run itself uses (run_worker): explicit override,
+  # then the deployment record's path, then the conventional location.
+  defp effective_manifest_path(agent_name, opts) do
+    case Keyword.get(opts, :manifest_path) do
+      path when is_binary(path) ->
+        path
+
+      nil ->
+        case DeploymentRegistry.get(agent_name) do
+          %{manifest_path: path} when is_binary(path) -> path
+          _ -> Path.join("manifests", "#{agent_name}.md")
+        end
     end
   end
 

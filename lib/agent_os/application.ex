@@ -8,6 +8,13 @@ defmodule AgentOS.Application do
   # from the Application module behaviour.
   @impl true
   def start(_type, _args) do
+    # Boot guard (feature 045, FR-011/SC-007): the substrate runs ONLY containerized on macOS.
+    # A host-run BEAM broker listens on the macOS host kernel while agent containers run in the
+    # OrbStack Linux VM kernel, so agents get ECONNREFUSED on the inference socket — a half-working
+    # substrate whose agents are dead. Refuse that state loudly instead of coming up broken. Test
+    # runs (autostart disabled) and the in-container app (AOS_IN_CONTAINER set) are unaffected.
+    boot_guard!()
+
     # Resolve credentials at startup
     credentials = AgentOS.CredentialSource.resolve_credentials()
 
@@ -149,4 +156,50 @@ defmodule AgentOS.Application do
     # Start the supervisor with the child specifications.
     Supervisor.start_link(children, opts)
   end
+
+  # Raises (aborting application start) when a real substrate boot is attempted on the macOS host
+  # outside the container. Reads the three signals from the environment and delegates the decision
+  # to the pure `boot_permitted?/3` (unit-tested directly, without killing a running VM).
+  defp boot_guard! do
+    autostart? = Application.get_env(:agent_os, :autostart, true)
+    in_container? = System.get_env("AOS_IN_CONTAINER") not in [nil, ""]
+
+    case boot_permitted?(autostart?, in_container?, :os.type()) do
+      :ok ->
+        :ok
+
+      {:refused, message} ->
+        Logger.error(message)
+        raise message
+    end
+  end
+
+  @typedoc "The outcome of the host/container boot guard."
+  @type boot_decision() :: :ok | {:refused, String.t()}
+
+  @doc """
+  Pure boot-guard decision (feature 045, FR-011). Refuses ONLY the one broken topology — a real
+  app start (autostart enabled) on the macOS host outside the container — and permits everything
+  else:
+
+    * `autostart?` false        -> `:ok` (the hermetic test suite; no supervision tree comes up).
+    * `in_container?` true       -> `:ok` (the containerized substrate — the sole real run mode).
+    * OS is not `{:unix, :darwin}` -> `:ok` (Linux host / CI; the UDS is kernel-local either way).
+    * else (autostart + host + macOS) -> `{:refused, message}` naming the container entry point.
+  """
+  @spec boot_permitted?(boolean(), boolean(), {atom(), atom()}) :: boot_decision()
+  def boot_permitted?(autostart?, in_container?, os_type)
+  def boot_permitted?(false, _in_container?, _os_type), do: :ok
+  def boot_permitted?(_autostart?, true, _os_type), do: :ok
+
+  def boot_permitted?(true, false, {:unix, :darwin}) do
+    {:refused,
+     "AgentOS refuses to start: the substrate runs only containerized on macOS. A host-run BEAM " <>
+       "broker cannot be reached by sandboxed agents (the inference Unix socket is kernel-local, " <>
+       "so agents in the OrbStack VM get ECONNREFUSED against a broker on the host kernel). " <>
+       "Start the substrate with `docker compose up substrate` instead. " <>
+       "(Set AOS_IN_CONTAINER=1 only when actually running inside the container.)"}
+  end
+
+  def boot_permitted?(_autostart?, _in_container?, _os_type), do: :ok
 end

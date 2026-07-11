@@ -152,6 +152,46 @@ defmodule AgentOS.Provisioner do
   end
 
   @doc """
+  Read-only forecast of `deploy/3`'s approval decision for the agent's CURRENT
+  manifest + code: `true` when a run attempt would park on human approval (deploy
+  would return `{:blocked, ref}`). Performs no writes — nothing is parked, no
+  provenance is recorded — so the UI can decide whether to offer "Run now" or
+  "Approve to run" without side effects.
+  """
+  @spec approval_required?(binary(), atom() | String.t(), keyword()) :: boolean()
+  def approval_required?(manifest_path, review_mode, opts \\ []) do
+    agent_name = Path.basename(manifest_path, ".md")
+
+    case AgentOS.Manifest.load(manifest_path) do
+      {:ok, manifest} ->
+        hash = manifest_hash(manifest_path)
+
+        case get_recorded_provenance(agent_name) do
+          %{status: status, hash: ^hash}
+          when status in [:reviewed_human, :skipped_in_envelope, :dangerously_skipped] ->
+            false
+
+          _ ->
+            case normalize_mode(review_mode) do
+              :always_review ->
+                true
+
+              :review_if_risky ->
+                not envelope_predicate?(manifest, opts) or
+                  gate_breach_flagged?(agent_name, opts)
+
+              :dangerously_skip_review ->
+                false
+            end
+        end
+
+      {:error, _reason} ->
+        # An unloadable manifest cannot run at all; the run path surfaces its own error.
+        false
+    end
+  end
+
+  @doc """
   Runs the deploy-time safety rail checking if the deployment must block on a human.
   """
   @spec deploy(binary(), atom() | String.t(), keyword()) ::
@@ -218,32 +258,47 @@ defmodule AgentOS.Provisioner do
                   end
 
                 if should_block? do
-                  ref = "ref_deploy_#{agent_name}_#{System.unique_integer([:positive])}"
-
-                  action = %AgentOS.ProposedAction{
-                    type: "deploy",
-                    recipient: agent_name,
-                    method: manifest_path,
-                    payload: %{"review_mode" => to_string(normalized_mode), "hash" => hash}
-                  }
-
-                  grant = %AgentOS.Manifest.Grant{
-                    connector: "deploy",
-                    recipients: nil,
-                    methods: nil
-                  }
-
                   pending_store = AgentOS.StateStore.snapshot("pending_approvals")
                   approvals = Map.get(pending_store, :approvals, %{})
 
-                  updated_approvals =
-                    Map.put(approvals, ref, %{ref: ref, action: action, grant: grant})
+                  # One parked approval per agent + manifest hash: repeated blocked
+                  # attempts (another "Run now" click, a scheduled trigger firing)
+                  # must not fill the consent queue with duplicates of the same ask.
+                  existing_ref =
+                    Enum.find_value(approvals, nil, fn {ref, %{action: action}} ->
+                      if action.recipient == agent_name and
+                           Map.get(action.payload || %{}, "hash") == hash,
+                         do: ref,
+                         else: nil
+                    end)
 
-                  :ok =
-                    AgentOS.StateStore.apply_action(
-                      "pending_approvals",
-                      {:put, :approvals, updated_approvals}
-                    )
+                  ref =
+                    existing_ref ||
+                      "ref_deploy_#{agent_name}_#{System.unique_integer([:positive])}"
+
+                  if is_nil(existing_ref) do
+                    action = %AgentOS.ProposedAction{
+                      type: "deploy",
+                      recipient: agent_name,
+                      method: manifest_path,
+                      payload: %{"review_mode" => to_string(normalized_mode), "hash" => hash}
+                    }
+
+                    grant = %AgentOS.Manifest.Grant{
+                      connector: "deploy",
+                      recipients: nil,
+                      methods: nil
+                    }
+
+                    updated_approvals =
+                      Map.put(approvals, ref, %{ref: ref, action: action, grant: grant})
+
+                    :ok =
+                      AgentOS.StateStore.apply_action(
+                        "pending_approvals",
+                        {:put, :approvals, updated_approvals}
+                      )
+                  end
 
                   # Record blocked attempt in provenance
                   :ok = record_provenance(agent_name, :blocked, hash)

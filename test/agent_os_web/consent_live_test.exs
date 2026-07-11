@@ -148,7 +148,7 @@ defmodule AgentOSWeb.ConsentLiveTest do
 
     # Click Approve
     html_approved = lv |> element(".btn-approve") |> render_click()
-    assert html_approved =~ "Deployment Approved!"
+    assert html_approved =~ "The agent is being deployed"
 
     # Verify provenance is updated to :reviewed_human
     provenance = AgentOS.StateStore.snapshot("provenance")
@@ -212,7 +212,7 @@ defmodule AgentOSWeb.ConsentLiveTest do
 
     # No judge/security verdicts exist for this agent: approval must be refused.
     html = lv |> element(".btn-approve") |> render_click()
-    refute html =~ "Deployment Approved!"
+    refute html =~ "The agent is being deployed"
     assert html =~ "Not approved:"
 
     # Provenance must NOT say a human review happened.
@@ -269,7 +269,7 @@ defmodule AgentOSWeb.ConsentLiveTest do
 
     # Click Reject
     html_rejected = lv |> element(".btn-reject") |> render_click()
-    assert html_rejected =~ "Deployment Rejected"
+    assert html_rejected =~ "will not be deployed or run"
 
     # Verify provenance is NOT reviewed_human (should not be present or different status)
     provenance = AgentOS.StateStore.snapshot("provenance")

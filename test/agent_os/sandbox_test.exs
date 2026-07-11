@@ -1,7 +1,23 @@
 defmodule AgentOS.SandboxTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias AgentOS.Sandbox
+
+  # Default every test to host-bind mode so the host-bind mount-validation assertions are correct
+  # even when the suite runs in-container (feature 045 sets shared-volume globally there). The
+  # shared-volume describe block overrides this in its own setup.
+  setup do
+    prev_vol = Application.get_env(:agent_os, :inference_socket_volume)
+    Application.delete_env(:agent_os, :inference_socket_volume)
+
+    on_exit(fn ->
+      if prev_vol,
+        do: Application.put_env(:agent_os, :inference_socket_volume, prev_vol),
+        else: Application.delete_env(:agent_os, :inference_socket_volume)
+    end)
+
+    :ok
+  end
 
   test "build_argv/1 generates correct docker run argument list" do
     sandbox = %Sandbox{
@@ -183,6 +199,69 @@ defmodule AgentOS.SandboxTest do
     # Mount to /tmp/inference.sock but with wrong host path is blocked
     assert_raise ArgumentError, ~r/Inference socket mount source must match/i, fn ->
       Sandbox.build_argv(%{base | mounts: [{"/wrong/host/path", "/tmp/inference.sock"}]})
+    end
+  end
+
+  describe "shared-volume mode writable-mount validation (feature 045, FR-005)" do
+    setup do
+      prev_vol = Application.get_env(:agent_os, :inference_socket_volume)
+      prev_path = Application.get_env(:agent_os, :inference_socket_volume_path)
+      Application.put_env(:agent_os, :inference_socket_volume, "aos_inf")
+      Application.put_env(:agent_os, :inference_socket_volume_path, "/run/aos")
+
+      on_exit(fn ->
+        if prev_vol,
+          do: Application.put_env(:agent_os, :inference_socket_volume, prev_vol),
+          else: Application.delete_env(:agent_os, :inference_socket_volume)
+
+        if prev_path,
+          do: Application.put_env(:agent_os, :inference_socket_volume_path, prev_path),
+          else: Application.delete_env(:agent_os, :inference_socket_volume_path)
+      end)
+
+      base = %Sandbox{
+        image: "agent-generated:dev",
+        cidfile: "/tmp/cidfile.txt",
+        user: "1000:1000"
+      }
+
+      {:ok, base: base}
+    end
+
+    test "accepts the named volume as the sole writable mount", %{base: base} do
+      argv = Sandbox.build_argv(%{base | mounts: [{"aos_inf", "/run/aos"}]})
+      assert "aos_inf:/run/aos" in argv
+    end
+
+    test "accepts the volume mount alongside :ro code mounts", %{base: base} do
+      argv =
+        Sandbox.build_argv(%{
+          base
+          | mounts: [{"aos_inf", "/run/aos"}, {"/host/agents/x", "/app/agents/x:ro"}]
+        })
+
+      assert "aos_inf:/run/aos" in argv
+      assert "/host/agents/x:/app/agents/x:ro" in argv
+    end
+
+    test "rejects a writable mount at the volume path with the wrong source", %{base: base} do
+      assert_raise ArgumentError, ~r/shared inference volume/i, fn ->
+        Sandbox.build_argv(%{base | mounts: [{"wrong_vol", "/run/aos"}]})
+      end
+    end
+
+    test "rejects any other writable (non-:ro) mount", %{base: base} do
+      assert_raise ArgumentError, ~r/read-only|:ro/i, fn ->
+        Sandbox.build_argv(%{base | mounts: [{"aos_inf", "/run/aos"}, {"/x", "/tmp/other"}]})
+      end
+    end
+
+    test "the legacy /tmp/inference.sock host-bind path is NOT special in volume mode",
+         %{base: base} do
+      # In volume mode a /tmp/inference.sock mount is just another writable mount → rejected.
+      assert_raise ArgumentError, ~r/read-only|:ro/i, fn ->
+        Sandbox.build_argv(%{base | mounts: [{"/host/path", "/tmp/inference.sock"}]})
+      end
     end
   end
 

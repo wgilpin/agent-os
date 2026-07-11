@@ -152,6 +152,92 @@ defmodule AgentOS.ProvisionerTest do
     assert stored.action.recipient == Path.basename(temp_manifest, ".md")
   end
 
+  test "approval_required?/3 forecasts the block without side effects", %{
+    conformance_path: _c,
+    provenance_path: _p
+  } do
+    temp_manifest =
+      Path.join(
+        System.tmp_dir!(),
+        "approval_required_#{System.unique_integer([:positive])}.md"
+      )
+
+    File.write!(temp_manifest, """
+    ---
+    purpose: "test approval forecast"
+    grants: []
+    spend:
+      cap: 50000
+      window: "daily"
+      on_breach: "kill"
+    owner: "human"
+    supervision: "none"
+    ---
+    # Approval forecast
+    """)
+
+    on_exit(fn -> File.rm(temp_manifest) end)
+
+    agent_name = Path.basename(temp_manifest, ".md")
+    {opts, code_hash} = create_temp_agent(agent_name)
+    seed_pass_verdicts(agent_name, code_hash)
+
+    before = AgentOS.StateStore.snapshot("pending_approvals") |> Map.get(:approvals, %{})
+
+    # No approved provenance yet: a run under :always_review would park.
+    assert Provisioner.approval_required?(temp_manifest, :always_review, opts)
+    refute Provisioner.approval_required?(temp_manifest, :dangerously_skip_review, opts)
+
+    # Read-only: forecasting parked nothing.
+    approvals = AgentOS.StateStore.snapshot("pending_approvals") |> Map.get(:approvals, %{})
+    assert map_size(approvals) == map_size(before)
+
+    # Once provenance records an approved status for the current hash, no approval is needed.
+    assert {:ok, _} = Provisioner.deploy(temp_manifest, :dangerously_skip_review, opts)
+    refute Provisioner.approval_required?(temp_manifest, :always_review, opts)
+  end
+
+  test "deploy/3 blocked twice parks ONE approval (same agent + hash reuses the ref)", %{
+    conformance_path: _c,
+    provenance_path: _p
+  } do
+    temp_manifest =
+      Path.join(
+        System.tmp_dir!(),
+        "deploy_blocked_dedupe_#{System.unique_integer([:positive])}.md"
+      )
+
+    File.write!(temp_manifest, """
+    ---
+    purpose: "test blocked dedupe"
+    grants: []
+    spend:
+      cap: 50000
+      window: "daily"
+      on_breach: "kill"
+    owner: "human"
+    supervision: "none"
+    ---
+    # Blocked dedupe
+    """)
+
+    on_exit(fn -> File.rm(temp_manifest) end)
+
+    agent_name = Path.basename(temp_manifest, ".md")
+    {opts, code_hash} = create_temp_agent(agent_name)
+    seed_pass_verdicts(agent_name, code_hash)
+
+    before = AgentOS.StateStore.snapshot("pending_approvals") |> Map.get(:approvals, %{})
+
+    # Two blocked attempts (e.g. "Run now" clicked twice) must not queue two asks.
+    assert {:blocked, ref1} = Provisioner.deploy(temp_manifest, :always_review, opts)
+    assert {:blocked, ref2} = Provisioner.deploy(temp_manifest, :always_review, opts)
+    assert ref1 == ref2
+
+    approvals = AgentOS.StateStore.snapshot("pending_approvals") |> Map.get(:approvals, %{})
+    assert map_size(approvals) == map_size(before) + 1
+  end
+
   test "envelope_predicate?/2 classifications" do
     in_env_manifest = %AgentOS.Manifest{
       purpose: "test",

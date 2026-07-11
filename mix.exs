@@ -7,6 +7,12 @@ defmodule AgentOS.MixProject do
       version: "0.1.0",
       elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
+      # Env-driven deps/build paths (feature 045): the containerized substrate points these at
+      # container-local dirs so its Linux-compiled artifacts never clash with the host macOS
+      # `_build`/`deps` when the repo is bind-mounted at the identical path. Unset on the host
+      # (default `deps`/`_build`), so the host workflow is byte-for-byte unchanged.
+      deps_path: System.get_env("MIX_DEPS_PATH") || "deps",
+      build_path: System.get_env("MIX_BUILD_PATH") || "_build",
       deps: deps()
     ]
   end

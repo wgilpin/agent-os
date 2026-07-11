@@ -86,24 +86,11 @@ defmodule AgentOS.Sandbox do
         :ok
     end
 
-    # Ensure no writable host mounts exist other than /tmp/inference.sock,
-    # and that the host path for /tmp/inference.sock exactly matches the configured inference UDS path.
-    configured_socket_path =
-      Path.expand(Application.get_env(:agent_os, :inference_uds_path, "data/inference.sock"))
-
-    for {host, container} <- sandbox.mounts || [] do
-      if container == "/tmp/inference.sock" do
-        if Path.expand(host) != configured_socket_path do
-          raise ArgumentError,
-                "Inference socket mount source must match the configured UDS path #{configured_socket_path}. Got: #{host}"
-        end
-      else
-        if not String.ends_with?(container, ":ro") do
-          raise ArgumentError,
-                "Only the legitimate inference-UDS mount (/tmp/inference.sock) is allowed to be writable. All other mounts must be read-only (end with :ro). Got mount: {#{inspect(host)}, #{inspect(container)}}"
-        end
-      end
-    end
+    # Writable-mount validation branches on the socket topology (feature 045). Exactly ONE
+    # writable mount is permitted — the inference channel — and every other mount must be
+    # read-only (end with ":ro"). The two modes differ only in which mount is the legitimate
+    # writable one.
+    validate_writable_mounts!(sandbox.mounts || [])
 
     # Log container start metadata to satisfy Constitution VI (Loud Failures)
     Logger.info(
@@ -171,6 +158,58 @@ defmodule AgentOS.Sandbox do
 
     # Reconstruct arguments: base docker run arguments + mount args + env vars + image name + command arguments
     base_args ++ mount_args ++ env_args ++ [sandbox.image] ++ cmd_args
+  end
+
+  # Enforces the single-writable-mount invariant (FR-005). The legitimate writable mount is the
+  # inference channel; its shape depends on the topology mode:
+  #   host-bind    -> container target "/tmp/inference.sock"; host source MUST equal the
+  #                   configured UDS path (the historical path-equality check).
+  #   shared-volume -> container target == the volume mount path; host source MUST equal the
+  #                   configured volume name. The legacy /tmp/inference.sock target is NOT
+  #                   special in this mode — it would just be another writable mount → rejected.
+  # Every non-inference mount must be read-only (":ro"). Violations raise loudly (FR-009).
+  defp validate_writable_mounts!(mounts) do
+    case AgentOS.InferenceTopology.mode() do
+      :host_bind ->
+        configured_socket_path =
+          Path.expand(Application.get_env(:agent_os, :inference_uds_path, "data/inference.sock"))
+
+        for {host, container} <- mounts do
+          if container == "/tmp/inference.sock" do
+            if Path.expand(host) != configured_socket_path do
+              raise ArgumentError,
+                    "Inference socket mount source must match the configured UDS path #{configured_socket_path}. Got: #{host}"
+            end
+          else
+            reject_non_ro!(host, container)
+          end
+        end
+
+      :shared_volume ->
+        volume_name = AgentOS.InferenceTopology.volume_name()
+        volume_path = AgentOS.InferenceTopology.volume_path()
+
+        for {host, container} <- mounts do
+          if container == volume_path do
+            if host != volume_name do
+              raise ArgumentError,
+                    "The shared inference volume mount at #{volume_path} must have source #{inspect(volume_name)}. Got: #{inspect(host)}"
+            end
+          else
+            reject_non_ro!(host, container)
+          end
+        end
+    end
+
+    :ok
+  end
+
+  # Rejects any mount that is not read-only. Shared by both topology branches.
+  defp reject_non_ro!(host, container) do
+    if not String.ends_with?(container, ":ro") do
+      raise ArgumentError,
+            "Only the legitimate inference-UDS mount is allowed to be writable. All other mounts must be read-only (end with :ro). Got mount: {#{inspect(host)}, #{inspect(container)}}"
+    end
   end
 
   # Helper to parse cpus parameter to float

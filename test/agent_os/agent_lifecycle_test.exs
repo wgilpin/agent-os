@@ -484,6 +484,23 @@ defmodule AgentOS.AgentLifecycleTest do
       assert opts[:trigger] == "manual"
     end
 
+    test "refuses a run that would only park on approval (awaiting_approval)" do
+      agent = "run_now_unapproved_#{System.unique_integer([:positive])}"
+      path = write_manifest(agent, "08:30")
+      :ok = DeploymentRegistry.record_deployment(agent, path, :reviewed_human)
+
+      start_run_fn = fn _opts -> flunk("run must not start") end
+
+      # Under :always_review with no approved provenance for the current hash, the
+      # run would park — so run_now refuses up front instead of starting-and-blocking.
+      assert {:error, :awaiting_approval} =
+               AgentLifecycle.run_now(agent,
+                 start_run_fn: start_run_fn,
+                 agents_dir: write_agent_code(agent),
+                 review_mode: :always_review
+               )
+    end
+
     test "refuses an agent whose generated code is missing" do
       agent = "run_now_orphan_#{System.unique_integer([:positive])}"
       path = write_manifest(agent, "08:30")
