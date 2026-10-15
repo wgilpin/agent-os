@@ -30,6 +30,27 @@ Application.put_env(:agent_os, :discord_notify_transport, fn _url, _opts ->
   {:ok, %Req.Response{status: 204}}
 end)
 
+Application.put_env(:agent_os, :web_search_transport, fn _url, _opts ->
+  {:ok,
+   %Req.Response{
+     status: 200,
+     body: %{
+       "results" => [
+         %{
+           "title" => "Elixir 1.16 Released",
+           "url" => "https://elixir-lang.org",
+           "content" => "Elixir 1.16 features."
+         },
+         %{
+           "title" => "Erlang OTP 27 features",
+           "url" => "https://erlang.org",
+           "content" => "OTP 27 release notes."
+         }
+       ]
+     }
+   }}
+end)
+
 ExUnit.start(exclude: [:docker])
 
 defmodule AgentOS.TestHelper do
@@ -254,6 +275,43 @@ defmodule AgentOS.TestHelper do
     request =
       "POST /v1/tool_calls HTTP/1.1\r\n" <>
         "Host: localhost\r\n" <>
+        "Content-Type: application/json\r\n" <>
+        "Content-Length: #{byte_size(body)}\r\n" <>
+        "Connection: close\r\n\r\n" <> body
+
+    {:ok, socket} =
+      :gen_tcp.connect({:local, sock_path}, 0, [:binary, packet: :raw, active: false])
+
+    :ok = :gen_tcp.send(socket, request)
+    response = recv_all(socket, "")
+    :gen_tcp.close(socket)
+
+    [headers, resp_body] = String.split(response, "\r\n\r\n", parts: 2)
+    status = headers |> String.split(" ") |> Enum.at(1) |> String.to_integer()
+    {status, Jason.decode!(resp_body)}
+  end
+
+  @doc """
+  Posts an OpenAI-shaped chat-completions request to the broker's
+  `/v1/chat/completions` route over the UDS, presenting the run token as an
+  `Authorization: Bearer` header (feature 046). Pass `run_token: nil` to omit the
+  header (auth-rejection tests). Returns `{status_code, decoded_json_body}`.
+  """
+  def chat_completions_uds(sock_path, %{} = payload, opts \\ []) do
+    body = Jason.encode!(payload)
+    run_token = Keyword.get(opts, :run_token, :none)
+
+    auth_line =
+      case run_token do
+        :none -> ""
+        nil -> ""
+        token -> "Authorization: Bearer #{token}\r\n"
+      end
+
+    request =
+      "POST /v1/chat/completions HTTP/1.1\r\n" <>
+        "Host: localhost\r\n" <>
+        auth_line <>
         "Content-Type: application/json\r\n" <>
         "Content-Length: #{byte_size(body)}\r\n" <>
         "Connection: close\r\n\r\n" <> body

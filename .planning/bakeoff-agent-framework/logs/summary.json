@@ -1,0 +1,179 @@
+{
+ "pydantic-ai-slim": {
+  "import_time": {
+   "best_of_3_wall_s": 0.22,
+   "top5_cumulative_us": [
+    {
+     "us": 183676,
+     "module": "pydantic_ai"
+    },
+    {
+     "us": 109509,
+     "module": "pydantic_ai._template"
+    },
+    {
+     "us": 70620,
+     "module": "pydantic_ai._run_context"
+    },
+    {
+     "us": 50951,
+     "module": "pydantic_ai.agent"
+    },
+    {
+     "us": 39963,
+     "module": "pydantic_ai.capabilities._deferred_capability_loader"
+    }
+   ]
+  },
+  "footprint": {
+   "packages": 30,
+   "site_packages_size": "45M",
+   "package_list": [
+    "annotated_types",
+    "anyio",
+    "certifi",
+    "charset_normalizer",
+    "distro",
+    "genai_prices",
+    "griffelib",
+    "h11",
+    "httpcore",
+    "httpcore2",
+    "httpx",
+    "httpx2",
+    "idna",
+    "jiter",
+    "logfire_api",
+    "openai",
+    "opentelemetry_api",
+    "pydantic",
+    "pydantic_ai_slim",
+    "pydantic_core",
+    "pydantic_graph",
+    "regex",
+    "requests",
+    "sniffio",
+    "tiktoken",
+    "tqdm",
+    "truststore",
+    "typing_extensions",
+    "typing_inspection",
+    "urllib3"
+   ]
+  },
+  "golden_normal": {
+   "result": {
+    "candidate": "pydantic-ai-slim==2.5.0",
+    "mode": "normal",
+    "status": "PASS",
+    "output": {
+     "outcome": "done",
+     "reason": "searched notes and added the todo"
+    },
+    "output_type_ok": true,
+    "tool_hits": [
+     [
+      "search_notes",
+      "quarterly report"
+     ],
+     [
+      "add_todo",
+      "Review quarterly report",
+      "https://notes.local/q3"
+     ]
+    ],
+    "egress_attempts": []
+   },
+   "broker_requests": 3,
+   "stderr_tail": ""
+  },
+  "malformed_retries": {
+   "result": {
+    "candidate": "pydantic-ai-slim==2.5.0",
+    "mode": "malformed",
+    "status": "FAIL",
+    "error": "UnexpectedModelBehavior: Tool 'search_notes' exceeded max retries count of 2",
+    "tool_hits": [],
+    "egress_attempts": []
+   },
+   "broker_requests": 3,
+   "stderr_tail": ""
+  }
+ },
+ "no-framework": {
+  "import_time": {
+   "best_of_3_wall_s": 0.03,
+   "top5_cumulative_us": [
+    {
+     "us": 16851,
+     "module": "pydantic"
+    },
+    {
+     "us": 9595,
+     "module": "pydantic._migration"
+    },
+    {
+     "us": 9440,
+     "module": "pydantic.warnings"
+    },
+    {
+     "us": 9233,
+     "module": "pydantic.version"
+    },
+    {
+     "us": 9158,
+     "module": "pydantic_core"
+    }
+   ]
+  },
+  "footprint": {
+   "packages": 5,
+   "site_packages_size": "8.3M",
+   "package_list": [
+    "annotated_types",
+    "pydantic",
+    "pydantic_core",
+    "typing_extensions",
+    "typing_inspection"
+   ]
+  },
+  "golden_normal": {
+   "result": {
+    "candidate": "no-framework baseline",
+    "mode": "normal",
+    "status": "PASS",
+    "output": {
+     "outcome": "done",
+     "reason": "searched notes and added the todo"
+    },
+    "output_type_ok": true,
+    "tool_hits": [
+     [
+      "search_notes",
+      "quarterly report"
+     ],
+     [
+      "add_todo",
+      "Review quarterly report",
+      "https://notes.local/q3"
+     ]
+    ],
+    "egress_attempts": []
+   },
+   "broker_requests": 3,
+   "stderr_tail": ""
+  },
+  "malformed_retries": {
+   "result": {
+    "candidate": "no-framework baseline",
+    "mode": "malformed",
+    "status": "FAIL",
+    "error": "RuntimeError: exceeded 2 validation retries",
+    "tool_hits": [],
+    "egress_attempts": []
+   },
+   "broker_requests": 3,
+   "stderr_tail": ""
+  }
+ }
+}

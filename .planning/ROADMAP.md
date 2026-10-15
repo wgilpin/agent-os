@@ -40,6 +40,12 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 9: Persistent State & Permissions (v8)** - Queryable durable store, split build-time/runtime consent, agent-invisible namespaces
 - [ ] **Phase 10: Priorities Coach (v9)** - First *live* read + notify + OAuth: a generated daily coaching agent that reads a doc, pings Google Chat, ingests the reply, and writes the doc back
 - [ ] **Phase 11: Generated-Agent Runtime Isolation (v10)** - Every agent body — generated included — runs inside the container sandbox; runtime pluggable (runc → runsc/gVisor → Apple Containers endgame)
+- [ ] **Phase 12: Single-User Ops Hardening (v11)** - The three ops gaps that matter for one person's always-on Mac: UI bound to localhost only, scheduled backups of `data/`, and an automatic container restart policy
+- [ ] **Phase 13: Agent Runtime Kit (v12)** - Generated bodies stop hand-rolling transport: first-party `agent_os_runtime` (pydantic-ai-slim, pinned) speaks the broker UDS; tool stubs codegen'd from the connector registry per manifest grant; generation emits instructions + glue, not plumbing
+- [ ] **Phase 14: Conversational Routing (v13)** - One chat surface over all agents: a trusted Elixir planner-router plans once from the user's utterance (roster = manifest purpose lines), executes deterministically via message-triggers with substrate-mediated artifact handoff; user↔agent only
+- [ ] **Phase 15: User Profile Store (v14)** - Standing user-preference store: section-scoped `profile_read`/`profile_write` manifest grants over a substrate-owned namespace, writer provenance, LiveView editor
+- [ ] **Phase 16: Operator Recall (v15)** - Full-text search over run history and transcripts in the inventory dashboard (operator-facing only)
+- [ ] **Phase 17: Channel Gateway (v16)** - Messaging channels become a pluggable class: `ChannelAdapter` behaviour extracted from the Discord path, Telegram as N=2, all surfaces routing into the Phase 14 conversation orchestrator
 
 ## Phase Details
 
@@ -237,7 +243,7 @@ Plans:
 Plans:
 - [ ] 10-01: `discord_notify` connector — first connector `execute/2` that actually POSTs over the network (Discord incoming webhook). Static per-channel URL via the existing static credential source (no OAuth); metered, `requires_deploy_consent?: true`. Completes the live-egress path (`Notif` live). No deps.
 - [ ] 10-02: Path-scoped file connectors `file_read` + `file_write` — first *live* `Rd` and `Mut` on a filesystem grant; forces a new **path-scoped grant shape** in the manifest/gate. No credential. No deps.
-- [ ] 10-03: Inbound external message trigger — a Discord bot/gateway connection (persistent websocket or interactions endpoint) that receives the user's reply and maps it onto the waiting agent's message trigger (spec 007). First real external `Evt`; heavier than a plain inbound webhook. Depends on trigger gateway (present).
+- [ ] 10-03: Inbound external message trigger — a Discord bot/gateway connection (persistent websocket or interactions endpoint) that receives the user's reply and maps it onto the waiting agent's message trigger (spec 007). First real external `Evt`; heavier than a plain inbound webhook. **Operator-identity pinning** (only the pinned operator id may fire a trigger) is written as the reference contract that the Phase 17 `ChannelAdapter` behaviour later extracts, not a Discord one-off. Depends on trigger gateway (present).
 - [ ] 10-04: Generate the Priorities Coach end-to-end, live (Wave-A acceptance) — elicit → manifest (path read+write, `chat_notify`, chat-reply event, daily trigger, spend cap) → judge → novel body → security-review → deploy-on-green; re-prove world-B-on-generated with the new grant shapes; live smoke of the full 0800 loop. Depends on 10-01, 10-02, 10-03.
 - [ ] 10-05: OAuth-with-refresh credential source (`OAuth` primitive) — extend `CredentialSource` (static-env only today) to hold a refresh token, rotate the access token, and inject the current one per call behind the credential-proxy boundary. Provisioned at admission (08-03). No deps (Wave B only).
 - [ ] 10-06: `drive_read` + `drive_write` connectors — live read + write-back of a Google Doc over the 10-01 egress path using 10-05's OAuth credential; id-scoped grant. Depends on 10-01, 10-05.
@@ -263,10 +269,99 @@ Plans:
 
 > **Decision record (2026-07-10):** gVisor over Kata/Firecracker for the container-side hardening — comparable isolation for this workload shape (short-lived untrusted Python, syscall-light), ~tens-of-ms overhead vs hundreds, and critically it passes the host inference-UDS bind-mount through, which real VMs cannot (virtiofs drops sockets); a VM backend therefore requires the vsock rework and is sequenced as the 11-04 endgame rather than the default path. On macOS dev, Docker Desktop's Linux VM already provides a hardware wall between sandboxed agents and the host session — the acute gap is agents running outside any sandbox (11-01), not runc vs runsc (11-03).
 
+### Phase 12: Single-User Ops Hardening (v11)
+**Goal**: Close the small set of *operational* gaps that actually matter for the stated deployment model — a single user's always-on Mac (see README "Deployment model"; cloud-grade auth/TLS/multi-tenancy are out of scope by design). With the substrate containerized (spec 045), the app's remaining production distance is three plumbing items, not architecture.
+**Depends on**: Spec 045 (containerized substrate is the thing being bound, backed up, and restarted)
+**Success Criteria** (what must be TRUE):
+  1. The web UI (including the consent screen) is reachable ONLY from the Mac itself: compose publishes `127.0.0.1:4000:4000`, not `4000:4000` — a device on the same LAN gets connection-refused.
+  2. `data/` (state stores, run log, transcripts) is backed up on a schedule with retention, and a restore has been exercised once (a backup that has never been restored is a hope, not a backup).
+  3. The substrate container comes back by itself: `restart: unless-stopped` (or equivalent) on the `substrate` service, verified by killing the container and observing recovery — including the broker re-binding its socket on the shared volume and triggers re-arming.
+**Plans**: 3
+
+Plans:
+- [ ] 12-01: Localhost-only UI — change the compose port mapping to `127.0.0.1:4000:4000`; verify from a second device that :4000 is unreachable. No deps.
+- [ ] 12-02: Scheduled `data/` backups — daily snapshot with 7-day/4-week retention to a location outside the repo (the stores are SQLite: copy via a consistent snapshot, not a live-file `cp`); document and exercise the restore path. No deps.
+- [ ] 12-03: Restart policy — `restart: unless-stopped` on the substrate service; kill-test proves the broker socket, trigger re-arming, and UI all recover unattended. No deps.
+
+### Phase 13: Agent Runtime Kit (v12)
+**Goal**: Replace hand-rolled agent plumbing with a first-party runtime kit. Today every generated body re-invents ~40 lines of raw HTTP-over-UDS socket code and makes a single inference call (see any `agents/*/main.py`); "complex" agents (multi-step tool loops, retries, structured outputs, message history) have no home. This phase bakes an `agent_os_runtime` package into the generated-agent image (spec 044): a pydantic-ai `Model` that speaks the broker UDS, tool stubs **codegen'd from the connector registry for exactly the connectors the manifest grants**, and a blessed-subset import surface that becomes the Stage-4 generation cheat sheet. Generated bodies collapse to `Agent(instructions, tools, output_type)` — a smaller, uniform surface for the judge and security-review. The trust boundary does not move: in-body typing is DX and early failure; the gate remains the only enforcement, and the sandbox (network=none, UDS-only) physically kills the framework's native tools/MCP/direct-provider paths.
+**Depends on**: Phase 8 (connector registry supplies the tool vocabulary), spec 044 (the image the kit bakes into). May run AHEAD of Phase 10: it changes what Stage 4 emits, and generating the Priorities Coach on the kit avoids regenerating it later.
+**Success Criteria** (what must be TRUE):
+  1. A generated body contains zero transport code: it imports only `agent_os_runtime` (which re-exports the blessed pydantic-ai subset) and runs against the broker UDS via the kit's Model.
+  2. The tool stubs available inside a body are exactly the manifest-granted connectors, rendered mechanically from the same registry metadata the gate validates against — one source of truth, no drift.
+  3. The framework is pinned exact (`pydantic-ai-slim[openai]==2.5.0`); a version bump is a deliberate event: the bake-off regression harness (`.planning/bakeoff-agent-framework/`) re-runs green and a golden agent regenerates through the full pipeline before the pin moves.
+  4. Offline-total holds in the real image: a `--network=none` container run of a kit-based agent completes the golden tool task with zero egress attempts and no lazy asset downloads.
+  5. The kit's invocation contract is session-shaped from day one: message history in, history delta out (persisted substrate-side), so chat-turn agents (Phase 14) require no body changes.
+  6. World-B-on-generated stays green for kit-based bodies; spend reconciles call-for-call (every framework retry is a visible, metered broker request, bounded by explicit config).
+**Plans**: 3
+**Spec prompts**: 13-01 drafted in [phase-13-spec-prompts.md](phase-13-spec-prompts.md); 13-02/13-03 drafted plan-by-plan when started.
+- [ ] 13-01: `agent_os_runtime` package + SubstrateModel — pydantic-ai `OpenAIChatModel` over `httpx.AsyncHTTPTransport(uds=…)` (first-class, proven in the bake-off), pinned deps baked into the generated-agent image; history-in/history-delta-out contract; in-image `--network=none` offline validation.
+- [ ] 13-02: Connector tool-schema + per-grant stub codegen — connector behaviour gains a tool schema; provisioning renders typed pydantic-ai tool stubs for exactly the granted connectors, each a thin POST to `/v1/tool_calls`.
+- [ ] 13-03: Stage-4 generation contract on the kit — blessed-subset cheat sheet into the generation prompt; judge + security-review updated for the smaller declarative surface; re-prove world-B-on-generated with a kit-based body.
+
+> **Decision record (2026-07-12):** pydantic-ai-slim (v2 line, `[openai]` extra, pinned `==2.5.0`) backs the kit, chosen by empirical bake-off against a ~200-line no-framework baseline (scorecard + re-runnable harness: [bakeoff-agent-framework/](bakeoff-agent-framework/)). Both candidates passed every gating criterion — first-class UDS transport, offline-total under an AF_UNIX-only jail, zero uncommanded calls, bounded configurable retries; pydantic-ai costs 0.22s import / 30 pkgs / 45MB vs 0.03s / 5 pkgs / 8.3MB, immaterial in a container, and wins on declarative (machine-reviewable) bodies and generation familiarity. The no-framework loop is the kept **exit ramp**: because bodies import only the kit, swapping frameworks later is a kit release, not a generation-contract change. Version-churn risk is handled by the exact pin + regression harness, not by trusting the model's training data: the blessed API subset travels in the Stage-4 prompt. Incidental finding: macOS caps AF_UNIX `sun_path` at ~104 chars — keep `INFERENCE_SOCKET` paths short.
+
+### Phase 14: Conversational Routing (v13)
+**Goal**: One chat surface over all deployed agents. A **dispatcher, not a mediator**: a trusted Elixir planner-router receives the user's message plus a substrate-rendered roster (each agent's manifest purpose line + a small dataflow signature), makes ONE broker inference call emitting a typed plan (single target, or an ordered pipeline), and then the substrate executes it deterministically — each step an ordinary message-trigger invocation gated by that agent's own manifest, step outputs handed off as substrate-held artifacts. Control flow derives ONLY from the user's utterance; agent outputs flow through as data, never as control (the CaMeL pattern — the gate/manifest/store already are the capability interpreter). The rendered plan is the consent surface. The elicitation orchestrator becomes just another routable target ("no agent does this — want me to build one?").
+**Depends on**: Phase 10 (first live conversational agent), Phase 13 (session-shaped invocation contract). Workload-gated per the build-out strategy: do not start before ≥2 message-triggered agents exist — routing with N=1 is an if-statement.
+**Success Criteria** (what must be TRUE):
+  1. The planner is unpoisonable by construction: its context is only the system concept + the substrate-rendered roster — never agent code, tool schemas, store contents, or any agent output. Roster lines are mechanical renders of the manifest (an agent NEVER authors its own routing description).
+  2. Explicit `@agent-name` addressing bypasses the LLM router deterministically; unaddressed messages get one routing/planning call; open threads have sticky affinity (no re-route per message).
+  3. A multi-step request ("read X, write a paper, add a todo") executes as a typed plan fixed BEFORE any untrusted data is read; injection in step data can corrupt step *content* but cannot add a step, change a recipient, or invoke another agent.
+  4. Agents never talk to each other through the router; no merged transcript exists — the orchestrator holds per-agent threads, replies return verbatim and tagged. (Agent↔agent composition, if ever needed, is a future explicit manifested grant — `ask_agent` — not router plumbing.)
+  5. Plans needing a data-dependent decision either carry a deterministic predicate over structured step output, or bounce back to the user in-thread — never an LLM re-plan from agent output.
+  6. The planner has a frozen-roster golden-plan eval suite (utterance table → expected plans) running in CI.
+**Plans**: 4 (sketch — refine at spec time)
+- [ ] 14-01: Roster render — manifest purpose line + dataflow signature (accepts-artifact / produces-artifact / side-effect-only, derived from grant shapes), substrate-rendered; capability-render discipline.
+- [ ] 14-02: Planner — typed plan schema (validated like any proposed action; unknown agent → reject; low confidence → ask user / offer elicitation), one broker call, golden-plan eval suite.
+- [ ] 14-03: Conversation orchestrator — per-agent threads, sticky affinity, plan execution over message-triggers, artifact handoff via the 09-02 store, rendered-plan consent step. **Surface-agnostic by construction**: threads are keyed substrate-side with a surface tag, so Phase 17 channel adapters drop in without orchestrator rework.
+- [ ] 14-04: Chat surface (LiveView) — unified conversation UI; elicitation orchestrator as a routable target; replies tagged by agent. LiveView is **one channel among N**, not the conversation surface — it talks to the orchestrator through the same interface a Phase 17 adapter will.
+
+### Phase 15: User Profile Store (v14)
+**Goal**: Standing user preferences become a substrate primitive agents can consume — the personalization benefit of a Hermes-style `USER.md` without the self-modification risk. A substrate-owned `profile` namespace on the 09-02 store holds sectioned preferences (e.g. `schedule`, `priorities`, `tone`). Access is **section-scoped manifest grants** in both directions: `profile_read: [sections]` exposes only the named slice (namespace/section resolution stays substrate-side and agent-invisible per 09-02; whole-profile reads do not exist), and `profile_write: [sections]` is a real grant — gate-enforced, section-scoped, `requires_deploy_consent?: true` — with writer provenance (agent, run, timestamp) recorded on every entry, so cross-agent influence through the profile is bounded by the manifest and legible in the log rather than forbidden. The operator edits the full profile in LiveView; dispatcher-mediated writes ("remember I prefer…" → substrate writes after in-thread confirm) arrive free with Phase 14. Nearly pure composition of existing primitives — a saturation-strategy win.
+**Depends on**: Phase 9 (store + agent-invisible namespaces). **Sanctioned to run ahead of Phase 10**: the Priorities Coach is the first consumer — generating it with profile grants beats regenerating later (same logic that moved Phase 13 ahead).
+**Surfaced by**: the Hermes Agent comparison (2026-07-21) — user-profile memory as a mounted store, not an agent-written file.
+**Success Criteria** (what must be TRUE):
+  1. A `profile_read` grant names sections; the agent observes only those sections; the capability render shows the user exactly which slice of their profile each agent sees.
+  2. A `profile_write` grant names sections; a write outside the granted sections is physically blocked (world-B style — gate/store binding, not agent cooperation); every agent write carries provenance and is visibly attributed in the operator view.
+  3. The operator can view and edit the full profile in LiveView, including deleting agent-written entries.
+  4. A generated agent (the coach) can carry profile grants through the unchanged pipeline with world-B green.
+**Plans**: 2
+- [ ] 15-01: `profile` namespace + section-scoped `profile_read`/`profile_write` connectors on the store engine — grant-bound section resolution, write provenance, capability-render phrases, world-B cases for out-of-section read/write.
+- [ ] 15-02: LiveView profile editor — full-profile view/edit, agent-written entries attributed, wired into the inventory dashboard.
+
+### Phase 16: Operator Recall (v15)
+**Goal**: Full-text search over everything the substrate already records — run log, action transcripts, elicitation transcripts — surfaced as a search box on the inventory dashboard. Pure legibility (the product): "what did any agent ever do mentioning X?" answered in one query. FTS5 virtual table over the existing 09-02 SQLite engine; no new state, no trust-boundary impact. **Operator-facing only**: an agent-facing `history_find` grant is explicitly NOT built — past sanitized-but-untrusted content re-entering a future agent's context is an injection-replay channel; it goes to the backlog with that flag and waits for an agent that genuinely forces it (dedupe needs are already served by scoped `store_find` on the agent's own namespace).
+**Depends on**: 09-02 (SQLite engine). No phase depends on it; slots anywhere.
+**Surfaced by**: the Hermes Agent comparison (2026-07-21) — FTS over history, kept on the operator side of the boundary.
+**Success Criteria** (what must be TRUE):
+  1. One search box on the inventory dashboard answers free-text queries across run log, action transcripts, and elicitation transcripts, with results linking to the full record.
+  2. Indexing is incremental — appending a record does not rebuild the index, and search stays responsive at years of single-user history.
+  3. Nothing agent-observable changes: no new grant, no new connector, world-B suite untouched.
+**Plans**: 2
+- [ ] 16-01: FTS5 index over run log + transcripts on the existing engine, populated incrementally behind the single-writer contract.
+- [ ] 16-02: Search UI on the inventory dashboard — query, ranked results, deep-link to the underlying record.
+
+### Phase 17: Channel Gateway (v16)
+**Goal**: Messaging channels become a pluggable class, the way 08-01 made connectors one. Extract a `ChannelAdapter` behaviour from the 10-03 Discord path — inbound: authenticated message → message-trigger with **operator-identity pinning in the behaviour contract** (only the pinned operator id may fire a trigger, per-adapter implementations prove it, not re-invent it); outbound: reply delivery tagged per-surface — and prove the abstraction at N=2 with Telegram (clean bot API, no business-account hurdles; WhatsApp/Signal noted and skipped; iMessage tempting for a Mac-resident OS but rides fragile AppleScript — noted, not built). All channels route into the Phase 14 conversation orchestrator; cross-surface session continuation (start on the phone, pick up in LiveView) falls out of substrate-held threads with a surface tag. If the operator never wants a second messenger, this phase shrinks to the behaviour extraction alone.
+**Depends on**: 10-03 (first real channel), Phase 14 (the surface-agnostic orchestrator channels plug into). Workload-gated with Phase 14.
+**Surfaced by**: the Hermes Agent comparison (2026-07-21) — the symmetric multi-platform gateway, rebuilt as substrate-mediated trigger plumbing.
+**Success Criteria** (what must be TRUE):
+  1. Adding a channel is dropping ONE `ChannelAdapter` module — no edits to the trigger gateway, orchestrator, or any agent; the Discord path runs on the extracted behaviour with 10-04's live loop still green.
+  2. A message from a non-pinned identity on any channel is rejected at the adapter with a loud log — enforced by the behaviour contract, verified per adapter.
+  3. A conversation started on one surface continues on another: same thread, same sticky agent affinity, replies delivered to the surface the last message arrived on.
+  4. Telegram works end-to-end as the N=2 proof: inbound to the dispatcher, reply back, operator-pinned.
+**Plans**: 3
+- [ ] 17-01: `ChannelAdapter` behaviour + Discord migration — extract from 10-03, operator-pinning and reply-delivery in the contract, trigger-gateway wiring generic.
+- [ ] 17-02: Telegram adapter — bot API, long-poll or webhook, operator-pinned; the N=2 proof.
+- [ ] 17-03: Cross-surface continuation — surface tag on substrate-held threads, reply routing to last-active surface, LiveView chat running through the same adapter interface.
+
+> **Decision record (2026-07-12):** dispatcher topology over the standard mediator/orchestrator-agent pattern. A front agent that reads every worker reply and synthesizes answers is an LLM in a privileged position (no manifest describes it), a cross-agent injection channel (worker output steers the next invocation), and a legibility break (user sees paraphrase, log records actions). The dispatcher keeps the trusted layer deterministic: plan once from trusted input, execute mechanically, return replies verbatim. Accepted cost: no automatic cross-agent synthesis — the user reads N tagged replies, which for a single-operator system whose product is legibility is the right trade.
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11 (11-01/11-02 may run ahead of Phase 10 — they close an active security gap and nothing in Phase 10 depends on them)
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11 → 12 → 13 → 14 → 15 → 16 → 17, with sanctioned deviations: 11-01/11-02 may run ahead of Phase 10 (active security gap, no Phase-10 dependency); Phase 12's plans are small, independent, and may slot in anytime after 045; **Phase 13 should run ahead of Phase 10** (it changes what Stage 4 emits — generate the coach on the kit rather than regenerate it after); **Phase 15 may run ahead of Phase 10** (small, composition-only, and the coach is its first consumer); Phase 16 slots anywhere after 09-02. Phase 14 is workload-gated (not before two message-triggered agents exist) and Phase 17 is gated with it.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -281,3 +376,9 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 9. Persistent State & Permissions (v8) | 3/3 | Complete | 2026-07-02 |
 | 10. Priorities Coach (v9) | 0/7 | Planned — see [phase-10-priorities-coach-roadmap.md](phase-10-priorities-coach-roadmap.md) | — |
 | 11. Generated-Agent Runtime Isolation (v10) | 1/4 | 11-01 done (spec 044); 11-02/03/04 open | 2026-07-11 |
+| 12. Single-User Ops Hardening (v11) | 0/3 | Planned (follow-on to spec 045) | — |
+| 13. Agent Runtime Kit (v12) | 0/3 | Planned — framework chosen by bake-off 2026-07-12; runs ahead of Phase 10 | — |
+| 14. Conversational Routing (v13) | 0/4 | Deferred — workload-gated (needs ≥2 conversational agents) | — |
+| 15. User Profile Store (v14) | 0/2 | Planned — may run ahead of Phase 10 (coach is first consumer) | — |
+| 16. Operator Recall (v15) | 0/2 | Planned — slots anywhere after 09-02 | — |
+| 17. Channel Gateway (v16) | 0/3 | Deferred — workload-gated with Phase 14 | — |

@@ -49,9 +49,10 @@ x-substrate-env: &substrate-env
   # cannot exec here). PortRunner/host-process agent bodies (discovery, elicitor, judge) use this.
   PYTHON_BIN: /opt/aos/venv/bin/python
   PYTHONPATH: /Users/will/projects/agent_os
-  # Model-key passthrough for real runs (SC-001): CredentialSource resolves :model_key from the
-  # MODEL_KEY env var, falling back to the bind-mounted .env (loaded at startup outside MIX_ENV=test).
+  # Model-key and search-key passthrough for real runs (SC-001): CredentialSource resolves
+  # :model_key and :search_api_key from env vars, falling back to the bind-mounted .env.
   MODEL_KEY: ${MODEL_KEY:-}
+  SEARCH_API_KEY: ${SEARCH_API_KEY:-}
 
 services:
   # The full substrate app — THE way to run Agent OS (FR-012/FR-013). `docker compose up substrate`

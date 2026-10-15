@@ -154,6 +154,167 @@ defmodule AgentOS.InferenceBroker do
   end
 
   @doc """
+  OpenAI-compatible single-turn completion (feature 046). Backs the broker's
+  `/v1/chat/completions` surface: authenticates via the run token presented as an
+  `Authorization: Bearer` value, then performs EXACTLY ONE metered model call onto
+  the SAME pricing/metering/cap/kill path as the native `/v1/inference` envelope.
+
+  Unlike the native path it does NOT drive a server-side tool loop or execute
+  connector tools — the framework in the agent body drives the loop client-side and
+  issues one request per turn, so each request is one discrete metered broker call
+  and spend reconciles call-for-call (FR-007). The framework-declared `tools` from
+  the request are passed straight through to the provider.
+
+  Returns `{:ok, openai_completion_map}` on success, `{:breach, :spend}` on cap
+  breach (pre- or post-meter, kill-on-breach identical to native), or
+  `{:error, :unknown_run_token | :unpriced_model | :unsupported | term()}`.
+  """
+  @spec complete_openai(map(), String.t() | nil, keyword()) ::
+          {:ok, map()}
+          | {:breach, :spend}
+          | {:error, :unknown_run_token | :unpriced_model | :unsupported | term()}
+  def complete_openai(request, run_token, opts \\ []) do
+    requested_model = Map.get(request, "model")
+    messages = Map.get(request, "messages") || []
+    tools_in = Map.get(request, "tools")
+    streaming? = Map.get(request, "stream", false) == true
+
+    cond do
+      is_nil(run_token) ->
+        Logger.error("OpenAI-surface inference rejected: missing/invalid bearer token")
+        {:error, :unknown_run_token}
+
+      streaming? ->
+        # The broker does not support streaming; refuse cleanly rather than
+        # silently half-support it (spec Edge Cases).
+        Logger.warning("OpenAI-surface inference rejected: streaming is unsupported")
+        {:error, :unsupported}
+
+      true ->
+        do_complete_openai(run_token, requested_model, messages, tools_in, opts)
+    end
+  end
+
+  defp do_complete_openai(run_token, requested_model, messages, tools_in, opts) do
+    with {:ok, resolved} <- resolve(run_token),
+         model = resolved.effective_model || requested_model,
+         agent_name = resolved.agent_name,
+         manifest = resolved.manifest,
+         prices =
+           Keyword.get(opts, :prices) || Application.get_env(:agent_os, :inference_prices, %{}),
+         {:ok, price_entry} <- InferencePrice.lookup(prices, model) do
+      now = Keyword.get(opts, :now) || DateTime.utc_now()
+
+      # Normalise the spend window exactly as the native path does.
+      spend_ledger = StateStore.snapshot("spend_ledger")
+      raw_entry = Map.get(spend_ledger, agent_name, %{spent: 0, window_start: now})
+      agent_entry = AgentOS.SpendLedger.current_entry(raw_entry, now, manifest.spend.window)
+
+      if agent_entry != raw_entry do
+        StateStore.apply_action("spend_ledger", {:put, agent_name, agent_entry})
+      end
+
+      # Pre-check the cap: an already-exhausted agent never reaches the provider.
+      if agent_entry.spent >= manifest.spend.cap do
+        Logger.warning(
+          "OpenAI-surface inference blocked: agent '#{agent_name}' spent (#{to_dollars(agent_entry.spent)}) >= cap (#{to_dollars(manifest.spend.cap)})"
+        )
+
+        {:breach, :spend}
+      else
+        call = %{model: model, messages: messages, tools: tools_in || []}
+        meter_openai_call(agent_name, manifest, call, agent_entry.spent, price_entry, now, opts)
+      end
+    else
+      {:error, :unknown_run_token} ->
+        Logger.error("OpenAI-surface inference failed: unknown run token")
+        {:error, :unknown_run_token}
+
+      {:error, :unpriced_model} ->
+        Logger.error("OpenAI-surface inference failed: unpriced model")
+        {:error, :unpriced_model}
+
+      other ->
+        Logger.error("OpenAI-surface inference failed: #{inspect(other)}")
+        {:error, other}
+    end
+  end
+
+  # Performs the single credentialed provider call, meters it, and enforces the
+  # post-meter cap. Reuses the identical helpers as the native path so metering is
+  # byte-for-byte the same; only the loop (absent) and the wire shape differ.
+  # `call` bundles the framework-supplied model/messages/tools for this one turn.
+  defp meter_openai_call(agent_name, manifest, call, spent, price_entry, now, opts) do
+    %{model: model, messages: messages, tools: tools} = call
+
+    provider_fn =
+      Keyword.get(opts, :provider_fn) || Application.get_env(:agent_os, :provider_fn) ||
+        (&real_provider_fn/4)
+
+    provider_result =
+      AgentOS.CredentialProxy.with_credential(:model_key, fn secret ->
+        cond do
+          is_function(provider_fn, 4) -> provider_fn.(model, messages, tools, secret)
+          is_function(provider_fn, 3) -> provider_fn.(model, messages, secret)
+          true -> raise ArgumentError, "provider_fn must have arity 3 or 4"
+        end
+      end)
+
+    case provider_result do
+      %{input_tokens: _, output_tokens: _} = usage ->
+        dollars = InferencePrice.micro_dollars(usage, price_entry)
+        new_spent = spent + dollars
+
+        StateStore.apply_action(
+          "spend_ledger",
+          {:put, agent_name, %{spent: new_spent, window_start: now}}
+        )
+
+        if new_spent >= manifest.spend.cap do
+          Logger.warning(
+            "OpenAI-surface inference breach: agent '#{agent_name}' spent (#{to_dollars(new_spent)}) crossed cap (#{to_dollars(manifest.spend.cap)})"
+          )
+
+          {:breach, :spend}
+        else
+          {:ok, build_openai_completion(model, usage)}
+        end
+
+      {:error, reason} ->
+        Logger.error("OpenAI-surface inference failed: #{inspect(reason)}")
+        {:error, reason}
+
+      _ ->
+        Logger.error("OpenAI-surface inference failed: provider response missing usage")
+        {:error, :missing_usage}
+    end
+  end
+
+  # Wraps the provider's assistant message + token usage into a standard OpenAI
+  # `chat.completion` object the framework's OpenAI client accepts. finish_reason is
+  # "tool_calls" when the model requested tools, else "stop".
+  defp build_openai_completion(model, usage) do
+    message = Map.get(usage, :message) || %{"role" => "assistant", "content" => usage.completion}
+    tool_calls = Map.get(message, "tool_calls") || Map.get(message, :tool_calls)
+    finish_reason = if is_list(tool_calls) and tool_calls != [], do: "tool_calls", else: "stop"
+
+    %{
+      "id" => "chatcmpl-" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower),
+      "object" => "chat.completion",
+      "created" => System.system_time(:second),
+      "model" => model,
+      "choices" => [
+        %{"index" => 0, "message" => message, "finish_reason" => finish_reason}
+      ],
+      "usage" => %{
+        "prompt_tokens" => usage.input_tokens,
+        "completion_tokens" => usage.output_tokens,
+        "total_tokens" => usage.input_tokens + usage.output_tokens
+      }
+    }
+  end
+
+  @doc """
   Direct tool-submission channel: runs an agent's submitted tool calls through the
   SAME deterministic gate as the inference path (`CapabilityRail.evaluate_tool_calls/4`)
   with **no model call anywhere**. Identical gating/parking/recording semantics; the
@@ -665,8 +826,8 @@ defmodule AgentOS.InferenceBroker do
 
   defp handle_connection(socket) do
     case read_http_request(socket, "") do
-      {:ok, path, body} ->
-        route_request(socket, path, body)
+      {:ok, path, auth, body} ->
+        route_request(socket, path, auth, body)
 
       _ ->
         :ok
@@ -676,9 +837,11 @@ defmodule AgentOS.InferenceBroker do
   end
 
   # Routes by request path. `/v1/tool_calls` runs the direct tool-submission channel
-  # (no model); ANY other path (including `/v1/inference` and legacy pathless requests)
-  # keeps today's inference behaviour, so deployed agents are untouched.
-  defp route_request(socket, "/v1/tool_calls", body) do
+  # (no model); `/v1/chat/completions` is the OpenAI-compatible single-turn surface
+  # (feature 046, Bearer-token auth); ANY other path (including `/v1/inference` and
+  # legacy pathless requests) keeps today's native inference behaviour, so deployed
+  # agents are untouched.
+  defp route_request(socket, "/v1/tool_calls", _auth, body) do
     case Jason.decode(body) do
       {:ok, request_map} ->
         case submit_tool_calls(request_map) do
@@ -700,7 +863,40 @@ defmodule AgentOS.InferenceBroker do
     end
   end
 
-  defp route_request(socket, _path, body) do
+  # OpenAI-compatible chat-completions surface (feature 046). The run token is the
+  # `Authorization: Bearer` value; the framework drives the tool loop client-side, so
+  # this is ONE metered completion per request onto the same meter/cap/kill path.
+  defp route_request(socket, "/v1/chat/completions", auth, body) do
+    run_token = parse_bearer_token(auth)
+
+    case Jason.decode(body) do
+      {:ok, request_map} ->
+        case complete_openai(request_map, run_token) do
+          {:ok, completion} ->
+            send_json_response(socket, 200, completion)
+
+          {:breach, :spend} ->
+            send_json_response(socket, 402, %{error: :spend_breach})
+
+          {:error, :unknown_run_token} ->
+            send_json_response(socket, 401, %{error: :unknown_run_token})
+
+          {:error, :unpriced_model} ->
+            send_json_response(socket, 400, %{error: :unpriced_model})
+
+          {:error, :unsupported} ->
+            send_json_response(socket, 400, %{error: :unsupported_feature})
+
+          {:error, other} ->
+            send_json_response(socket, 400, %{error: inspect(other)})
+        end
+
+      _ ->
+        send_json_response(socket, 400, %{error: :bad_request})
+    end
+  end
+
+  defp route_request(socket, _path, _auth, body) do
     case Jason.decode(body) do
       {:ok, request_map} ->
         case complete(request_map) do
@@ -733,14 +929,18 @@ defmodule AgentOS.InferenceBroker do
         case String.split(new_buffer, "\r\n\r\n", parts: 2) do
           [headers, body] ->
             path = parse_request_path(headers)
+            # Capture the Authorization header for the OpenAI-compatible surface
+            # (feature 046). The native path ignores it and reads run_token from
+            # the body, so nothing changes there.
+            auth = parse_auth_header(headers)
 
             case Regex.run(~r/[Cc]ontent-[Ll]ength:\s*(\d+)/, headers) do
               [_, length_str] ->
                 content_length = String.to_integer(length_str)
-                read_body(socket, path, body, content_length)
+                read_body(socket, path, auth, body, content_length)
 
               _ ->
-                {:ok, path, body}
+                {:ok, path, auth, body}
             end
 
           _ ->
@@ -765,14 +965,33 @@ defmodule AgentOS.InferenceBroker do
     end
   end
 
-  defp read_body(_socket, path, body, content_length) when byte_size(body) >= content_length do
-    {:ok, path, binary_part(body, 0, content_length)}
+  # Extracts the raw `Authorization` header value from the request headers, or nil.
+  defp parse_auth_header(headers) do
+    case Regex.run(~r/[Aa]uthorization:\s*(.+)/, headers) do
+      [_, value] -> String.trim(value)
+      _ -> nil
+    end
   end
 
-  defp read_body(socket, path, body, content_length) do
+  # Extracts the bearer token from an `Authorization: Bearer <token>` value, or nil.
+  defp parse_bearer_token(nil), do: nil
+
+  defp parse_bearer_token(auth) when is_binary(auth) do
+    case Regex.run(~r/^[Bb]earer\s+(\S+)$/, String.trim(auth)) do
+      [_, token] -> token
+      _ -> nil
+    end
+  end
+
+  defp read_body(_socket, path, auth, body, content_length)
+       when byte_size(body) >= content_length do
+    {:ok, path, auth, binary_part(body, 0, content_length)}
+  end
+
+  defp read_body(socket, path, auth, body, content_length) do
     case :gen_tcp.recv(socket, 0, 5000) do
       {:ok, data} ->
-        read_body(socket, path, body <> data, content_length)
+        read_body(socket, path, auth, body <> data, content_length)
 
       {:error, reason} ->
         {:error, reason}

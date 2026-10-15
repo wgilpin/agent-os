@@ -17,5 +17,5 @@ at the machine. Do not propose cloud hosting, multi-tenancy, or login layers as
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-`specs/045-containerize-substrate-uds/plan.md`
+`specs/046-agent-runtime-kit/plan.md`
 <!-- SPECKIT END -->
